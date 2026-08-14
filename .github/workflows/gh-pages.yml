@@ -39,9 +39,9 @@ jobs:
       - name: install antora
         run: >-
           npm i -g
-          @antora/cli@3.2
-          @antora/site-generator@3.2
-          @sntke/antora-mermaid-extension@1.0.3
+          @antora/cli@3.1
+          @antora/site-generator@3.1
+          @sntke/antora-mermaid-extension@0.0.13
           @antora/lunr-extension
           @andrew-jones/antora-tabs-extension
       - name: override ui bundle for gh-pages
