@@ -1,0 +1,344 @@
+= Module 3: Catalog Items and Workloads
+:source-highlighter: rouge
+:toc: macro
+:toclevels: 1
+
+include::ROOT:partial$_attributes.adoc[]
+
+toc::[]
+
+Tenants are provisioned and Ceph storage is backing their environments. The platform team at Sovereign Cloud Corp has done their job — but the tenant users are still waiting. They need compute.
+
+That gap is what you close in this module. You will author a `ComputeInstanceCatalogItem`, publish it to the OSAC service catalog, and then use it to deploy an actual virtual machine. When you finish, any authorized tenant can request compute through the catalog without filing a ticket or waiting for a platform engineer.
+
+The `osac` CLI is your primary tool here. Think of it as `kubectl` for the OSAC control plane — same pattern, different objects.
+
+== Learning objectives
+
+By the end of this module, you'll be able to:
+
+* Install and configure the `osac` CLI against the cluster API
+* Author a valid `ComputeInstanceCatalogItem` with the correct type annotation and template structure
+* Publish a catalog item and confirm it is visible in the platform catalog
+* Deploy a compute instance from the catalog and verify the virtual machine is running
+
+== Exercise 1: Install and configure the osac CLI
+
+The `osac` CLI manages OSAC objects from the command line — catalog items, compute instances, and platform configuration. Before you can create anything, you need the CLI installed and authenticated.
+
+Start from the bastion host. If you're not already connected, open a terminal and run:
+
+[source,bash,role="execute"]
+----
+ssh {bastion_ssh_user_name}@{bastion_public_hostname}
+----
+
+When prompted, use the password: `{bastion_ssh_password}`
+
+. Check whether the `osac` binary is already available:
++
+[source,bash,role="execute"]
+----
+osac version 2>/dev/null && echo "osac is installed" || echo "osac not found — install required"
+----
+
+. If the CLI is not present, download it from the cluster's CLI distribution route:
++
+[source,bash,role="execute"]
+----
+OSAC_API_HOST="osac-api-{osac_namespace}.{openshift_cluster_ingress_domain}"
+curl -skLo /tmp/osac "https://${OSAC_API_HOST}/cli/download/osac-linux-amd64"
+chmod +x /tmp/osac
+sudo mv /tmp/osac /usr/local/bin/osac
+----
+
+. Confirm the binary is executable and on your PATH:
++
+[source,bash,role="execute"]
+----
+osac version
+----
++
+Expected output (version number may vary):
++
+----
+osac version: v1.x.x
+----
+
+. Set the OSAC API server endpoint:
++
+[source,bash,role="execute"]
+----
+osac config set endpoint "https://osac-api-{osac_namespace}.{openshift_cluster_ingress_domain}"
+----
+
+. Log in with your admin credentials:
++
+[source,bash,role="execute"]
+----
+osac login --username {admin_user} --password {admin_password}
+----
++
+Expected output:
++
+----
+Login successful. Context saved to ~/.osac/config
+----
+
+. Verify the CLI can reach the platform by listing catalog items:
++
+[source,bash,role="execute"]
+----
+osac get computeinstancecatalogitem
+----
++
+The command returns either an empty list or any items already in the catalog. Either result confirms you are authenticated and connected.
+
+=== Verify
+
+Run both commands to confirm CLI readiness:
+
+[source,bash,role="execute"]
+----
+osac version && osac get computeinstancecatalogitem && echo "CLI ready"
+----
+
+Expected result: both commands exit cleanly and you see `CLI ready` at the end. If you see an authentication error, re-run `osac login` with the credentials above and try again.
+
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Exercise 2: Create and publish a ComputeInstanceCatalogItem
+
+Sovereign Cloud Corp needs a standard compute offering for government workloads — two vCPUs, 4 GiB RAM, and 50 GiB storage, backed by OpenShift Virtualization. You will author the YAML definition, apply it, and confirm it is visible and published.
+
+Two rules for `ComputeInstanceCatalogItem` YAML are critical:
+
+* The `'@type'` field must be set to `type.googleapis.com/osac.public.v1.ComputeInstanceCatalogItem` exactly. The platform rejects items with any other value or a missing type annotation.
+* The `template` field must be a nested object with a `name` property — for example, `name: ocp-virt-vm`. Do not use a dotted string like `ocp-virt-vm.default`; that format is invalid here.
+* The `published` field must be set to `true`. An unpublished catalog item exists in the system but is not visible to tenants.
+
+. Create the catalog item definition file:
++
+[source,bash,role="execute"]
+----
+cat > /tmp/sovereign-standard-vm.yaml << 'EOF'
+'@type': type.googleapis.com/osac.public.v1.ComputeInstanceCatalogItem
+name: sovereign-standard-vm
+displayName: "Sovereign Standard VM"
+description: "Standard compute instance for EU government workloads — 2 vCPU, 4 GiB RAM, 50 GiB storage"
+published: true
+template:
+  name: ocp-virt-vm
+resources:
+  cpu: "2"
+  memoryMiB: 4096
+  storageMiB: 51200
+EOF
+----
+
+. Review the file contents before applying:
++
+[source,bash,role="execute"]
+----
+cat /tmp/sovereign-standard-vm.yaml
+----
++
+Check that the `'@type'` value is the full googleapis URL, `published` is `true`, and `template` is a nested object (not a string).
+
+. Apply the catalog item to the platform:
++
+[source,bash,role="execute"]
+----
+osac create -f /tmp/sovereign-standard-vm.yaml
+----
++
+Expected output:
++
+----
+computeinstancecatalogitem/sovereign-standard-vm created
+----
+
+. List all catalog items to confirm the entry is present:
++
+[source,bash,role="execute"]
+----
+osac get computeinstancecatalogitem
+----
++
+Expected output (abbreviated):
++
+----
+NAME                     DISPLAY NAME            PUBLISHED   TEMPLATE
+sovereign-standard-vm    Sovereign Standard VM   true        ocp-virt-vm
+----
+
+. Inspect the full object to validate every field was stored correctly:
++
+[source,bash,role="execute"]
+----
+osac get computeinstancecatalogitem sovereign-standard-vm -o yaml
+----
++
+Confirm that `published: true`, `template.name: ocp-virt-vm`, and the `'@type'` annotation all appear in the output.
+
+=== Verify
+
+Run this command to check all three required fields in one pass:
+
+[source,bash,role="execute"]
+----
+osac get computeinstancecatalogitem sovereign-standard-vm -o yaml | grep -E "'@type'|published|name:"
+----
+
+Expected output:
+----
+'@type': type.googleapis.com/osac.public.v1.ComputeInstanceCatalogItem
+name: sovereign-standard-vm
+published: true
+  name: ocp-virt-vm
+----
+
+If any field is missing or incorrect, delete the item and re-create it:
+
+[source,bash,role="execute"]
+----
+osac delete computeinstancecatalogitem sovereign-standard-vm
+osac create -f /tmp/sovereign-standard-vm.yaml
+----
+
+[.solve-button-placeholder]#solve-button-placeholder#
+
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Exercise 3: Deploy a workload from the catalog
+
+The catalog item is published. Now you deploy an actual compute instance from it and confirm the virtual machine comes up running. This is the self-service flow a tenant user would follow — the platform handles the rest.
+
+. Create a compute instance definition that references the catalog item:
++
+[source,bash,role="execute"]
+----
+cat > /tmp/gov-portal-vm.yaml << 'EOF'
+'@type': type.googleapis.com/osac.public.v1.ComputeInstance
+name: gov-portal-vm
+displayName: "Government Portal VM"
+catalogItemName: sovereign-standard-vm
+namespace: {osac_namespace}
+EOF
+----
+
+. Review the file before applying:
++
+[source,bash,role="execute"]
+----
+cat /tmp/gov-portal-vm.yaml
+----
++
+Confirm that `catalogItemName` matches the name you created in Exercise 2.
+
+. Deploy the compute instance:
++
+[source,bash,role="execute"]
+----
+osac create -f /tmp/gov-portal-vm.yaml
+----
++
+Expected output:
++
+----
+computeinstance/gov-portal-vm created
+----
+
+. Watch the instance status until it reaches `Running`:
++
+[source,bash,role="execute"]
+----
+osac get computeinstance gov-portal-vm --watch
+----
++
+Wait for the `STATUS` column to show `Running`, then press Ctrl+C to stop watching. This typically takes 30 to 60 seconds.
+
+. Confirm the underlying VirtualMachine object was created in OpenShift:
++
+[source,bash,role="execute"]
+----
+oc get vm -n {osac_namespace}
+----
++
+Expected output:
++
+----
+NAME            AGE   STATUS    READY
+gov-portal-vm   1m    Running   True
+----
+
+. Check that the VirtualMachineInstance is active:
++
+[source,bash,role="execute"]
+----
+oc get vmi -n {osac_namespace}
+----
++
+A `Running` VMI confirms the guest OS started successfully inside the VM.
+
+=== Verify
+
+Run this command to check both the VM and VMI status together:
+
+[source,bash,role="execute"]
+----
+oc get vm,vmi -n {osac_namespace}
+----
+
+Both objects should show `Running`. If the instance stays in `Pending` for more than two minutes, check the events on the VM object:
+
+[source,bash,role="execute"]
+----
+oc describe vm gov-portal-vm -n {osac_namespace} | tail -30
+----
+
+Look for scheduling errors, image pull failures, or storage binding issues. Common causes are a missing `ocp-virt-vm` template or insufficient node capacity.
+
+[.solve-button-placeholder]#solve-button-placeholder#
+
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Learning outcomes checkpoint
+
+Before wrapping up, confirm you can answer each of these:
+
+* What is the exact `'@type'` string required for a `ComputeInstanceCatalogItem`, and why does it matter?
+* Why does setting `published: false` (or omitting `published`) prevent tenants from seeing the catalog item?
+* What is the difference between a `ComputeInstanceCatalogItem` and a `ComputeInstance`?
+* What OpenShift object does the OSAC platform create when a compute instance is deployed from the catalog?
+
+If any of these are unclear, revisit the relevant exercise above.
+
+== Module summary
+
+You extended the Sovereign Cloud Corp platform from a tenant management layer into an active self-service catalog. Government agency teams can now provision standard compute resources on demand — no tickets, no manual provisioning, no waiting.
+
+**What you accomplished:**
+
+* Installed and authenticated the `osac` CLI against the cluster API
+* Authored a `ComputeInstanceCatalogItem` with the correct googleapis type annotation, a nested template object, and `published: true`
+* Applied the catalog item with `osac create -f` and confirmed it appeared in the platform catalog
+* Deployed a compute instance by referencing the catalog item and verified the virtual machine reached `Running` state on OpenShift Virtualization
+
+**Key takeaways:**
+
+* The `'@type'` annotation is the platform's type discriminator — get it wrong and the API rejects the object entirely
+* The `template.name` field must be a nested object, not a string; this is a common authoring mistake that produces confusing error messages
+* `published: true` is required for tenant visibility; creating a catalog item without it is valid but invisible to users
+* The `osac` CLI and `oc` CLI work together — `osac` manages OSAC-layer objects, while `oc` lets you inspect the underlying OpenShift resources the platform creates
+
+**Business value for Sovereign Cloud Corp:**
+
+* **Self-service provisioning**: Tenant teams request compute on demand without raising a support ticket
+* **Regulatory alignment**: Every workload stays within the sovereign cluster boundary — data never leaves approved infrastructure
+* **Operational efficiency**: Platform engineers define offerings once and tenants consume them repeatedly at scale
+* **Auditability**: Every provisioning action flows through the `osac` API and is traceable for compliance reporting
+
+**Next steps:**
+
+You have completed all three hands-on modules. The conclusion covers the full learning journey you have taken across platform orientation, tenant management, and catalog-driven workload provisioning — and points you toward advanced OSAC topics including approval workflows, quota management, and Keycloak group-to-tenant role mapping.

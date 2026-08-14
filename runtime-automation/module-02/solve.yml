@@ -1,0 +1,10 @@
+---
+# Module 2: Managing Tenants — solve tasks
+# Generate with: /ftl:rhdp-lab-validator
+- name: Module 02 - Solve placeholder
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Placeholder
+      ansible.builtin.debug:
+        msg: "Solve tasks not yet generated. Run /ftl:rhdp-lab-validator to create."

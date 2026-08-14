@@ -1,0 +1,10 @@
+---
+# Module 3: Catalog Items and Workloads — solve tasks
+# Generate with: /ftl:rhdp-lab-validator
+- name: Module 03 - Solve placeholder
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Placeholder
+      ansible.builtin.debug:
+        msg: "Solve tasks not yet generated. Run /ftl:rhdp-lab-validator to create."

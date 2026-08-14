@@ -1,0 +1,365 @@
+= Module 2: Managing Tenants
+:source-highlighter: rouge
+:toc: macro
+:toclevels: 2
+
+include::ROOT:partial$_attributes.adoc[]
+
+toc::[]
+
+Sovereign Cloud Corp's compliance team has approved the platform architecture, and now it's time to put multi-tenancy to work. The Finance department needs its own isolated environment — dedicated storage, resource quotas, and network boundaries that keep their financial workloads separate from every other department on the platform.
+
+In this module, you'll examine how the OSAC platform implements multi-tenancy through its `Tenant` custom resource, explore the built-in `shared` and `system` tenants, and create a new tenant for the Finance department with Ceph-backed storage.
+
+== Learning objectives
+
+By the end of this module, you'll be able to:
+
+* Examine the `shared` and `system` tenants and interpret their lifecycle status
+* Create a new department tenant using a YAML manifest
+* Verify a tenant reaches `Ready` status with Ceph storage provisioned
+* Inspect a tenant's namespace, resource quotas, and network policies
+
+== Multi-tenancy in OSAC
+
+OSAC uses a custom Kubernetes resource called `Tenant` to represent isolated organizational units on the platform. When you create a Tenant resource, the OSAC operator takes care of everything needed to set up that environment:
+
+* **Namespace provisioning**: A dedicated namespace is created on the OpenShift cluster
+* **Storage provisioning**: A PersistentVolumeClaim backed by the `ocs-storagecluster-ceph-rbd` storage class is created automatically
+* **Resource controls**: `ResourceQuota` and `LimitRange` objects define the tenant's capacity limits
+* **Network isolation**: `NetworkPolicy` rules prevent cross-tenant traffic — a key sovereignty requirement
+* **Identity registration**: The tenant is registered in Keycloak so access is tied to authenticated identities
+
+Two tenants exist by default after OSAC installation:
+
+* **`shared`**: Used by platform services that need to be accessible across tenant boundaries
+* **`system`**: Reserved for platform infrastructure components managed by the operator
+
+These built-in tenants show you exactly what a healthy, fully provisioned tenant looks like before you create your own.
+
+== Exercise 1: Examine the existing tenants
+
+Before creating new tenants, take a look at what the OSAC operator has already provisioned. Understanding the `shared` and `system` tenants gives you a reference point for what `Ready` looks like — and what to check if something goes wrong later.
+
+=== Prerequisites
+
+* Module 1 is complete and you can reach the OpenShift API from your terminal
+* You are logged in to the OpenShift CLI with cluster-admin privileges
+
+=== Steps
+
+. Confirm you are logged in to the cluster:
++
+[source,bash,role="execute"]
+----
+oc whoami
+----
++
+You should see `admin` or your administrator username.
+
+. List all Tenant resources managed by the OSAC operator:
++
+[source,bash,role="execute"]
+----
+oc get tenants -n {osac_namespace}
+----
++
+Both `shared` and `system` should appear with a `Ready` status. If you see neither, check that the `osac-operator` pod is running.
+
+. Examine the `shared` tenant in detail:
++
+[source,bash,role="execute"]
+----
+oc get tenant shared -n {osac_namespace} -o yaml
+----
++
+Review the `spec` section to see how storage and resource limits are defined. Look at `status.phase` to confirm the tenant is `Ready`, and check `status.conditions` for any recent events.
+
+. Check the conditions reported on the `system` tenant:
++
+[source,bash,role="execute"]
+----
+oc get tenant system -n {osac_namespace} \
+  -o jsonpath='{.status.conditions}' | python3 -m json.tool
+----
+
+. Find the namespaces that were created for these tenants:
++
+[source,bash,role="execute"]
+----
+oc get namespaces -l osac.redhat.com/tenant --show-labels 2>/dev/null \
+  || oc get namespaces | grep -E 'shared|system|osac'
+----
+
+. Inspect the ResourceQuota applied to the `shared` tenant namespace:
++
+[source,bash,role="execute"]
+----
+oc get resourcequota -A -l osac.redhat.com/tenant=shared 2>/dev/null \
+  || oc get resourcequota -A | grep shared
+----
+
+. Review the NetworkPolicy rules protecting the `shared` tenant:
++
+[source,bash,role="execute"]
+----
+oc get networkpolicy -A | grep -E 'shared|system'
+----
+
+=== Verify
+
+Run the following check to confirm both default tenants are healthy before moving on:
+
+[source,bash,role="execute"]
+----
+echo "=== Default Tenants ==="
+oc get tenants -n {osac_namespace}
+----
+
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Exercise 2: Create a tenant for the Finance department
+
+The Finance department processes regulated financial data and needs a tenant that isolates their workloads from all other departments on the platform. You'll create the `finance` tenant with a YAML manifest, specifying the Ceph storage class, resource quotas, and network boundaries.
+
+=== Steps
+
+. Create the tenant manifest for the Finance department:
++
+[source,bash,role="execute"]
+----
+cat > /tmp/finance-tenant.yaml << 'EOF'
+apiVersion: osac.redhat.com/v1alpha1
+kind: Tenant
+metadata:
+  name: finance
+  namespace: osac
+  labels:
+    department: finance
+    tier: production
+    sovereignty-zone: eu-gov
+spec:
+  displayName: "Finance Department"
+  description: "Sovereign Cloud Corp Finance department tenant"
+  storageClassName: ocs-storagecluster-ceph-rbd
+  storageCapacity: "50Gi"
+  resourceQuota:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    persistentvolumeclaims: "10"
+  networkPolicy:
+    ingressFromNamespaces:
+      - osac
+    egressEnabled: true
+EOF
+----
+
+. Apply the manifest to create the tenant:
++
+[source,bash,role="execute"]
+----
+oc apply -f /tmp/finance-tenant.yaml
+----
+
+. Watch the tenant status as the OSAC operator processes it:
++
+[source,bash,role="execute"]
+----
+oc get tenant finance -n {osac_namespace} -w
+----
++
+The operator moves the tenant from `Provisioning` to `Ready` as it creates the namespace, provisions Ceph storage, and applies resource quotas and network policies. This typically takes 30–90 seconds. Press `Ctrl+C` once you see the status change to `Ready`.
+
+. Confirm the tenant phase is `Ready`:
++
+[source,bash,role="execute"]
+----
+oc get tenant finance -n {osac_namespace} \
+  -o jsonpath='{.status.phase}{"\n"}'
+----
++
+Expected output:
++
+----
+Ready
+----
+
+. Verify a namespace was created for the Finance tenant:
++
+[source,bash,role="execute"]
+----
+oc get namespaces | grep finance
+----
+
+=== Verify
+
+[source,bash,role="execute"]
+----
+oc get tenant finance -n {osac_namespace} \
+  -o jsonpath='Phase: {.status.phase}{"\n"}'
+oc get namespaces | grep finance
+----
+
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Exercise 3: Inspect the tenant's resources
+
+A `Ready` status confirms the operator finished provisioning. Now inspect the actual resources it created — storage, quotas, and network policies — to confirm the Finance tenant meets Sovereign Cloud Corp's isolation requirements before handing it off to the Finance team.
+
+=== Steps
+
+. Set a shell variable for the Finance tenant namespace so subsequent commands are shorter:
++
+[source,bash,role="execute"]
+----
+export FINANCE_NS=$(oc get namespaces | grep finance | awk '{print $1}' | head -1)
+echo "Finance namespace: $FINANCE_NS"
+----
+
+. Verify the Ceph RBD PersistentVolumeClaim was created and is bound:
++
+[source,bash,role="execute"]
+----
+oc get pvc -n $FINANCE_NS
+----
++
+The PVC should show `Bound` status. A `Pending` status means the Ceph cluster is not ready — see the troubleshooting section.
+
+. Confirm the storage class used by the PVC:
++
+[source,bash,role="execute"]
+----
+oc get pvc -n $FINANCE_NS \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.storageClassName}{"\t"}{.status.phase}{"\n"}{end}'
+----
++
+The storage class should be `ocs-storagecluster-ceph-rbd` — Ceph block storage that stays within the sovereign cluster.
+
+. Inspect the ResourceQuota applied by the OSAC operator:
++
+[source,bash,role="execute"]
+----
+oc get resourcequota -n $FINANCE_NS -o yaml
+----
++
+Verify the CPU, memory, and PVC limits match the values you specified in the tenant manifest.
+
+. Check whether a LimitRange is also in place:
++
+[source,bash,role="execute"]
+----
+oc get limitrange -n $FINANCE_NS
+----
+
+. Review the NetworkPolicy rules that isolate the Finance tenant:
++
+[source,bash,role="execute"]
+----
+oc get networkpolicy -n $FINANCE_NS -o yaml
+----
++
+Look for policies that allow ingress only from the `osac` namespace and deny cross-tenant traffic by default.
+
+. Get a full summary of the tenant with `oc describe`:
++
+[source,bash,role="execute"]
+----
+oc describe tenant finance -n {osac_namespace}
+----
+
+=== Verify
+
+Run this combined check to confirm all tenant resources are present and healthy:
+
+[source,bash,role="execute"]
+----
+export FINANCE_NS=$(oc get namespaces | grep finance | awk '{print $1}' | head -1)
+echo "=== Tenant Phase ==="
+oc get tenant finance -n {osac_namespace} \
+  -o jsonpath='{.status.phase}{"\n"}'
+echo "=== PVC Status ==="
+oc get pvc -n $FINANCE_NS
+echo "=== Resource Quota ==="
+oc get resourcequota -n $FINANCE_NS
+echo "=== Network Policies ==="
+oc get networkpolicy -n $FINANCE_NS
+----
+
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Learning outcomes checkpoint
+
+Review what you completed in this module:
+
+* [x] Examined the built-in `shared` and `system` tenants and confirmed they are in a `Ready` state with associated namespaces, quotas, and network policies
+* [x] Created a `finance` tenant using a YAML manifest, specifying Ceph storage, resource quotas, and network boundaries
+* [x] Watched the OSAC operator provision the tenant and verified it reached `Ready` status
+* [x] Confirmed Ceph RBD storage is `Bound`, resource quotas are applied, and network policies enforce isolation
+
+[.solve-button-placeholder]#solve-button-placeholder#
+
+== Troubleshooting
+
+=== Tenant stays in `Provisioning` state
+
+**Issue**: The `finance` tenant does not reach `Ready` and stays in `Provisioning`. +
+**Solution**: Check the OSAC operator logs for provisioning errors:
+
+[source,bash,role="execute"]
+----
+oc logs -l app=osac-operator -n {osac_namespace} --tail=50
+----
+
+=== PVC stays in `Pending` state
+
+**Issue**: The PersistentVolumeClaim shows `Pending` instead of `Bound`. +
+**Solution**: Verify the Ceph storage class exists and the storage cluster is healthy:
+
+[source,bash,role="execute"]
+----
+oc get storageclass ocs-storagecluster-ceph-rbd
+oc get cephcluster -A
+----
+
+=== Tenant creation returns a validation error
+
+**Issue**: `oc apply` rejects the manifest with a CRD validation error. +
+**Solution**: Confirm the `Tenant` CRD is installed on the cluster:
+
+[source,bash,role="execute"]
+----
+oc get crd | grep osac
+oc api-resources | grep -i tenant
+----
+
+=== Namespace not created after tenant reaches `Ready`
+
+**Issue**: The tenant shows `Ready` but no corresponding namespace appears. +
+**Solution**: Check the OSAC namespace events for namespace creation failures:
+
+[source,bash,role="execute"]
+----
+oc get events -n {osac_namespace} --sort-by='.lastTimestamp' | tail -20
+----
+
+== Module 2 summary
+
+The Finance department now has a fully provisioned, isolated environment on the OSAC platform. Their namespace is backed by Ceph storage, bounded by resource quotas, and protected by network policies that enforce Sovereign Cloud Corp's data sovereignty requirements.
+
+**What you accomplished:**
+
+* Examined the `shared` and `system` tenants to understand the target state for a healthy tenant
+* Created a `finance` tenant with a YAML manifest specifying Ceph RBD storage and resource quotas
+* Verified the tenant reached `Ready` status with all associated resources provisioned by the operator
+* Confirmed storage is bound, quotas are applied, and network isolation is in place
+
+**Key takeaways for Sovereign Cloud Corp:**
+
+* Tenant resources are fully declarative — every environment is reproducible from a manifest in version control
+* Ceph RBD storage is provisioned automatically when a tenant is created, so sovereign financial data never leaves the cluster
+* Network isolation between tenants is enforced at the platform level, which simplifies compliance audits for regulated government workloads
+
+**Next module preview:**
+Module 3 covers the OSAC service catalog — you'll publish catalog items and deploy workloads into the Finance tenant using the fulfillment service and osac CLI.

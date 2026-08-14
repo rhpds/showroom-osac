@@ -1,0 +1,18 @@
+// Standard environment attributes — values injected at deploy time via AgnosticV user-data
+:guid: %guid%
+:user: %user%
+:password: %password%
+:admin_user: %admin_user%
+:admin_password: %admin_password%
+:openshift_console_url: %openshift_console_url%
+:api_url: %api_url%
+:openshift_cluster_ingress_domain: %openshift_cluster_ingress_domain%
+:bastion_public_hostname: %bastion_public_hostname%
+:bastion_ssh_user_name: %bastion_ssh_user_name%
+:bastion_ssh_password: %bastion_ssh_password%
+
+// OSAC-specific attributes
+:osac_ui_url: https://osac-ui-osac.%openshift_cluster_ingress_domain%
+:keycloak_url: https://keycloak-osac.%openshift_cluster_ingress_domain%
+:osac_namespace: osac
+:ocp_version: 4.18

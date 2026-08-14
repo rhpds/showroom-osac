@@ -1,0 +1,94 @@
+= Introduction to OpenShift Sovereign AI Cloud — Overview
+:toc:
+:toc-placement: preamble
+:icons: font
+include::ROOT:partial$_attributes.adoc[]
+
+== Your role and mission
+
+You're a Platform Engineer at Sovereign Cloud Corp, a European government services provider. Leadership has tasked your team with deploying a sovereign cloud platform that meets strict EU data sovereignty and regulatory compliance requirements.
+
+The mandate is clear: no workload data leaves the region, all access is audited, and tenants must be fully isolated from one another. Your manager put it this way: "We have government clients who cannot place their workloads on public cloud. We need a sovereign platform that gives them the control and compliance guarantees they require — and we need it running on OpenShift."
+
+*Your assignment*: Deploy, explore, and operate the OpenShift Sovereign AI Cloud (OSAC) platform. That means standing up multi-tenant environments, configuring Ceph storage, and using the osac CLI to provision workloads through a service catalog.
+
+*The objective*: Demonstrate a working sovereign cloud environment where isolated tenants can request and receive compute workloads through an automated service catalog — all running on OpenShift {ocp_version}.
+
+== Success criteria for your mission
+
+By the end of this workshop, you'll have the hands-on skills to run OSAC for Sovereign Cloud Corp's government clients:
+
+* Navigate and understand the OSAC platform architecture and components → *confidently explain what each service does and how they connect*
+* Create and manage multi-tenant environments with Ceph storage → *provide isolated, compliant workload environments for each client agency*
+* Use the osac CLI to create catalog items and deploy workloads → *automate tenant service delivery without manual intervention*
+* Verify platform health and tenant readiness → *ensure every tenant environment meets operational and compliance standards before go-live*
+
+*Technical outcome*: You'll operate a real OSAC deployment — including the osac-operator, fulfillment service, Keycloak, and Kafka — using the same tools and workflows you'd use in production.
+
+*Business benefit*: A proven, repeatable process for onboarding government tenants onto a sovereign cloud platform that satisfies EU data residency and regulatory requirements.
+
+== Target audience
+
+This workshop is designed for:
+
+* Platform Engineers who operate or plan to operate OpenShift-based cloud infrastructure
+* Cloud Architects evaluating sovereign cloud architectures for regulated industries
+* Infrastructure specialists working with multi-tenant Kubernetes environments
+* Anyone responsible for deploying or managing AI or workload platforms on OpenShift
+
+== What you need to succeed
+
+You should have:
+
+* Working knowledge of OpenShift or Kubernetes — you've deployed applications and worked with namespaces before
+* Familiarity with the command line — you're comfortable running CLI commands in a terminal
+* Basic understanding of multi-tenancy concepts — you know what tenant isolation means, even if you haven't configured it before
+* No prior OSAC experience required — the workshop walks you through each component from the ground up
+
+== Sovereign Cloud Corp's platform challenges
+
+*The situation*: Sovereign Cloud Corp has signed contracts with several European government agencies. Each agency needs dedicated, isolated compute environments for sensitive workloads — and none of them can run on public cloud infrastructure.
+
+*Project timeline*: The first tenant environments must be ready for production workloads within the current quarter. Manual provisioning is not an option at that scale.
+
+*Current challenges* (operational pain points):
+
+* *No tenant isolation*: All existing shared infrastructure lacks hard multi-tenant boundaries → creates compliance violations and audit failures for government clients
+* *Manual provisioning*: Each new workload request requires engineering intervention → adds weeks of lead time and limits capacity to onboard new clients
+* *No unified identity layer*: Different agencies use different credential systems → creates access control gaps and makes auditing difficult
+* *Storage complexity*: Persistent workloads need consistent, compliant storage → current ad-hoc storage provisioning doesn't meet regulatory retention requirements
+
+*The opportunity*: OSAC brings together OpenShift multi-tenancy, Ceph storage, Keycloak identity management, and a service catalog into a single platform. You've been selected to evaluate and operate it for Sovereign Cloud Corp's initial rollout.
+
+*Technical perspective*: "OSAC looks like the right foundation — OpenShift gives us the orchestration, Ceph gives us sovereign storage, and the service catalog means we can onboard new tenants without an engineering ticket for every workload request."
+
+== Your vision of success
+
+If OSAC meets Sovereign Cloud Corp's requirements, here's what the platform delivers:
+
+*Immediate wins* (end of this quarter):
+
+* *Tenant isolation*: Each government agency runs in a dedicated environment → satisfies data sovereignty and cross-tenant data leakage requirements
+* *Automated provisioning*: Workload requests go through the service catalog → cuts provisioning time from weeks to minutes
+
+*Strategic benefits* (ongoing):
+
+* *Compliant storage by default*: Ceph storage classes enforce retention and locality policies → every tenant gets compliant storage without manual configuration
+* *Centralized identity management*: Keycloak manages all tenant and operator credentials → one audit trail across the entire platform
+* *Scalable onboarding*: The osac CLI and service catalog let the team onboard new tenants and workloads without growing the operations headcount
+
+*Success metric*: A fully operational OSAC environment where a new tenant can be created, storage configured, and a workload deployed entirely through platform tooling — no manual steps, no compliance gaps.
+
+== Common questions
+
+*"What does 'sovereign' actually mean for this platform?"*
+→ It means workload data stays within your infrastructure boundary, access is mediated through Keycloak, and nothing runs on external public cloud. Module 1 walks through the architecture and each component's role in enforcing those guarantees.
+
+*"How does multi-tenancy work — are tenants truly isolated?"*
+→ Yes. Each tenant gets dedicated namespaces, storage classes, and network policies. Module 2 shows you how to create a tenant and verify its isolation against the shared and system tenants already in the cluster.
+
+*"Do I need to write code to provision workloads, or is there a UI?"*
+→ Both options exist. Module 3 covers the osac CLI, which is the primary tool for creating catalog items and deploying workloads. The OSAC UI at `{osac_ui_url}` provides a visual view of what's running.
+
+*"Where does Kafka fit in?"*
+→ Kafka handles event streaming between the fulfillment service and the osac-operator. When a tenant requests a workload through the catalog, Kafka carries that request to the operator for processing. Module 1 explains the full event flow.

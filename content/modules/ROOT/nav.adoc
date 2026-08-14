@@ -1,0 +1,8 @@
+* xref:index.adoc[Introduction to OpenShift Sovereign AI Cloud]
+* xref:01-overview.adoc[Overview]
+* xref:02-details.adoc[Workshop Details]
+
+.Modules
+* xref:03-module-01-platform-overview.adoc[Exploring the OSAC Platform]
+* xref:04-module-02-tenant-management.adoc[Managing Tenants]
+* xref:05-module-03-catalog-and-workloads.adoc[Catalog Items and Workloads]

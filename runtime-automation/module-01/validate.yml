@@ -1,0 +1,10 @@
+---
+# Module 1: Exploring the OSAC Platform — validate tasks
+# Generate with: /ftl:rhdp-lab-validator
+- name: Module 01 - Validate placeholder
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Placeholder
+      ansible.builtin.debug:
+        msg: "Validate tasks not yet generated. Run /ftl:rhdp-lab-validator to create."

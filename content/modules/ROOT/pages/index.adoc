@@ -1,0 +1,62 @@
+= Introduction to OpenShift Sovereign AI Cloud
+
+include::ROOT:partial$_attributes.adoc[]
+
+Welcome to the Introduction to OpenShift Sovereign AI Cloud workshop!
+
+You're a Platform Engineer at Sovereign Cloud Corp, a European government services provider. Leadership has handed you a critical mission: deploy a sovereign cloud platform on OpenShift that meets strict data sovereignty and regulatory compliance requirements. The platform must support multiple government tenants, automate workload provisioning through a service catalog, and integrate with Keycloak for identity management.
+
+This isn't just another cloud deployment. Your government clients need to know their data never leaves their jurisdiction, and every workload must be provisioned through an auditable, compliant process. You have the tools — and this workshop shows you how to use them.
+
+== What you'll learn
+
+In this workshop, you will:
+
+* Navigate and understand the OSAC platform architecture and components
+* Create and manage multi-tenant environments with Ceph storage
+* Use the osac CLI to create catalog items and deploy workloads
+* Verify platform health and tenant readiness
+
+== Who this is for
+
+This workshop is designed for Platform Engineers and Cloud Architects who want to deploy and manage a complete OpenShift Sovereign AI Cloud (OSAC) platform, including multi-tenant environments and automated workload provisioning.
+
+**Experience level**: Intermediate
+
+== Prerequisites
+
+Before starting this workshop, you should have:
+
+* Familiarity with OpenShift or Kubernetes concepts (pods, namespaces, operators)
+* Basic command-line experience with `oc` or `kubectl`
+* Understanding of multi-tenancy and role-based access control (RBAC)
+* (Optional) Familiarity with Ceph storage concepts
+
+== Workshop environment
+
+Your environment includes a pre-deployed OpenShift {ocp_version} cluster with the OSAC operator already installed. All platform components — the fulfillment service, Keycloak identity management, Kafka event streaming, and the OSAC UI — are running and ready to use.
+
+You will work through the modules using two tabs in your lab interface:
+
+* *Terminal* — for CLI commands using the `oc` and `osac` tools
+* *OCP Console* — for visual exploration of the cluster and platform components
+
+Your access details:
+
+* *OpenShift Console*: {openshift_console_url}
+* *OSAC UI*: {osac_ui_url}
+* *Keycloak*: {keycloak_url}
+* *Username*: {user}
+* *Password*: {password}
+
+NOTE: All environment details and credentials are available in the lab interface.
+
+== Estimated time
+
+This workshop takes approximately **90 minutes** to complete across three modules of roughly 30 minutes each.
+
+Work at your own pace. If time is short, focus on Modules 1 and 2 for the core platform concepts.
+
+== Let's get started!
+
+Click on **Workshop Overview** in the navigation to begin.

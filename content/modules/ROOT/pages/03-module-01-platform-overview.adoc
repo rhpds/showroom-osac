@@ -1,0 +1,352 @@
+= Module 1: Exploring the OSAC Platform
+:source-highlighter: rouge
+:toc: macro
+:toclevels: 1
+
+include::ROOT:partial$_attributes.adoc[]
+
+toc::[]
+
+The infrastructure team at Sovereign Cloud Corp just handed you the keys to a freshly deployed OpenShift Sovereign AI Cloud environment. Before onboarding any tenants or provisioning workloads, you need to know the platform inside and out. A misconfigured component today means a frustrated tenant tomorrow — and in a government services context, that has real consequences.
+
+In this module, you walk through the deployed OSAC platform. You verify that every component is healthy, explore the UI, and understand how Keycloak and Kafka tie the system together. By the time you finish, you'll have a clear picture of the platform's architecture and the confidence to move forward.
+
+== Learning objectives
+
+By the end of this module, you'll be able to:
+
+* Verify all OSAC operators and pods are running in the `{osac_namespace}` namespace
+* Navigate the OSAC web UI and identify its key dashboard sections
+* Examine the Keycloak realm configuration that governs tenant identity
+* Inspect the Kafka cluster and confirm the messaging infrastructure is healthy
+
+== Exercise 1: Verify the OSAC namespace
+
+Sovereign Cloud Corp's platform runs in the `{osac_namespace}` namespace on OpenShift {ocp_version}. Before exploring anything else, confirm that every operator and service is running. A healthy platform is your baseline.
+
+Log in to the bastion host first. Open a terminal and run:
+
+[source,bash,role="execute"]
+----
+ssh {bastion_ssh_user_name}@{bastion_public_hostname}
+----
+
+When prompted, enter the password: `{bastion_ssh_password}`
+
+. Log in to the OpenShift cluster with admin credentials:
++
+[source,bash,role="execute"]
+----
+oc login {api_url} -u {admin_user} -p {admin_password} --insecure-skip-tls-verify=false
+----
+
+. Verify you are targeting the correct cluster and confirm your identity:
++
+[source,bash,role="execute"]
+----
+oc whoami
+oc cluster-info
+----
+
+. Check that all pods in the `{osac_namespace}` namespace are running:
++
+[source,bash,role="execute"]
+----
+oc get pods -n {osac_namespace}
+----
++
+Expected output: all pods should show `Running` or `Completed` status. No pod should remain in `Pending`, `CrashLoopBackOff`, or `Error` state.
+
+. Confirm all ClusterServiceVersions (CSVs) show `Succeeded`:
++
+[source,bash,role="execute"]
+----
+oc get csv -n {osac_namespace}
+----
+
+. List the key services exposed in the namespace:
++
+[source,bash,role="execute"]
+----
+oc get svc -n {osac_namespace}
+----
+
+. Retrieve the routes to confirm which endpoints are externally reachable:
++
+[source,bash,role="execute"]
+----
+oc get routes -n {osac_namespace}
+----
++
+You should see routes for `osac-ui`, `keycloak`, and any additional services the fulfillment stack exposes.
+
+=== Verify
+
+Confirm your baseline health check passed before moving on:
+
+[source,bash,role="execute"]
+----
+oc get pods -n {osac_namespace} --field-selector=status.phase!=Running --field-selector=status.phase!=Succeeded 2>/dev/null | grep -v "No resources found" && echo "WARNING: unhealthy pods detected" || echo "All pods healthy"
+----
+
+Expected result: `All pods healthy`
+
+[.solve-button-placeholder]#solve-button-placeholder#
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Exercise 2: Explore the OSAC web UI
+
+With the platform confirmed healthy, log in to the OSAC web UI. This is the central console that platform engineers and tenant administrators use to manage the environment.
+
+. Open a browser and navigate to the OSAC UI:
++
+[source,text]
+----
+{osac_ui_url}
+----
+
+. Log in using your admin credentials:
++
+* Username: `{admin_user}`
+* Password: `{admin_password}`
+
+. From the command line, confirm the route is reachable:
++
+[source,bash,role="execute"]
+----
+curl -sk -o /dev/null -w "%\{http_code}" {osac_ui_url}/health || curl -sk -o /dev/null -w "%\{http_code}" {osac_ui_url}
+----
++
+A response of `200` or `302` confirms the UI is reachable and responding.
+
+. In the browser UI, locate and explore the following sections:
++
+* **Dashboard** — platform-wide health and tenant summary
+* **Tenants** — list of provisioned tenants (currently empty — you will create tenants in Module 2)
+* **Catalog** — available service catalog items
+* **Settings** — platform configuration and integrations
+
+. From the CLI, inspect the OSAC UI deployment to understand its configuration:
++
+[source,bash,role="execute"]
+----
+oc describe deployment osac-ui -n {osac_namespace} | grep -A 20 "Environment:"
+----
+
+. Check the fulfillment service, which processes catalog requests behind the UI:
++
+[source,bash,role="execute"]
+----
+oc get deployment fulfillment-service -n {osac_namespace} -o jsonpath='{.status.readyReplicas}'
+----
++
+The output should show `1` or more ready replicas.
+
+=== Verify
+
+Confirm the OSAC UI and fulfillment service are responding:
+
+[source,bash,role="execute"]
+----
+oc rollout status deployment/osac-ui -n {osac_namespace} && \
+oc rollout status deployment/fulfillment-service -n {osac_namespace}
+----
+
+Expected output:
+----
+deployment "osac-ui" successfully rolled out
+deployment "fulfillment-service" successfully rolled out
+----
+
+[.solve-button-placeholder]#solve-button-placeholder#
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Exercise 3: Examine the Keycloak realm configuration
+
+Keycloak handles identity management for the entire OSAC platform. Every tenant gets its own identity context tied to the `osac` realm. Understanding this configuration is essential before you create tenants in Module 2.
+
+. Retrieve the Keycloak URL:
++
+[source,bash,role="execute"]
+----
+echo "Keycloak URL: {keycloak_url}"
+----
+
+. Confirm the Keycloak pod is running and ready:
++
+[source,bash,role="execute"]
+----
+oc get pods -n {osac_namespace} -l app=keycloak
+----
+
+. Check the Keycloak deployment details:
++
+[source,bash,role="execute"]
+----
+oc describe deployment keycloak -n {osac_namespace} | grep -E "(Replicas|Image|Ready)"
+----
+
+. Open the Keycloak admin console in your browser:
++
+[source,text]
+----
+{keycloak_url}/admin
+----
++
+Log in with:
++
+* Username: `{admin_user}`
+* Password: `{admin_password}`
+
+. In the Keycloak admin console, navigate to the `osac` realm:
+.. Click the realm selector in the top-left corner
+.. Select **osac** from the list
+.. Review the **Realm Settings** tab — note the session timeouts and token lifetimes configured for government compliance
+
+. From the CLI, check the Keycloak service endpoints:
++
+[source,bash,role="execute"]
+----
+oc get endpoints keycloak -n {osac_namespace}
+----
+
+. Inspect the Keycloak ConfigMap to review realm import configuration:
++
+[source,bash,role="execute"]
+----
+oc get configmaps -n {osac_namespace} | grep keycloak
+----
+
+. Review the realm configuration if a ConfigMap is present:
++
+[source,bash,role="execute"]
+----
+oc get configmap keycloak-realm-config -n {osac_namespace} -o jsonpath='{.data}' 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "Realm config managed by operator"
+----
+
+=== Verify
+
+Confirm Keycloak is serving the `osac` realm:
+
+[source,bash,role="execute"]
+----
+curl -sk {keycloak_url}/realms/osac | python3 -c "import sys,json; d=json.load(sys.stdin); print('Realm:', d.get('realm'), '| Public Key available:', bool(d.get('public_key')))"
+----
+
+Expected output:
+----
+Realm: osac | Public Key available: True
+----
+
+[.solve-button-placeholder]#solve-button-placeholder#
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Exercise 4: Inspect the Kafka cluster
+
+OSAC uses Kafka as its event backbone. Every catalog request, tenant lifecycle event, and workload status update flows through Kafka. A healthy Kafka cluster means the platform can process requests reliably and at scale.
+
+. List Kafka resources in the `{osac_namespace}` namespace:
++
+[source,bash,role="execute"]
+----
+oc get kafka -n {osac_namespace}
+----
+
+. Describe the Kafka custom resource to review its configuration:
++
+[source,bash,role="execute"]
+----
+oc describe kafka -n {osac_namespace}
+----
++
+Look for the `Status` section. All listeners should show `ready: true`.
+
+. Check the Kafka broker pods:
++
+[source,bash,role="execute"]
+----
+oc get pods -n {osac_namespace} -l strimzi.io/kind=Kafka
+----
++
+You should see at least one broker pod in `Running` state.
+
+. List the Kafka topics that OSAC has created:
++
+[source,bash,role="execute"]
+----
+oc get kafkatopics -n {osac_namespace}
+----
++
+Topics prefixed with `osac-` handle platform events. Note the names — you will see these referenced in Module 3 when catalog workloads generate events.
+
+. Check KafkaUsers configured for OSAC service-to-service communication:
++
+[source,bash,role="execute"]
+----
+oc get kafkausers -n {osac_namespace}
+----
+
+. Verify the Zookeeper (or KRaft) components are healthy:
++
+[source,bash,role="execute"]
+----
+oc get pods -n {osac_namespace} | grep -E "zookeeper|kafka"
+----
+
+. Review the Kafka cluster status conditions:
++
+[source,bash,role="execute"]
+----
+oc get kafka -n {osac_namespace} -o jsonpath='{.items[0].status.conditions}' | python3 -m json.tool 2>/dev/null
+----
++
+All conditions should show `"type": "Ready"` with `"status": "True"`.
+
+=== Verify
+
+Confirm all Kafka components are ready:
+
+[source,bash,role="execute"]
+----
+oc wait --for=condition=Ready kafka --all -n {osac_namespace} --timeout=60s
+----
+
+Expected output:
+----
+kafka.kafka.strimzi.io/<cluster-name> condition met
+----
+
+[.solve-button-placeholder]#solve-button-placeholder#
+[.validate-button-placeholder]#validate-button-placeholder#
+
+== Learning outcomes checkpoint
+
+Before moving to Module 2, confirm you can answer these questions:
+
+* Which namespace contains all OSAC platform components?
+* What role does the fulfillment service play in relation to the OSAC UI?
+* Which Keycloak realm governs OSAC tenant identities?
+* What types of events does Kafka carry in the OSAC platform?
+
+If any of these are unclear, review the relevant exercise above or raise a question with the facilitator.
+
+== Module summary
+
+You have completed the platform orientation for Sovereign Cloud Corp's OpenShift Sovereign AI Cloud environment.
+
+**What you accomplished:**
+
+* Verified all OSAC operators, CSVs, and pods are healthy in the `{osac_namespace}` namespace
+* Explored the OSAC web UI and located the Dashboard, Tenants, Catalog, and Settings sections
+* Confirmed the Keycloak `osac` realm is configured and serving identity tokens
+* Inspected the Kafka cluster, its topics, and its users
+
+**Key takeaways:**
+
+* Every platform operation in OSAC flows through three core layers: identity (Keycloak), orchestration (osac-operator + fulfillment-service), and messaging (Kafka)
+* Healthy CSVs are a prerequisite — a degraded operator means the platform cannot process tenant or workload requests
+* The `osac` Keycloak realm is the trust anchor for all tenant authentication; its availability is non-negotiable for sovereign operations
+
+**Next steps:**
+
+Module 2 covers tenant management. You will use what you learned here about the OSAC namespace and Keycloak realm to create and configure multi-tenant environments backed by Ceph storage.
