@@ -6,12 +6,14 @@ on:
     paths:
       - 'content/**'
       - 'site.yml'
+      - 'ui-config.yml'
       - '.github/workflows/gh-pages.yml'
   pull_request:
     branches: [main]
     paths:
       - 'content/**'
       - 'site.yml'
+      - 'ui-config.yml'
       - '.github/workflows/gh-pages.yml'
   workflow_dispatch:
 
@@ -29,13 +31,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: setup node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: install antora
-        run: npm i -g @antora/cli@3.1 @antora/site-generator@3.1 @sntke/antora-mermaid-extension@0.0.9 @antora/lunr-extension @andrew-jones/antora-tabs-extension
+        run: >-
+          npm i -g
+          @antora/cli@3.2
+          @antora/site-generator@3.2
+          @sntke/antora-mermaid-extension@1.0.3
+          @antora/lunr-extension
+          @andrew-jones/antora-tabs-extension
       - name: override ui bundle for gh-pages
         run: >-
           sed -i 's|url: .*ui-bundle.zip|url: https://github.com/rhpds/rhdp_showroom_theme/releases/download/showroom-template/ui-bundle.zip|'
@@ -47,7 +55,7 @@ jobs:
         run: antora --fetch site.yml
       - name: upload pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: www
   deploy:
@@ -58,6 +66,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-    - name: deploy github pages
-      id: deployment
-      uses: actions/deploy-pages@v4
+      - name: deploy github pages
+        id: deployment
+        uses: actions/deploy-pages@v4
