@@ -39,15 +39,27 @@ Your environment includes a pre-deployed OpenShift {ocp_version} cluster with th
 You will work through the modules using two tabs in your lab interface:
 
 * *Terminal* — for CLI commands using the `oc` and `osac` tools
-* *OCP Console* — for visual exploration of the cluster and platform components
+* *OSAC Console* - to administer the Open Sovereign AI Cloud
+* *OpenShift Console* — for visual exploration of the cluster and platform components
 
 Your access details:
 
-* *OpenShift Console*: {openshift_console_url}
+=== OSAC
+
 * *OSAC UI*: {osac_ui_url}
-* *Keycloak*: {keycloak_url}
-* *Username*: {user}
-* *Password*: {password}
+* *Admin user*: `{osac_admin_user}`
+* *Admin password*: `{osac_admin_password}`
+* *Common user password*: `{osac_user_password}`
+
+=== OpenShift
+
+* *OpenShift Console*: {openshift_console_url}
+* *Admin user*: `{openshift_cluster_admin_username}`
+* *Admin password*: `{openshift_cluster_admin_password}`
+
+=== Other
+
+* *Keycloak*: {osac_keycloak_url}
 
 NOTE: All environment details and credentials are available in the lab interface.
 
