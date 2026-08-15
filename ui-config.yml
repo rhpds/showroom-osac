@@ -10,7 +10,7 @@ view_switcher:
 
 tabs:
 - name: OSAC Console
-  url: 'https://osac-ui-osac.${DOMAIN}
+  url: 'https://osac-ui-osac.${DOMAIN}'
 - name: OpenShift Console
   url: 'https://console-openshift-console.${DOMAIN}'
 - name: Terminal
