@@ -50,6 +50,15 @@ Your access details:
 * *Admin user*: `{osac_admin_user}`
 * *Admin password*: `{osac_admin_password}`
 * *Common user password*: `{osac_user_password}`
+* Log into OSAC from the command line:
++
+[source,bash,role=execute,subs=attributes]
+----
+osac login --insecure \
+  --issuer="https://keycloak-keycloak.{openshift_cluster_ingress_domain}/realms/osac" \
+  --flow=password --user={osac_admin_user} --password={osac_admin_password} \
+  https://fulfillment-internal-api-osac.{openshift_cluster_ingress_domain}
+----
 
 === OpenShift
 
