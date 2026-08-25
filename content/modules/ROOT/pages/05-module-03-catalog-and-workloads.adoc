@@ -9,9 +9,9 @@ toc::[]
 
 Tenants are provisioned and Ceph storage is backing their environments. The platform team at Sovereign Cloud Corp has done their job — but the tenant users are still waiting. They need compute.
 
-That gap is what you close in this module. You will author a `ComputeInstanceCatalogItem`, publish it to the OSAC service catalog, and then use it to deploy an actual virtual machine. When you finish, any authorized tenant can request compute through the catalog without filing a ticket or waiting for a platform engineer.
+That gap is what you close in this module. You will author a `ComputeInstanceCatalogItem`, publish it to the Red Hat Cloud Extensions service catalog, and then use it to deploy an actual virtual machine. When you finish, any authorized tenant can request compute through the catalog without filing a ticket or waiting for a platform engineer.
 
-The `osac` CLI is your primary tool here. Think of it as `kubectl` for the OSAC control plane — same pattern, different objects.
+The `osac` CLI is your primary tool here. Think of it as `kubectl` for the Red Hat Cloud Extensions control plane — same pattern, different objects.
 
 == Learning objectives
 
@@ -24,7 +24,7 @@ By the end of this module, you'll be able to:
 
 == Exercise 1: Install and configure the osac CLI
 
-The `osac` CLI manages OSAC objects from the command line — catalog items, compute instances, and platform configuration. Before you can create anything, you need the CLI installed and authenticated.
+The `osac` CLI manages Red Hat Cloud Extensions objects from the command line — catalog items, compute instances, and platform configuration. Before you can create anything, you need the CLI installed and authenticated.
 
 Start from the bastion host. If you're not already connected, open a terminal and run:
 
@@ -65,7 +65,7 @@ Expected output (version number may vary):
 osac version: v1.x.x
 ----
 
-. Set the OSAC API server endpoint:
+. Set the Red Hat Cloud Extensions API server endpoint:
 +
 [source,bash,role="execute"]
 ----
@@ -310,7 +310,7 @@ Before wrapping up, confirm you can answer each of these:
 * What is the exact `'@type'` string required for a `ComputeInstanceCatalogItem`, and why does it matter?
 * Why does setting `published: false` (or omitting `published`) prevent tenants from seeing the catalog item?
 * What is the difference between a `ComputeInstanceCatalogItem` and a `ComputeInstance`?
-* What OpenShift object does the OSAC platform create when a compute instance is deployed from the catalog?
+* What OpenShift object does Red Hat Cloud Extensions create when a compute instance is deployed from the catalog?
 
 If any of these are unclear, revisit the relevant exercise above.
 
@@ -330,7 +330,7 @@ You extended the Sovereign Cloud Corp platform from a tenant management layer in
 * The `'@type'` annotation is the platform's type discriminator — get it wrong and the API rejects the object entirely
 * The `template.name` field must be a nested object, not a string; this is a common authoring mistake that produces confusing error messages
 * `published: true` is required for tenant visibility; creating a catalog item without it is valid but invisible to users
-* The `osac` CLI and `oc` CLI work together — `osac` manages OSAC-layer objects, while `oc` lets you inspect the underlying OpenShift resources the platform creates
+* The `osac` CLI and `oc` CLI work together — `osac` manages Red Hat Cloud Extensions objects, while `oc` lets you inspect the underlying OpenShift resources the platform creates
 
 **Business value for Sovereign Cloud Corp:**
 
@@ -341,4 +341,4 @@ You extended the Sovereign Cloud Corp platform from a tenant management layer in
 
 **Next steps:**
 
-You have completed all three hands-on modules. The conclusion covers the full learning journey you have taken across platform orientation, tenant management, and catalog-driven workload provisioning — and points you toward advanced OSAC topics including approval workflows, quota management, and Keycloak group-to-tenant role mapping.
+You have completed all three hands-on modules. The conclusion covers the full learning journey you have taken across platform orientation, tenant management, and catalog-driven workload provisioning — and points you toward advanced Red Hat Cloud Extensions topics including approval workflows, quota management, and Keycloak group-to-tenant role mapping.
