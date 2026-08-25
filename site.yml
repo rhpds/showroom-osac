@@ -1,7 +1,6 @@
 ---
 site:
-  title: Introduction to OpenShift Sovereign AI Cloud
-  url: https://github.com/rhpds/showroom-osac
+  title: Introduction to Red Hat Cloud Extensions
   start_page: modules::index.adoc
 
 content:
@@ -11,7 +10,7 @@ content:
 
 ui:
   bundle:
-    url: https://github.com/rhpds/rhdp_showroom_theme/releases/download/rh-one-2025/ui-bundle.zip
+    url: https://github.com/rhpds/rhdp_showroom_theme/releases/download/v2.0.3/ui-bundle.zip
     snapshot: true
 
 antora:
