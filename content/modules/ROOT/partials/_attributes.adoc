@@ -11,7 +11,7 @@
 :bastion_ssh_user_name: %bastion_ssh_user_name%
 :bastion_ssh_password: %bastion_ssh_password%
 
-// OSAC-specific attributes
+// Red Hat Cloud Extensions attributes
 :osac_ui_url: https://osac-ui-osac.%openshift_cluster_ingress_domain%
 :keycloak_url: https://keycloak-osac.%openshift_cluster_ingress_domain%
 :osac_namespace: osac

@@ -9,7 +9,7 @@ view_switcher:
   default_mode: split
 
 tabs:
-- name: OSAC Console
+- name: Red Hat Cloud Extensions Console
   url: 'https://osac-ui-osac.${DOMAIN}'
 - name: OpenShift Console
   url: 'https://console-openshift-console.${DOMAIN}'

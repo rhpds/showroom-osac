@@ -9,7 +9,7 @@ toc::[]
 
 Sovereign Cloud Corp's compliance team has approved the platform architecture, and now it's time to put multi-tenancy to work. The Finance department needs its own isolated environment — dedicated storage, resource quotas, and network boundaries that keep their financial workloads separate from every other department on the platform.
 
-In this module, you'll examine how the OSAC platform implements multi-tenancy through its `Tenant` custom resource, explore the built-in `shared` and `system` tenants, and create a new tenant for the Finance department with Ceph-backed storage.
+In this module, you'll examine how Red Hat Cloud Extensions implements multi-tenancy through its `Tenant` custom resource, explore the built-in `shared` and `system` tenants, and create a new tenant for the Finance department with Ceph-backed storage.
 
 == Learning objectives
 
@@ -20,9 +20,9 @@ By the end of this module, you'll be able to:
 * Verify a tenant reaches `Ready` status with Ceph storage provisioned
 * Inspect a tenant's namespace, resource quotas, and network policies
 
-== Multi-tenancy in OSAC
+== Multi-tenancy in Red Hat Cloud Extensions
 
-OSAC uses a custom Kubernetes resource called `Tenant` to represent isolated organizational units on the platform. When you create a Tenant resource, the OSAC operator takes care of everything needed to set up that environment:
+Red Hat Cloud Extensions uses a custom Kubernetes resource called `Tenant` to represent isolated organizational units on the platform. When you create a Tenant resource, the Red Hat Cloud Extensions operator takes care of everything needed to set up that environment:
 
 * **Namespace provisioning**: A dedicated namespace is created on the OpenShift cluster
 * **Storage provisioning**: A PersistentVolumeClaim backed by the `ocs-storagecluster-ceph-rbd` storage class is created automatically
@@ -30,7 +30,7 @@ OSAC uses a custom Kubernetes resource called `Tenant` to represent isolated org
 * **Network isolation**: `NetworkPolicy` rules prevent cross-tenant traffic — a key sovereignty requirement
 * **Identity registration**: The tenant is registered in Keycloak so access is tied to authenticated identities
 
-Two tenants exist by default after OSAC installation:
+Two tenants exist by default after Red Hat Cloud Extensions installation:
 
 * **`shared`**: Used by platform services that need to be accessible across tenant boundaries
 * **`system`**: Reserved for platform infrastructure components managed by the operator
@@ -39,7 +39,7 @@ These built-in tenants show you exactly what a healthy, fully provisioned tenant
 
 == Exercise 1: Examine the existing tenants
 
-Before creating new tenants, take a look at what the OSAC operator has already provisioned. Understanding the `shared` and `system` tenants gives you a reference point for what `Ready` looks like — and what to check if something goes wrong later.
+Before creating new tenants, take a look at what the Red Hat Cloud Extensions operator has already provisioned. Understanding the `shared` and `system` tenants gives you a reference point for what `Ready` looks like — and what to check if something goes wrong later.
 
 === Prerequisites
 
@@ -57,7 +57,7 @@ oc whoami
 +
 You should see `admin` or your administrator username.
 
-. List all Tenant resources managed by the OSAC operator:
+. List all Tenant resources managed by the Red Hat Cloud Extensions operator:
 +
 [source,bash,role="execute"]
 ----
@@ -163,14 +163,14 @@ EOF
 oc apply -f /tmp/finance-tenant.yaml
 ----
 
-. Watch the tenant status as the OSAC operator processes it:
+. Watch the tenant status as the Red Hat Cloud Extensions operator processes it:
 +
 [source,bash,role="execute"]
 ----
 oc get tenant finance -n {osac_namespace} -w
 ----
 +
-The operator moves the tenant from `Provisioning` to `Ready` as it creates the namespace, provisions Ceph storage, and applies resource quotas and network policies. This typically takes 30–90 seconds. Press `Ctrl+C` once you see the status change to `Ready`.
+The Red Hat Cloud Extensions operator moves the tenant from `Provisioning` to `Ready` as it creates the namespace, provisions Ceph storage, and applies resource quotas and network policies. This typically takes 30–90 seconds. Press `Ctrl+C` once you see the status change to `Ready`.
 
 . Confirm the tenant phase is `Ready`:
 +
@@ -237,7 +237,7 @@ oc get pvc -n $FINANCE_NS \
 +
 The storage class should be `ocs-storagecluster-ceph-rbd` — Ceph block storage that stays within the sovereign cluster.
 
-. Inspect the ResourceQuota applied by the OSAC operator:
+. Inspect the ResourceQuota applied by the Red Hat Cloud Extensions operator:
 +
 [source,bash,role="execute"]
 ----
@@ -295,7 +295,7 @@ Review what you completed in this module:
 
 * [x] Examined the built-in `shared` and `system` tenants and confirmed they are in a `Ready` state with associated namespaces, quotas, and network policies
 * [x] Created a `finance` tenant using a YAML manifest, specifying Ceph storage, resource quotas, and network boundaries
-* [x] Watched the OSAC operator provision the tenant and verified it reached `Ready` status
+* [x] Watched the Red Hat Cloud Extensions operator provision the tenant and verified it reached `Ready` status
 * [x] Confirmed Ceph RBD storage is `Bound`, resource quotas are applied, and network policies enforce isolation
 
 [.solve-button-placeholder]#solve-button-placeholder#
@@ -305,7 +305,7 @@ Review what you completed in this module:
 === Tenant stays in `Provisioning` state
 
 **Issue**: The `finance` tenant does not reach `Ready` and stays in `Provisioning`. +
-**Solution**: Check the OSAC operator logs for provisioning errors:
+**Solution**: Check the Red Hat Cloud Extensions operator logs for provisioning errors:
 
 [source,bash,role="execute"]
 ----
@@ -337,7 +337,7 @@ oc api-resources | grep -i tenant
 === Namespace not created after tenant reaches `Ready`
 
 **Issue**: The tenant shows `Ready` but no corresponding namespace appears. +
-**Solution**: Check the OSAC namespace events for namespace creation failures:
+**Solution**: Check the Red Hat Cloud Extensions namespace events for namespace creation failures:
 
 [source,bash,role="execute"]
 ----
@@ -346,7 +346,7 @@ oc get events -n {osac_namespace} --sort-by='.lastTimestamp' | tail -20
 
 == Module 2 summary
 
-The Finance department now has a fully provisioned, isolated environment on the OSAC platform. Their namespace is backed by Ceph storage, bounded by resource quotas, and protected by network policies that enforce Sovereign Cloud Corp's data sovereignty requirements.
+The Finance department now has a fully provisioned, isolated environment on Red Hat Cloud Extensions. Their namespace is backed by Ceph storage, bounded by resource quotas, and protected by network policies that enforce Sovereign Cloud Corp's data sovereignty requirements.
 
 **What you accomplished:**
 
@@ -362,4 +362,4 @@ The Finance department now has a fully provisioned, isolated environment on the 
 * Network isolation between tenants is enforced at the platform level, which simplifies compliance audits for regulated government workloads
 
 **Next module preview:**
-Module 3 covers the OSAC service catalog — you'll publish catalog items and deploy workloads into the Finance tenant using the fulfillment service and osac CLI.
+Module 3 covers the Red Hat Cloud Extensions service catalog — you'll publish catalog items and deploy workloads into the Finance tenant using the fulfillment service and osac CLI.

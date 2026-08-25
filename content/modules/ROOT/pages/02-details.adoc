@@ -11,7 +11,7 @@ Read through this page before starting Module 1. It covers timing, what you need
 
 === Full Workshop (90 minutes)
 
-* *Module 1*: Exploring the OSAC Platform (30 minutes)
+* *Module 1*: Exploring the Red Hat Cloud Extensions Platform (30 minutes)
 * *Module 2*: Managing Tenants (30 minutes)
 * *Module 3*: Catalog Items and Workloads (30 minutes)
 
@@ -19,7 +19,7 @@ Each module builds on the previous one, but they are structured so that a knowle
 
 === Abbreviated Workshop (60 minutes)
 
-* *Module 1*: Exploring the OSAC Platform (20 minutes)
+* *Module 1*: Exploring the Red Hat Cloud Extensions Platform (20 minutes)
 * *Module 2*: Managing Tenants (25 minutes)
 * *Module 3*: Catalog Items and Workloads — core exercises only (15 minutes)
 
@@ -36,7 +36,7 @@ You should be comfortable with:
 * Reading and editing YAML
 * Linux command-line usage at an intermediate level
 
-You do not need prior experience with Ceph storage, Keycloak, Kafka, or the OSAC platform. Each component is introduced in context as you encounter it.
+You do not need prior experience with Ceph storage, Keycloak, Kafka, or Red Hat Cloud Extensions. Each component is introduced in context as you encounter it.
 
 === Software Requirements
 
@@ -53,7 +53,7 @@ If you prefer your own terminal, you need:
 Your lab environment provides:
 
 * A multi-node Red Hat OpenShift {ocp_version} cluster
-* The OSAC platform pre-installed in the `{osac_namespace}` namespace
+* Red Hat Cloud Extensions pre-installed in the `{osac_namespace}` namespace
 * A bastion host with the `osac` CLI and `oc` CLI already configured
 * Pre-deployed Keycloak, Kafka, and Ceph storage components
 
@@ -74,9 +74,9 @@ Log in with these credentials:
 |Password |`{admin_password}`
 |===
 
-=== OSAC Platform UI
+=== Red Hat Cloud Extensions UI
 
-The OSAC dashboard is available at:
+The Red Hat Cloud Extensions dashboard is available at:
 
 ----
 {osac_ui_url}
@@ -86,7 +86,7 @@ Use the same admin credentials as the OpenShift console.
 
 === Keycloak Administration Console
 
-Keycloak provides identity management for the OSAC platform. Open it at:
+Keycloak provides identity management for Red Hat Cloud Extensions. Open it at:
 
 ----
 {keycloak_url}
@@ -112,11 +112,11 @@ Alternatively, click the *Terminal* tab in the Showroom sidebar — it connects 
 Work through this list before opening Module 1:
 
 * [ ] *OpenShift Console accessible* — Log in at `{openshift_console_url}` and confirm the cluster overview loads
-* [ ] *OSAC UI accessible* — Open `{osac_ui_url}` and confirm the dashboard appears
+* [ ] *Red Hat Cloud Extensions UI accessible* — Open `{osac_ui_url}` and confirm the dashboard appears
 * [ ] *Terminal tab open* — Click *Terminal* in the Showroom sidebar
 * [ ] *`oc` CLI verified* — Run `oc whoami` and confirm your username returns
 * [ ] *osac CLI available* — Run `osac --version` and confirm a version string returns
-* [ ] *OSAC namespace healthy* — Run `oc get pods -n {osac_namespace}` and confirm pods are Running
+* [ ] *Red Hat Cloud Extensions namespace healthy* — Run `oc get pods -n {osac_namespace}` and confirm pods are Running
 
 == Environment Verification
 
@@ -138,7 +138,7 @@ Check the overall cluster version:
 oc version
 ----
 
-Verify the OSAC operator pod is running:
+Verify the Red Hat Cloud Extensions operator pod is running:
 
 [source,bash,role="execute"]
 ----
@@ -147,14 +147,14 @@ oc get pods -n {osac_namespace} -l app.kubernetes.io/name=osac-operator
 
 All pods should show `Running`. If they show `Pending`, wait 60 seconds and retry.
 
-Check the full set of OSAC platform pods:
+Check the full set of Red Hat Cloud Extensions pods:
 
 [source,bash,role="execute"]
 ----
 oc get pods -n {osac_namespace}
 ----
 
-You should see pods for the OSAC operator, fulfillment service, Keycloak, and Kafka. All should be `Running` or `Completed`.
+You should see pods for the Red Hat Cloud Extensions operator, fulfillment service, Keycloak, and Kafka. All should be `Running` or `Completed`.
 
 Confirm the osac CLI is available and configured:
 
@@ -174,7 +174,7 @@ Confirm you are using the correct credentials:
 
 Try an incognito or private browser window to rule out a cached session. If the login page does not load, verify the URL is exactly `{openshift_console_url}`.
 
-=== OSAC UI Does Not Load
+=== Red Hat Cloud Extensions UI Does Not Load
 
 Check that the ingress route exists in the `{osac_namespace}` namespace:
 
@@ -183,14 +183,14 @@ Check that the ingress route exists in the `{osac_namespace}` namespace:
 oc get route -n {osac_namespace}
 ----
 
-If the route is missing, the OSAC operator may still be initializing. Check pod status:
+If the route is missing, the Red Hat Cloud Extensions operator may still be initializing. Check pod status:
 
 [source,bash,role="execute"]
 ----
 oc get pods -n {osac_namespace}
 ----
 
-Wait until all pods are `Running`, then refresh the OSAC UI URL.
+Wait until all pods are `Running`, then refresh the Red Hat Cloud Extensions UI URL.
 
 === SSH Connection Refused to Bastion
 
@@ -205,7 +205,7 @@ If the connection is refused or times out, use the *Terminal* tab in Showroom in
 
 === Pods Are Pending or in CrashLoopBackOff
 
-Inspect recent events in the OSAC namespace:
+Inspect recent events in the Red Hat Cloud Extensions namespace:
 
 [source,bash,role="execute"]
 ----

@@ -1,5 +1,5 @@
 ---
-# Module 1: Exploring the OSAC Platform — solve tasks
+# Module 1: Exploring the Red Hat Cloud Extensions Platform — solve tasks
 # Generate with: /ftl:rhdp-lab-validator
 - name: Module 01 - Solve placeholder
   hosts: localhost
