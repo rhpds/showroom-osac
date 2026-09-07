@@ -15,4 +15,6 @@
 :osac_ui_url: https://osac-ui-osac.%openshift_cluster_ingress_domain%
 :keycloak_url: https://keycloak-osac.%openshift_cluster_ingress_domain%
 :osac_namespace: osac
+:osac_internal_api_url: https://fulfillment-internal-api-osac.%openshift_cluster_ingress_domain%
+:osac_public_api_url: https://fulfillment-api-osac.%openshift_cluster_ingress_domain%
 :ocp_version: 4.18

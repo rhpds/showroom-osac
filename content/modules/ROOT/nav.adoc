@@ -4,5 +4,6 @@
 
 .Modules
 * xref:03-module-01-platform-overview.adoc[Exploring the Red Hat Cloud Extensions Platform]
-* xref:04-module-02-tenant-management.adoc[Managing Tenants]
+* xref:04-module-02-tenant-management-new.adoc[Managing Tenants]
+* xref:04-module-02-tenant-management.adoc[Managing Tenants Old content]
 * xref:05-module-03-catalog-and-workloads.adoc[Catalog Items and Workloads]
