@@ -3,8 +3,6 @@
 :toc: macro
 :toclevels: 2
 
-include::ROOT:partial$_attributes.adoc[]
-
 toc::[]
 
 Sovereign Cloud Corp's compliance team has approved the platform architecture, and now it's time to put multi-tenancy to work. The Finance department needs its own isolated environment — dedicated storage, resource quotas, and network boundaries that keep their financial workloads separate from every other department on the platform.

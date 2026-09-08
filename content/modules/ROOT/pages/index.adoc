@@ -1,7 +1,5 @@
 = Introduction to Red Hat Cloud Extensions
 
-include::ROOT:partial$_attributes.adoc[]
-
 Welcome to the Introduction to Red Hat Cloud Extensions workshop!
 
 You're a Platform Engineer at Sovereign Cloud Corp, a European government services provider. Leadership has handed you a critical mission: deploy a sovereign cloud platform on OpenShift that meets strict data sovereignty and regulatory compliance requirements. The platform must support multiple government tenants, automate workload provisioning through a service catalog, and integrate with Keycloak for identity management.
@@ -34,46 +32,74 @@ Before starting this workshop, you should have:
 
 == Workshop environment
 
-Your environment includes a pre-deployed OpenShift {ocp_version} cluster with the Red Hat Cloud Extensions operator already installed. All platform components — the fulfillment service, Keycloak identity management, Kafka event streaming, and the Red Hat Cloud Extensions UI — are running and ready to use.
+Your environment includes a pre-deployed OpenShift cluster with Red Hat Cloud Extensions already installed. All platform components — the fulfillment service, Keycloak identity management, Kafka event streaming, and the Red Hat Cloud Extensions UI — are running and ready to use.
 
 You will work through the modules using two tabs in your lab interface:
 
-* *Terminal* — for CLI commands using the `oc` and `osac` tools
+* *Instructions*: - on the left, for step-by-step guidance and explanations
+
 * *Red Hat Cloud Extensions Console* - to administer Red Hat Cloud Extensions
 * *OpenShift Console* — for visual exploration of the cluster and platform components
+* *Terminal* — for CLI commands using the `oc` and `osac` tools
 
 Your access details:
 
 === Red Hat Cloud Extensions
 
-* *Red Hat Cloud Extensions UI*: {osac_ui_url}
-* *Admin user*: `{osac_admin_user}`
-* *Admin password*: `{osac_admin_password}`
-* *Common user password*: `{osac_user_password}`
-* Log into Red Hat Cloud Extensions from the command line:
+* *Red Hat Cloud Extensions UI*: {osac_ui_url}^. You do not need to follow this link - use the tab on the right. Use the credentials below to log into the Red Hat Cloud Extensions UI.
+* *Red Hat Cloud Extensions admin credentials*:
++
+.*Admin user*
+[source,bash,role=execute,subs=attributes]
+----
+{osac_admin_user}
+----
++
+.*Admin user password*
+[source,bash,role=execute,subs=attributes]
+----
+{osac_admin_password}
+----
+
+// * *Common user password*: `{osac_user_password}`
+
+* Switch to the *Terminal* tab and log into Red Hat Cloud Extensions from the command line:
 +
 [source,bash,role=execute,subs=attributes]
 ----
 osac login --insecure \
   --issuer="https://keycloak-keycloak.{openshift_cluster_ingress_domain}/realms/osac" \
-  --flow=password --user={osac_admin_user} --password={osac_admin_password} \
+  --flow=password \
+  --user={osac_admin_user} \
+  --password={osac_admin_password} \
   https://fulfillment-internal-api-osac.{openshift_cluster_ingress_domain}
 ----
 
 === Keycloak
 
-* *Keycloak UI*: {osac_keycloak_url}
+You do not need to log into Keycloak for this workshop, but you can explore the Keycloak admin console if you wish.
+
+* *Keycloak UI*: {osac_keycloak_url}^
 * *Admin user*: `{osac_keycloak_admin_user}`
 * *Admin password*: `{osac_keycloak_admin_password}`
 
 === OpenShift
 
-* *OpenShift Console*: {openshift_console_url}
-* *Admin user*: `{openshift_cluster_admin_username}`
-* *Admin password*: `{openshift_cluster_admin_password}`
+You can explore the OpenShift cluster and Red Hat Cloud Extensions components through the OpenShift Console.
 
-
-NOTE: All environment details and credentials are available in the lab interface.
+* *OpenShift Console*: {openshift_console_url}^. You do not need to follow this link - use the tab on the right. Use the credentials below to log into the OpenShift Console.
++
+.*Cluster admin user*
+[source,bash,role=execute,subs=attributes]
+----
+{openshift_cluster_admin_username}
+----
++
+.*Cluster admin user password*
+[source,bash,role=execute,subs=attributes]
+----
+{openshift_cluster_admin_password}
+----
 
 == Estimated time
 

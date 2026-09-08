@@ -3,8 +3,6 @@
 :toc-placement: preamble
 :icons: font
 
-include::ROOT:partial$_attributes.adoc[]
-
 Read through this page before starting Module 1. It covers timing, what you need to know coming in, and how to reach every part of your lab environment. Five minutes here will save you time during the hands-on exercises.
 
 == Timing and Schedule
@@ -36,7 +34,7 @@ You should be comfortable with:
 * Reading and editing YAML
 * Linux command-line usage at an intermediate level
 
-You do not need prior experience with Ceph storage, Keycloak, Kafka, or Red Hat Cloud Extensions. Each component is introduced in context as you encounter it.
+You do not need prior experience with storage, Keycloak, Kafka, or Red Hat Cloud Extensions. Each component is introduced in context as you encounter it.
 
 === Software Requirements
 
@@ -44,7 +42,7 @@ All hands-on work runs inside the browser-based terminal Showroom provides. You 
 
 If you prefer your own terminal, you need:
 
-* *OpenShift CLI (`oc`)*: {ocp_version} or later — available at https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/[mirror.openshift.com^]
+* *OpenShift CLI (`oc`)*: available at https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/[mirror.openshift.com^]
 * *osac CLI*: pre-installed in the lab environment (bastion host)
 * *Web browser*: Chrome, Firefox, Safari, or Edge (current release)
 
@@ -52,67 +50,77 @@ If you prefer your own terminal, you need:
 
 Your lab environment provides:
 
-* A multi-node Red Hat OpenShift {ocp_version} cluster
+* A multi-node Red Hat OpenShift cluster
 * Red Hat Cloud Extensions pre-installed in the `{osac_namespace}` namespace
 * A bastion host with the `osac` CLI and `oc` CLI already configured
 * Pre-deployed Keycloak, Kafka, and Ceph storage components
 
 === OpenShift Console
 
-Open the OpenShift web console in a new browser tab:
-
-----
-{openshift_console_url}
-----
+On the right switch the *OpenShift Console* tab:
 
 Log in with these credentials:
 
-[cols="1,2",options="header"]
-|===
-|Field |Value
-|Username |`{admin_user}`
-|Password |`{admin_password}`
-|===
+.*Cluster admin user*
+[source,bash,role=execute,subs=attributes]
+----
+{openshift_cluster_admin_username}
+----
+
+.*Cluster admin user password*
+[source,bash,role=execute,subs=attributes]
+----
+{openshift_cluster_admin_password}
+----
 
 === Red Hat Cloud Extensions UI
 
-The Red Hat Cloud Extensions dashboard is available at:
+On the right switch to the *Red Hat Cloud Extensions* tab.
 
-----
-{osac_ui_url}
-----
+Log in with these credentials:
 
-Use the same admin credentials as the OpenShift console.
+.*Admin user*
+[source,bash,role=execute,subs=attributes]
+----
+{osac_admin_user}
+----
++
+.*Admin user password*
+[source,bash,role=execute,subs=attributes]
+----
+{osac_admin_password}
+----
 
 === Keycloak Administration Console
 
-Keycloak provides identity management for Red Hat Cloud Extensions. Open it at:
+Keycloak provides identity management for Red Hat Cloud Extensions.
 
+Switch to the *Keycloak* tab on the right and log in with these credentials:
+
+.*Keycloak admin user*
+[source,bash,role=execute,subs=attributes]
 ----
-{keycloak_url}
+{osac_keycloak_admin_user}
+----
++
+.*Keycloak admin user password*
+[source,bash,role=execute,subs=attributes]
+----
+{osac_keycloak_admin_password}
 ----
 
-You review Keycloak configuration during Module 1. Log in with the admin credentials shown in your lab details panel.
+You review Keycloak configuration during Module 1.
 
 === Bastion Host (SSH)
 
-The bastion host gives you CLI access to the cluster. Connect from your local terminal:
-
-[source,bash,role="execute"]
-----
-ssh {bastion_ssh_user_name}@{bastion_public_hostname}
-----
-
-When prompted, enter the password: `{bastion_ssh_password}`
-
-Alternatively, click the *Terminal* tab in the Showroom sidebar — it connects you to the bastion automatically with no SSH setup required.
+The bastion host gives you CLI access to the cluster. The *Terminal* tab on the right connexts you to the bastion automatically with no SSH setup required.
 
 == Pre-Workshop Checklist
 
 Work through this list before opening Module 1:
 
-* [ ] *OpenShift Console accessible* — Log in at `{openshift_console_url}` and confirm the cluster overview loads
-* [ ] *Red Hat Cloud Extensions UI accessible* — Open `{osac_ui_url}` and confirm the dashboard appears
+* [ ] *OpenShift Console accessible* — Log in at {openshift_console_url}^ and confirm the cluster overview loads
+* [ ] *Red Hat Cloud Extensions UI accessible* — Open {osac_ui_url}^ and confirm the dashboard appears
 * [ ] *Terminal tab open* — Click *Terminal* in the Showroom sidebar
 * [ ] *`oc` CLI verified* — Run `oc whoami` and confirm your username returns
 * [ ] *osac CLI available* — Run `osac --version` and confirm a version string returns
@@ -129,7 +137,7 @@ Confirm your OpenShift identity:
 oc whoami
 ----
 
-Expected output: `{admin_user}`
+Expected output: `{openshift_cluster_admin_username}`
 
 Check the overall cluster version:
 
@@ -140,16 +148,16 @@ oc version
 
 Verify the Red Hat Cloud Extensions operator pod is running:
 
-[source,bash,role="execute"]
+[source,bash,role="execute",subs=attributes]
 ----
 oc get pods -n {osac_namespace} -l app.kubernetes.io/name=osac-operator
 ----
 
-All pods should show `Running`. If they show `Pending`, wait 60 seconds and retry.
+All pods should show `Running` or `Completed`. If any show `Pending`, wait 60 seconds and retry.
 
 Check the full set of Red Hat Cloud Extensions pods:
 
-[source,bash,role="execute"]
+[source,bash,role="execute",subs=attributes]
 ----
 oc get pods -n {osac_namespace}
 ----
@@ -169,50 +177,28 @@ osac --version
 
 Confirm you are using the correct credentials:
 
-* *Username*: `{admin_user}`
-* *Password*: `{admin_password}`
+* *Username*: `{openshift_cluster_admin_username}`
+* *Password*: `{openshift_cluster_admin_password}`
 
-Try an incognito or private browser window to rule out a cached session. If the login page does not load, verify the URL is exactly `{openshift_console_url}`.
+Try an incognito or private browser window to rule out a cached session. If the login page does not load, verify the URL is exactly {openshift_console_url}^.
 
 === Red Hat Cloud Extensions UI Does Not Load
 
 Check that the ingress route exists in the `{osac_namespace}` namespace:
 
-[source,bash,role="execute"]
+[source,bash,role="execute",subs=attributes]
 ----
 oc get route -n {osac_namespace}
 ----
 
 If the route is missing, the Red Hat Cloud Extensions operator may still be initializing. Check pod status:
 
-[source,bash,role="execute"]
+[source,bash,role="execute",subs=attributes]
 ----
 oc get pods -n {osac_namespace}
 ----
 
 Wait until all pods are `Running`, then refresh the Red Hat Cloud Extensions UI URL.
-
-=== SSH Connection Refused to Bastion
-
-Verify the hostname and username:
-
-[source,bash,role="execute"]
-----
-ssh {bastion_ssh_user_name}@{bastion_public_hostname}
-----
-
-If the connection is refused or times out, use the *Terminal* tab in Showroom instead — it provides an equivalent shell session without requiring direct SSH access from your machine.
-
-=== Pods Are Pending or in CrashLoopBackOff
-
-Inspect recent events in the Red Hat Cloud Extensions namespace:
-
-[source,bash,role="execute"]
-----
-oc get events -n {osac_namespace} --sort-by='.lastTimestamp' | tail -20
-----
-
-Share the output with your instructor. Common causes include Ceph storage not yet provisioned or resource quota limits on the cluster.
 
 === osac CLI Not Found
 
@@ -228,7 +214,7 @@ If `osac` is absent from the bastion, ask your instructor — the binary path ma
 
 == Additional Resources
 
-* https://docs.openshift.com/container-platform/{ocp_version}/welcome/index.html[Red Hat OpenShift {ocp_version} Documentation^]
+* https://docs.openshift.com/container-platform/4.22/welcome/index.html[Red Hat OpenShift {ocp_version} Documentation^]
 * https://access.redhat.com/documentation/en-us/red_hat_openshift_data_foundation/[Red Hat OpenShift Data Foundation Documentation^]
 * https://www.keycloak.org/documentation[Keycloak Documentation^]
 * https://access.redhat.com/[Red Hat Customer Portal^]

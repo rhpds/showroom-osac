@@ -3,8 +3,6 @@
 :toc: macro
 :toclevels: 1
 
-include::ROOT:partial$_attributes.adoc[]
-
 toc::[]
 
 Tenants are provisioned and Ceph storage is backing their environments. The platform team at Sovereign Cloud Corp has done their job — but the tenant users are still waiting. They need compute.

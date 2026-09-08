@@ -3,8 +3,6 @@
 :toc: macro
 :toclevels: 2
 
-include::ROOT:partial$_attributes.adoc[]
-
 toc::[]
 
 Sovereign Cloud Corp has signed a new government agency client: SAI Corp. The agency needs a fully isolated tenant on the platform with federated single sign-on through their corporate identity provider. Their IT administrator, Alice, needs tenant-admin authority to manage projects and team access. Their analyst, Bob, needs read-only access to a specific project.
