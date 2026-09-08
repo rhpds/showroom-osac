@@ -44,7 +44,7 @@ osac version 2>/dev/null && echo "osac is installed" || echo "osac not found —
 +
 [source,bash,role="execute"]
 ----
-OSAC_API_HOST="osac-api-{osac_namespace}.{openshift_cluster_ingress_domain}"
+OSAC_API_HOST="osac-api-osac.{openshift_cluster_ingress_domain}"
 curl -skLo /tmp/osac "https://${OSAC_API_HOST}/cli/download/osac-linux-amd64"
 chmod +x /tmp/osac
 sudo mv /tmp/osac /usr/local/bin/osac
@@ -67,7 +67,7 @@ osac version: v1.x.x
 +
 [source,bash,role="execute"]
 ----
-osac config set endpoint "https://osac-api-{osac_namespace}.{openshift_cluster_ingress_domain}"
+osac config set endpoint "https://osac-api-osac.{openshift_cluster_ingress_domain}"
 ----
 
 . Log in with your admin credentials:
@@ -221,7 +221,7 @@ cat > /tmp/gov-portal-vm.yaml << 'EOF'
 name: gov-portal-vm
 displayName: "Government Portal VM"
 catalogItemName: sovereign-standard-vm
-namespace: {osac_namespace}
+namespace: osac
 EOF
 ----
 
@@ -260,7 +260,7 @@ Wait for the `STATUS` column to show `Running`, then press Ctrl+C to stop watchi
 +
 [source,bash,role="execute"]
 ----
-oc get vm -n {osac_namespace}
+oc get vm -n osac
 ----
 +
 Expected output:
@@ -274,7 +274,7 @@ gov-portal-vm   1m    Running   True
 +
 [source,bash,role="execute"]
 ----
-oc get vmi -n {osac_namespace}
+oc get vmi -n osac
 ----
 +
 A `Running` VMI confirms the guest OS started successfully inside the VM.
@@ -285,14 +285,14 @@ Run this command to check both the VM and VMI status together:
 
 [source,bash,role="execute"]
 ----
-oc get vm,vmi -n {osac_namespace}
+oc get vm,vmi -n osac
 ----
 
 Both objects should show `Running`. If the instance stays in `Pending` for more than two minutes, check the events on the VM object:
 
 [source,bash,role="execute"]
 ----
-oc describe vm gov-portal-vm -n {osac_namespace} | tail -30
+oc describe vm gov-portal-vm -n osac | tail -30
 ----
 
 Look for scheduling errors, image pull failures, or storage binding issues. Common causes are a missing `ocp-virt-vm` template or insufficient node capacity.

@@ -51,7 +51,7 @@ If you prefer your own terminal, you need:
 Your lab environment provides:
 
 * A multi-node Red Hat OpenShift cluster
-* Red Hat Cloud Extensions pre-installed in the `{osac_namespace}` namespace
+* Red Hat Cloud Extensions pre-installed in the `osac` namespace
 * A bastion host with the `osac` CLI and `oc` CLI already configured
 * Pre-deployed Keycloak, Kafka, and Ceph storage components
 
@@ -124,7 +124,7 @@ Work through this list before opening Module 1:
 * [ ] *Terminal tab open* — Click *Terminal* in the Showroom sidebar
 * [ ] *`oc` CLI verified* — Run `oc whoami` and confirm your username returns
 * [ ] *osac CLI available* — Run `osac --version` and confirm a version string returns
-* [ ] *Red Hat Cloud Extensions namespace healthy* — Run `oc get pods -n {osac_namespace}` and confirm pods are Running
+* [ ] *Red Hat Cloud Extensions namespace healthy* — Run `oc get pods -n osac` and confirm pods are Running
 
 == Environment Verification
 
@@ -150,7 +150,7 @@ Verify the Red Hat Cloud Extensions operator pod is running:
 
 [source,bash,role="execute",subs=attributes]
 ----
-oc get pods -n {osac_namespace} -l app.kubernetes.io/name=osac-operator
+oc get pods -n osac -l app.kubernetes.io/name=osac-operator
 ----
 
 All pods should show `Running` or `Completed`. If any show `Pending`, wait 60 seconds and retry.
@@ -159,7 +159,7 @@ Check the full set of Red Hat Cloud Extensions pods:
 
 [source,bash,role="execute",subs=attributes]
 ----
-oc get pods -n {osac_namespace}
+oc get pods -n osac
 ----
 
 You should see pods for the Red Hat Cloud Extensions operator, fulfillment service, Keycloak, and Kafka. All should be `Running` or `Completed`.
@@ -184,18 +184,18 @@ Try an incognito or private browser window to rule out a cached session. If the 
 
 === Red Hat Cloud Extensions UI Does Not Load
 
-Check that the ingress route exists in the `{osac_namespace}` namespace:
+Check that the ingress route exists in the `osac` namespace:
 
 [source,bash,role="execute",subs=attributes]
 ----
-oc get route -n {osac_namespace}
+oc get route -n osac
 ----
 
 If the route is missing, the Red Hat Cloud Extensions operator may still be initializing. Check pod status:
 
 [source,bash,role="execute",subs=attributes]
 ----
-oc get pods -n {osac_namespace}
+oc get pods -n osac
 ----
 
 Wait until all pods are `Running`, then refresh the Red Hat Cloud Extensions UI URL.

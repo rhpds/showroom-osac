@@ -59,7 +59,7 @@ You should see `admin` or your administrator username.
 +
 [source,bash,role="execute"]
 ----
-oc get tenants -n {osac_namespace}
+oc get tenants -n osac
 ----
 +
 Both `shared` and `system` should appear with a `Ready` status. If you see neither, check that the `osac-operator` pod is running.
@@ -68,7 +68,7 @@ Both `shared` and `system` should appear with a `Ready` status. If you see neith
 +
 [source,bash,role="execute"]
 ----
-oc get tenant shared -n {osac_namespace} -o yaml
+oc get tenant shared -n osac -o yaml
 ----
 +
 Review the `spec` section to see how storage and resource limits are defined. Look at `status.phase` to confirm the tenant is `Ready`, and check `status.conditions` for any recent events.
@@ -77,7 +77,7 @@ Review the `spec` section to see how storage and resource limits are defined. Lo
 +
 [source,bash,role="execute"]
 ----
-oc get tenant system -n {osac_namespace} \
+oc get tenant system -n osac \
   -o jsonpath='{.status.conditions}' | python3 -m json.tool
 ----
 
@@ -111,7 +111,7 @@ Run the following check to confirm both default tenants are healthy before movin
 [source,bash,role="execute"]
 ----
 echo "=== Default Tenants ==="
-oc get tenants -n {osac_namespace}
+oc get tenants -n osac
 ----
 
 [.validate-button-placeholder]#validate-button-placeholder#
@@ -165,7 +165,7 @@ oc apply -f /tmp/finance-tenant.yaml
 +
 [source,bash,role="execute"]
 ----
-oc get tenant finance -n {osac_namespace} -w
+oc get tenant finance -n osac -w
 ----
 +
 The Red Hat Cloud Extensions operator moves the tenant from `Provisioning` to `Ready` as it creates the namespace, provisions Ceph storage, and applies resource quotas and network policies. This typically takes 30–90 seconds. Press `Ctrl+C` once you see the status change to `Ready`.
@@ -174,7 +174,7 @@ The Red Hat Cloud Extensions operator moves the tenant from `Provisioning` to `R
 +
 [source,bash,role="execute"]
 ----
-oc get tenant finance -n {osac_namespace} \
+oc get tenant finance -n osac \
   -o jsonpath='{.status.phase}{"\n"}'
 ----
 +
@@ -195,7 +195,7 @@ oc get namespaces | grep finance
 
 [source,bash,role="execute"]
 ----
-oc get tenant finance -n {osac_namespace} \
+oc get tenant finance -n osac \
   -o jsonpath='Phase: {.status.phase}{"\n"}'
 oc get namespaces | grep finance
 ----
@@ -264,7 +264,7 @@ Look for policies that allow ingress only from the `osac` namespace and deny cro
 +
 [source,bash,role="execute"]
 ----
-oc describe tenant finance -n {osac_namespace}
+oc describe tenant finance -n osac
 ----
 
 === Verify
@@ -275,7 +275,7 @@ Run this combined check to confirm all tenant resources are present and healthy:
 ----
 export FINANCE_NS=$(oc get namespaces | grep finance | awk '{print $1}' | head -1)
 echo "=== Tenant Phase ==="
-oc get tenant finance -n {osac_namespace} \
+oc get tenant finance -n osac \
   -o jsonpath='{.status.phase}{"\n"}'
 echo "=== PVC Status ==="
 oc get pvc -n $FINANCE_NS
@@ -307,7 +307,7 @@ Review what you completed in this module:
 
 [source,bash,role="execute"]
 ----
-oc logs -l app=osac-operator -n {osac_namespace} --tail=50
+oc logs -l app=osac-operator -n osac --tail=50
 ----
 
 === PVC stays in `Pending` state
@@ -339,7 +339,7 @@ oc api-resources | grep -i tenant
 
 [source,bash,role="execute"]
 ----
-oc get events -n {osac_namespace} --sort-by='.lastTimestamp' | tail -20
+oc get events -n osac --sort-by='.lastTimestamp' | tail -20
 ----
 
 == Module 2 summary
