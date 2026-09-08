@@ -55,6 +55,24 @@ Your lab environment provides:
 * A bastion host with the `osac` CLI and `oc` CLI already configured
 * Pre-deployed Keycloak, Kafka, and Ceph storage components
 
+=== Red Hat Cloud Extensions UI
+
+On the right switch to the *Red Hat Cloud Extensions* tab.
+
+Log in with these credentials:
+
+.*Admin user*
+[source,bash,role=execute,subs=attributes]
+----
+{osac_admin_user}
+----
+
+.*Admin user password*
+[source,bash,role=execute,subs=attributes]
+----
+{osac_admin_password}
+----
+
 === OpenShift Console
 
 On the right switch the *OpenShift Console* tab:
@@ -73,24 +91,6 @@ Log in with these credentials:
 {openshift_cluster_admin_password}
 ----
 
-=== Red Hat Cloud Extensions UI
-
-On the right switch to the *Red Hat Cloud Extensions* tab.
-
-Log in with these credentials:
-
-.*Admin user*
-[source,bash,role=execute,subs=attributes]
-----
-{osac_admin_user}
-----
-+
-.*Admin user password*
-[source,bash,role=execute,subs=attributes]
-----
-{osac_admin_password}
-----
-
 === Keycloak Administration Console
 
 Keycloak provides identity management for Red Hat Cloud Extensions.
@@ -102,7 +102,7 @@ Switch to the *Keycloak* tab on the right and log in with these credentials:
 ----
 {osac_keycloak_admin_user}
 ----
-+
+
 .*Keycloak admin user password*
 [source,bash,role=execute,subs=attributes]
 ----
@@ -128,7 +128,7 @@ Work through this list before opening Module 1:
 
 == Environment Verification
 
-Run these commands in the Terminal tab to confirm the lab is ready.
+Run these commands in the *Terminal* tab to confirm the lab is ready.
 
 Confirm your OpenShift identity:
 
@@ -150,7 +150,7 @@ Verify the Red Hat Cloud Extensions operator pod is running:
 
 [source,bash,role="execute",subs=attributes]
 ----
-oc get pods -n osac -l app.kubernetes.io/name=osac-operator
+oc get pods -n osac -l app.kubernetes.io/name=operator
 ----
 
 All pods should show `Running` or `Completed`. If any show `Pending`, wait 60 seconds and retry.
@@ -168,7 +168,7 @@ Confirm the osac CLI is available and configured:
 
 [source,bash,role="execute"]
 ----
-osac --version
+osac version
 ----
 
 == Troubleshooting

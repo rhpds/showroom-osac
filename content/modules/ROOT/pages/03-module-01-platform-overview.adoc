@@ -27,7 +27,7 @@ Sovereign Cloud Corp's platform runs in the `osac` namespace on OpenShift. Befor
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc login {api_url} -u {openshift_cluster_admin_username} -p {openshift_cluster_admin_password} --insecure-skip-tls-verify=false
+oc login {openshift_api_url} -u {openshift_cluster_admin_username} -p {openshift_cluster_admin_password} --insecure-skip-tls-verify=false
 ----
 
 . Verify you are targeting the correct cluster and confirm your identity:
@@ -81,17 +81,14 @@ oc get pods -n osac --field-selector=status.phase!=Running --field-selector=stat
 
 Expected result: `All pods healthy`
 
-[.solve-button-placeholder]#solve-button-placeholder#
-[.validate-button-placeholder]#validate-button-placeholder#
-
 == Exercise 2: Explore the Red Hat Cloud Extensions web UI
 
 With the platform confirmed healthy, log in to the Red Hat Cloud Extensions web UI. This is the central console that platform engineers and tenant administrators use to manage the environment.
 
-. Switch to the Cloud Extensions tab on the right. Login using the platform admin credentials:
+. Switch to the *Cloud Extensions* tab on the right. Login using the platform admin credentials:
 +
 * Username: `{osac_admin_user}`
-* Password: `{adosac_admin_passwordmin_password}`
+* Password: `{osac_admin_password}`
 
 . In the browser UI, locate and explore the following sections:
 +
@@ -110,7 +107,7 @@ oc describe deployment osac-ui -n osac | grep -A 20 "Environment:"
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get deployment fulfillment-service -n osac -o jsonpath='{.status.readyReplicas}'
+oc get deployment fulfillment-controller -n osac -o jsonpath='{.status.readyReplicas}'
 ----
 +
 The output should show `1` or more ready replicas.
@@ -122,7 +119,7 @@ Confirm the Red Hat Cloud Extensions UI and fulfillment service are responding:
 [source,bash,role="execute",subs=attributes]
 ----
 oc rollout status deployment/osac-ui -n osac && \
-oc rollout status deployment/fulfillment-service -n osac
+oc rollout status deployment/fulfillment-controller -n osac
 ----
 
 Expected output:
@@ -130,9 +127,6 @@ Expected output:
 deployment "osac-ui" successfully rolled out
 deployment "fulfillment-service" successfully rolled out
 ----
-
-[.solve-button-placeholder]#solve-button-placeholder#
-[.validate-button-placeholder]#validate-button-placeholder#
 
 == Exercise 3: Examine the Keycloak realm configuration
 
@@ -149,28 +143,17 @@ echo "Keycloak URL: {osac_keycloak_url}"
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get pods -n osac -l app=keycloak
+oc get pods -n keycloak
 ----
 
 . Check the Keycloak deployment details:
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc describe deployment keycloak -n osac | grep -E "(Replicas|Image|Ready)"
+oc describe deployment keycloak-service -n keycloak | grep -E "(Replicas|Image|Ready)"
 ----
 
-. Open the Keycloak admin console in your browser:
-+
-[source,text]
-----
-{osac_keycloak_url}/admin
-----
-+
-Log in with:
-+
-* Username: `{osac_keycloak_admin_user}`
-* Password: `{osac_keycloak_admin_password}`
-
+. Switch to the Keycloak admin console tab on the right.
 . In the Keycloak admin console, navigate to the `osac` realm:
 .. Click the realm selector in the top-left corner
 .. Select **osac** from the list
@@ -180,21 +163,21 @@ Log in with:
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get endpoints keycloak -n osac
+oc get endpoints keycloak -n keycloak
 ----
 
 . Inspect the Keycloak ConfigMap to review realm import configuration:
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get configmaps -n osac | grep keycloak
+oc get configmaps -n keycloak | grep keycloak
 ----
 
 . Review the realm configuration if a ConfigMap is present:
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get configmap keycloak-realm-config -n osac -o jsonpath='{.data}' 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "Realm config managed by operator"
+oc get configmap keycloak-realm -n keycloak -o jsonpath='{.data}' | jq
 ----
 
 === Verify
@@ -211,9 +194,6 @@ Expected output:
 Realm: osac | Public Key available: True
 ----
 
-[.solve-button-placeholder]#solve-button-placeholder#
-[.validate-button-placeholder]#validate-button-placeholder#
-
 == Exercise 4: Inspect the Kafka cluster
 
 Red Hat Cloud Extensions uses Kafka as its event backbone. Every catalog request, tenant lifecycle event, and workload status update flows through Kafka. A healthy Kafka cluster means the platform can process requests reliably and at scale.
@@ -222,14 +202,14 @@ Red Hat Cloud Extensions uses Kafka as its event backbone. Every catalog request
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get kafka -n osac
+oc get kafka -n osac-kafka
 ----
 
 . Describe the Kafka custom resource to review its configuration:
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc describe kafka -n osac
+oc describe kafka -n osac-kafka
 ----
 +
 Look for the `Status` section. All listeners should show `ready: true`.
@@ -238,7 +218,7 @@ Look for the `Status` section. All listeners should show `ready: true`.
 +
 [source,bash,role="execute",subs=attributes ]
 ----
-oc get pods -n osac -l strimzi.io/kind=Kafka
+oc get pods -n osac-kafka -l strimzi.io/kind=Kafka
 ----
 +
 You should see at least one broker pod in `Running` state.
@@ -247,7 +227,7 @@ You should see at least one broker pod in `Running` state.
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get kafkatopics -n osac
+oc get kafkatopics -n osac-kafka
 ----
 +
 Topics prefixed with `osac-` handle platform events. Note the names — you will see these referenced in Module 3 when catalog workloads generate events.
@@ -256,21 +236,14 @@ Topics prefixed with `osac-` handle platform events. Note the names — you will
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get kafkausers -n osac
-----
-
-. Verify the Zookeeper (or KRaft) components are healthy:
-+
-[source,bash,role="execute",subs=attributes]
-----
-oc get pods -n osac | grep -E "zookeeper|kafka"
+oc get kafkausers -n osac-kafka
 ----
 
 . Review the Kafka cluster status conditions:
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc get kafka -n osac -o jsonpath='{.items[0].status.conditions}' | python3 -m json.tool 2>/dev/null
+oc get kafka -n osac-kafka -o jsonpath='{.items[0].status.conditions}' | jq
 ----
 +
 All conditions should show `"type": "Ready"` with `"status": "True"`.
@@ -281,16 +254,13 @@ Confirm all Kafka components are ready:
 
 [source,bash,role="execute",subs=attributes]
 ----
-oc wait --for=condition=Ready kafka --all -n osac --timeout=60s
+oc wait --for=condition=Ready kafka --all -n osac-kafka --timeout=60s
 ----
 
 Expected output:
 ----
-kafka.kafka.strimzi.io/<cluster-name> condition met
+kafka.kafka.strimzi.io/osac-kafka condition met
 ----
-
-[.solve-button-placeholder]#solve-button-placeholder#
-[.validate-button-placeholder]#validate-button-placeholder#
 
 == Learning outcomes checkpoint
 
