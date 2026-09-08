@@ -33,7 +33,7 @@ export TENANT=sai-corp
 export TENANT_ADMIN=alice
 export TENANT_USER=bob
 export REALM=osac
-mkdir -p /tmp/osac-demo
+mkdir -p ${HOME}/osac-demo
 echo "Setup OK: TENANT=$TENANT ADMIN=$TENANT_ADMIN USER=$TENANT_USER"
 ----
 
@@ -42,7 +42,7 @@ echo "Setup OK: TENANT=$TENANT ADMIN=$TENANT_ADMIN USER=$TENANT_USER"
 [source,bash,role="execute",subs="attributes"]
 ----
 osac login --insecure \
-  --issuer="{keycloak_url}/realms/osac" \
+  --issuer="{osac_keycloak_url}/realms/osac" \
   --flow=password --user={osac_admin_user} --password={osac_admin_password} \
   {osac_internal_api_url}
 ----
@@ -51,7 +51,7 @@ osac login --insecure \
 +
 [source,bash,role="execute"]
 ----
-cat > /tmp/osac-demo/sai-tenant.yaml <<'EOF'
+cat > ${HOME}/osac-demo/sai-tenant.yaml <<'EOF'
 "@type": type.googleapis.com/osac.private.v1.Tenant
 metadata:
   name: sai-corp
@@ -62,7 +62,7 @@ EOF
 +
 [source,bash,role="execute"]
 ----
-osac create -f /tmp/osac-demo/sai-tenant.yaml | tee /tmp/osac-demo/sai-tenant-create.txt
+osac create -f ${HOME}/osac-demo/sai-tenant.yaml | tee ${HOME}/osac-demo/sai-tenant-create.txt
 ----
 +
 Expected output:
@@ -232,14 +232,14 @@ export OIDC_ISSUER="{keycloak_url}/realms/sai-corp-idp"
 export OIDC_TOKEN_URL="{keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token"
 export OIDC_AUTHORIZATION_URL="{keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth"
 
-cat > /tmp/osac-demo/oidc-env.sh <<EOF
+cat > ${HOME}/osac-demo/oidc-env.sh <<EOF
 export OIDC_CLIENT_ID='${OIDC_CLIENT_ID}'
 export OIDC_CLIENT_SECRET='${OIDC_CLIENT_SECRET}'
 export OIDC_ISSUER='${OIDC_ISSUER}'
 export OIDC_TOKEN_URL='${OIDC_TOKEN_URL}'
 export OIDC_AUTHORIZATION_URL='${OIDC_AUTHORIZATION_URL}'
 EOF
-echo "OIDC environment saved to /tmp/osac-demo/oidc-env.sh"
+echo "OIDC environment saved to ${HOME}/osac-demo/oidc-env.sh"
 ----
 
 . Register the identity provider in Red Hat Cloud Extensions. Log in as platform admin first:
@@ -256,7 +256,7 @@ osac login --insecure \
 +
 [source,bash,role="execute"]
 ----
-cat > /tmp/osac-demo/idp.yaml <<EOF
+cat > ${HOME}/osac-demo/idp.yaml <<EOF
 "@type": type.googleapis.com/osac.private.v1.IdentityProvider
 metadata:
   name: oidc
@@ -271,7 +271,7 @@ spec:
     clientSecret: "${OIDC_CLIENT_SECRET}"
     issuer: "${OIDC_ISSUER}"
 EOF
-osac create -f /tmp/osac-demo/idp.yaml
+osac create -f ${HOME}/osac-demo/idp.yaml
 ----
 +
 Expected output:
@@ -469,7 +469,7 @@ Confirm this is a UUID (36-character hex string with dashes). If it is empty, Al
 +
 [source,bash,role="execute"]
 ----
-cat > /tmp/osac-demo/rolebinding.yaml <<EOF
+cat > ${HOME}/osac-demo/rolebinding.yaml <<EOF
 "@type": type.googleapis.com/osac.public.v1.RoleBinding
 metadata:
   name: tenant-admin-binding
@@ -479,7 +479,7 @@ spec:
   users:
     - ${ALICE_ID}
 EOF
-osac create -f /tmp/osac-demo/rolebinding.yaml
+osac create -f ${HOME}/osac-demo/rolebinding.yaml
 ----
 
 . Verify the RoleBinding is ready:
@@ -535,7 +535,7 @@ You should see both `alice` and `bob` in the user list.
 +
 [source,bash,role="execute"]
 ----
-cat > /tmp/osac-demo/sai-project.yaml <<'EOF'
+cat > ${HOME}/osac-demo/sai-project.yaml <<'EOF'
 "@type": type.googleapis.com/osac.public.v1.Project
 metadata:
   name: default
@@ -544,7 +544,7 @@ spec:
   title: Default Project
   description: Primary project for SAI Corp
 EOF
-osac create -f /tmp/osac-demo/sai-project.yaml | tee /tmp/osac-demo/project-create.txt
+osac create -f ${HOME}/osac-demo/sai-project.yaml | tee ${HOME}/osac-demo/project-create.txt
 ----
 +
 Expected output:
@@ -557,8 +557,8 @@ Created project with name 'default' and identifier '<uuid>'.
 +
 [source,bash,role="execute"]
 ----
-export PROJ_ID=$(grep -oP '[0-9a-f-]{36}' /tmp/osac-demo/project-create.txt | head -1)
-echo "PROJ_ID=${PROJ_ID}" | tee /tmp/osac-demo/proj-id.sh
+export PROJ_ID=$(grep -oP '[0-9a-f-]{36}' ${HOME}/osac-demo/project-create.txt | head -1)
+echo "PROJ_ID=${PROJ_ID}" | tee ${HOME}/osac-demo/proj-id.sh
 ----
 
 . List projects to confirm creation:
@@ -582,7 +582,7 @@ echo "BOB_ID=${BOB_ID}"
 +
 [source,bash,role="execute"]
 ----
-cat > /tmp/osac-demo/bob-membership.yaml <<EOF
+cat > ${HOME}/osac-demo/bob-membership.yaml <<EOF
 "@type": type.googleapis.com/osac.public.v1.ProjectMembership
 metadata:
   tenant: sai-corp
@@ -592,7 +592,7 @@ spec:
   users:
     - ${BOB_ID}
 EOF
-osac create -f /tmp/osac-demo/bob-membership.yaml
+osac create -f ${HOME}/osac-demo/bob-membership.yaml
 ----
 +
 Expected output:
@@ -676,7 +676,7 @@ You should see the `default` project in the list.
 +
 [source,bash,role="execute"]
 ----
-source /tmp/osac-demo/proj-id.sh
+source ${HOME}/osac-demo/proj-id.sh
 osac delete project ${PROJ_ID} || true
 ----
 +
@@ -724,7 +724,7 @@ osac get projectmemberships 2>/dev/null \
 +
 [source,bash,role="execute"]
 ----
-source /tmp/osac-demo/proj-id.sh
+source ${HOME}/osac-demo/proj-id.sh
 osac delete project ${PROJ_ID}
 ----
 +
@@ -766,16 +766,16 @@ This approach is useful for demos and testing scenarios where you need multiple 
 +
 [source,bash,role="execute"]
 ----
-mkdir -p /tmp/osac-demo/helpers
-cp -a ~/GIT/ice-osac/demo-files/demo1-tenant-onboarding/milestone-0.2/helpers/. /tmp/osac-demo/helpers/
-cp -f /tmp/osac-demo/helpers/sync-oidc-creds.sh /tmp/osac-demo/sync-oidc-creds.sh
+mkdir -p ${HOME}/osac-demo/helpers
+cp -a ~/GIT/ice-osac/demo-files/demo1-tenant-onboarding/milestone-0.2/helpers/. ${HOME}/osac-demo/helpers/
+cp -f ${HOME}/osac-demo/helpers/sync-oidc-creds.sh ${HOME}/osac-demo/sync-oidc-creds.sh
 ----
 
 . Run the setup script to build and deploy the mock OIDC server and register the identity provider:
 +
 [source,bash,role="execute"]
 ----
-bash /tmp/osac-demo/helpers/setup-testoidc-and-idp.sh
+bash ${HOME}/osac-demo/helpers/setup-testoidc-and-idp.sh
 ----
 +
 This script deploys a Go-based OIDC server with a 10-slot FIFO queue (alice and bob, each repeated 5 times). Each device flow login consumes the next slot in order.
@@ -793,7 +793,7 @@ Expected:
   phase: IDENTITY_PROVIDER_PHASE_READY
 ----
 
-IMPORTANT: Do not restart the mock OIDC server between logins. Restarting rotates the client secret and invalidates the identity provider configuration. If the queue is exhausted, use `bash /tmp/osac-demo/helpers/requeue-testoidc-user.sh` to refill it, then re-run `bash /tmp/osac-demo/sync-oidc-creds.sh`.
+IMPORTANT: Do not restart the mock OIDC server between logins. Restarting rotates the client secret and invalidates the identity provider configuration. If the queue is exhausted, use `bash ${HOME}/osac-demo/helpers/requeue-testoidc-user.sh` to refill it, then re-run `bash ${HOME}/osac-demo/sync-oidc-creds.sh`.
 
 == Troubleshooting
 
@@ -804,7 +804,7 @@ IMPORTANT: Do not restart the mock OIDC server between logins. Restarting rotate
 
 [source,bash,role="execute"]
 ----
-bash /tmp/osac-demo/sync-oidc-creds.sh
+bash ${HOME}/osac-demo/sync-oidc-creds.sh
 ----
 
 For the Keycloak realm approach, verify the OIDC endpoints match:

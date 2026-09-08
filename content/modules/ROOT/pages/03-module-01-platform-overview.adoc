@@ -132,14 +132,7 @@ deployment "fulfillment-service" successfully rolled out
 
 Keycloak handles identity management for the entire Red Hat Cloud Extensions platform. Every tenant gets its own identity context tied to the `osac` realm. Understanding this configuration is essential before you create tenants in Module 2.
 
-. Retrieve the Keycloak URL:
-+
-[source,bash,role="execute",subs=attributes]
-----
-echo "Keycloak URL: {osac_keycloak_url}"
-----
-
-. Confirm the Keycloak pod is running and ready:
+. Confirm the Keycloak pods are running and ready:
 +
 [source,bash,role="execute",subs=attributes]
 ----
