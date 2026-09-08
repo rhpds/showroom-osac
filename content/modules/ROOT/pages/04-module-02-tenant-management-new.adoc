@@ -37,45 +37,49 @@ mkdir -p ${HOME}/osac-demo
 echo "Setup OK: TENANT=$TENANT ADMIN=$TENANT_ADMIN USER=$TENANT_USER"
 ----
 
-. Log in to the Red Hat Cloud Extensions platform as the platform administrator:
+. Log in to the Red Hat Cloud Extensions platform *internal* fulfillment API as the platform administrator:
 +
 [source,bash,role="execute",subs="attributes"]
 ----
 osac login --insecure \
   --issuer="{osac_keycloak_url}/realms/osac" \
-  --flow=password --user={osac_admin_user} --password={osac_admin_password} \
-  {osac_internal_api_url}
+  --flow=password \
+  --user={osac_admin_user} \
+  --password={osac_admin_password} \
+  {osac_fulfillment_internal_api_url}
 ----
 
-. Create the tenant manifest for SAI Corp:
-+
-[source,bash,role="execute"]
-----
-cat > ${HOME}/osac-demo/sai-tenant.yaml <<'EOF'
-"@type": type.googleapis.com/osac.private.v1.Tenant
-metadata:
-  name: sai-corp
-EOF
-----
+. In the Red Hat Cloud Extensions console navigate to *Administration* -> *Tenants*.
+. Create a new tenant named `sai-corp`.
+// . Create the tenant manifest for SAI Corp:
+// +
+// [source,bash,role="execute"]
+// ----
+// cat > ${HOME}/osac-demo/sai-tenant.yaml <<'EOF'
+// "@type": type.googleapis.com/osac.private.v1.Tenant
+// metadata:
+//   name: sai-corp
+// EOF
+// ----
 
-. Create the tenant. The output includes a one-time break-glass password:
-+
-[source,bash,role="execute"]
-----
-osac create -f ${HOME}/osac-demo/sai-tenant.yaml | tee ${HOME}/osac-demo/sai-tenant-create.txt
-----
-+
-Expected output:
-+
-----
-Created tenant with name 'sai-corp' and identifier 'sai-corp'.
+// . Create the tenant. The output includes a one-time break-glass password:
+// +
+// [source,bash,role="execute"]
+// ----
+// osac create -f ${HOME}/osac-demo/sai-tenant.yaml | tee ${HOME}/osac-demo/sai-tenant-create.txt
+// ----
+// +
+// Expected output:
+// +
+// ----
+// Created tenant with name 'sai-corp' and identifier 'sai-corp'.
 
-Break-glass account credentials (shown only once, save them now):
-  Username: sai-corp-osac-break-glass
-  Password: <generated>
+// Break-glass account credentials (shown only once, save them now):
+//   Username: sai-corp-osac-break-glass
+//   Password: <generated>
 
-This is a temporary password that must be changed on first login.
-----
+// This is a temporary password that must be changed on first login.
+// ----
 +
 IMPORTANT: Copy and save the break-glass password now. It is displayed only during tenant creation and cannot be retrieved later.
 
@@ -92,26 +96,26 @@ You should see `sai-corp` alongside the built-in `shared` and `system` tenants, 
 +
 [source,bash,role="execute"]
 ----
-osac get tenant sai-corp -o yaml | grep -E 'state:|break_glass_user_id|idp_tenant_name'
+osac get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
 ----
 +
-Expected output:
-+
+.Expected output:
 ----
-  break_glass_user_id: <uuid>
-  idp_tenant_name: sai-corp
-  state: TENANT_STATE_SYNCED
+{
+  "id": "01a0812d-96b2-7d94-a25a-f963c40d5322",
+  "name": "break-glass-credentials"
+}
 ----
 
 . Verify that Red Hat Cloud Extensions automatically created a Keycloak organization for the tenant:
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-KC_TOKEN=$(curl -sk -X POST "{keycloak_url}/realms/master/protocol/openid-connect/token" \
+KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
   | jq -r '.access_token')
 curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
+  "{osac_keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
   | jq '[.[] | {id, name, enabled}]'
 ----
 +
@@ -126,19 +130,6 @@ oc get ns sai-corp
 +
 The namespace should show `Active` status.
 
-=== Verify
-
-[source,bash,role="execute"]
-----
-echo "=== Tenant Status ==="
-osac get tenants | grep sai-corp
-echo "=== Namespace ==="
-oc get ns sai-corp --no-headers 2>/dev/null && echo "Namespace OK" || echo "Namespace MISSING"
-----
-
-[.solve-button-placeholder]#solve-button-placeholder#
-[.validate-button-placeholder]#validate-button-placeholder#
-
 == Exercise 2: Set up a corporate identity provider
 
 SAI Corp employees need to authenticate through their corporate identity provider rather than receiving individual platform passwords. In this exercise, you create a Keycloak realm that simulates SAI Corp's corporate IdP, then register it with Red Hat Cloud Extensions so the platform can federate authentication.
@@ -149,7 +140,7 @@ SAI Corp employees need to authenticate through their corporate identity provide
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-KC_TOKEN=$(curl -sk -X POST "{keycloak_url}/realms/master/protocol/openid-connect/token" \
+KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
   | jq -r '.access_token')
 echo "Token obtained: ${KC_TOKEN:0:20}..."
@@ -159,7 +150,7 @@ echo "Token obtained: ${KC_TOKEN:0:20}..."
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-curl -sk -X POST "{keycloak_url}/admin/realms" \
+curl -sk -X POST "{osac_keycloak_url}/admin/realms" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -175,7 +166,7 @@ Expected: `HTTP 201` (created) or `HTTP 409` (already exists).
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-curl -sk -X POST "{keycloak_url}/admin/realms/sai-corp-idp/clients" \
+curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/clients" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -194,7 +185,7 @@ curl -sk -X POST "{keycloak_url}/admin/realms/sai-corp-idp/clients" \
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-curl -sk -X POST "{keycloak_url}/admin/realms/sai-corp-idp/users" \
+curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -210,7 +201,7 @@ curl -sk -X POST "{keycloak_url}/admin/realms/sai-corp-idp/users" \
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-curl -sk -X POST "{keycloak_url}/admin/realms/sai-corp-idp/users" \
+curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -228,9 +219,9 @@ curl -sk -X POST "{keycloak_url}/admin/realms/sai-corp-idp/users" \
 ----
 export OIDC_CLIENT_ID=osac-federation
 export OIDC_CLIENT_SECRET=osac-demo-secret
-export OIDC_ISSUER="{keycloak_url}/realms/sai-corp-idp"
-export OIDC_TOKEN_URL="{keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token"
-export OIDC_AUTHORIZATION_URL="{keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth"
+export OIDC_ISSUER="{osac_keycloak_url}/realms/sai-corp-idp"
+export OIDC_TOKEN_URL="{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token"
+export OIDC_AUTHORIZATION_URL="{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth"
 
 cat > ${HOME}/osac-demo/oidc-env.sh <<EOF
 export OIDC_CLIENT_ID='${OIDC_CLIENT_ID}'
@@ -247,7 +238,7 @@ echo "OIDC environment saved to ${HOME}/osac-demo/oidc-env.sh"
 [source,bash,role="execute",subs="attributes"]
 ----
 osac login --insecure \
-  --issuer="{keycloak_url}/realms/osac" \
+  --issuer="{osac_keycloak_url}/realms/osac" \
   --flow=password --user={osac_admin_user} --password={osac_admin_password} \
   {osac_internal_api_url}
 ----
@@ -397,14 +388,14 @@ Tenant: sai-corp
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-KC_TOKEN=$(curl -sk -X POST "{keycloak_url}/realms/master/protocol/openid-connect/token" \
+KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
   | jq -r '.access_token')
 ORG_ID=$(curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
+  "{osac_keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
   | jq -r '.[0].id')
 curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{keycloak_url}/admin/realms/${REALM}/organizations/${ORG_ID}/members" \
+  "{osac_keycloak_url}/admin/realms/${REALM}/organizations/${ORG_ID}/members" \
   | jq '[.[].username]'
 ----
 +
@@ -414,14 +405,14 @@ You should see `alice`, `bob`, and the break-glass account in the list.
 
 [source,bash,role="execute",subs="attributes"]
 ----
-KC_TOKEN=$(curl -sk -X POST "{keycloak_url}/realms/master/protocol/openid-connect/token" \
+KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
   | jq -r '.access_token')
 ORG_ID=$(curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
+  "{osac_keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
   | jq -r '.[0].id')
 MEMBERS=$(curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{keycloak_url}/admin/realms/${REALM}/organizations/${ORG_ID}/members" \
+  "{osac_keycloak_url}/admin/realms/${REALM}/organizations/${ORG_ID}/members" \
   | jq '[.[].username]')
 echo "$MEMBERS" | jq -e 'contains(["alice","bob"])' > /dev/null \
   && echo "Both users onboarded" || echo "Missing users in org"
@@ -443,7 +434,7 @@ Alice needs tenant-admin authority to manage SAI Corp's projects and team access
 [source,bash,role="execute",subs="attributes"]
 ----
 osac login --insecure \
-  --issuer="{keycloak_url}/realms/osac" \
+  --issuer="{osac_keycloak_url}/realms/osac" \
   --flow=password --user={osac_admin_user} --password={osac_admin_password} \
   {osac_internal_api_url}
 ----
