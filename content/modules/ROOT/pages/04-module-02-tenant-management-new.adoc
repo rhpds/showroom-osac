@@ -193,7 +193,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
     "email": "alice@sai-corp.example.com",
     "enabled": true,
     "emailVerified": true,
-    "credentials": [{"type": "password", "value": "redhat123", "temporary": false}]
+    "credentials": [{"type": "password", "value": "{osac_admin_password}", "temporary": false}]
   }' -w "Create alice: HTTP %\{http_code}\n" -o /dev/null
 ----
 
@@ -209,7 +209,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
     "email": "bob@sai-corp.example.com",
     "enabled": true,
     "emailVerified": true,
-    "credentials": [{"type": "password", "value": "redhat123", "temporary": false}]
+    "credentials": [{"type": "password", "value": "{osac_admin_password}", "temporary": false}]
   }' -w "Create bob: HTTP %\{http_code}\n" -o /dev/null
 ----
 
@@ -322,7 +322,7 @@ The CLI displays a URL and a one-time code. Complete the login in your browser:
 .. Open a new *incognito/private* browser window
 .. Paste the URL and press Enter
 .. On the login page, click *sai-corp-oidc* (the federated identity provider)
-.. Enter username `alice` and password `redhat123`, then click *Sign In*
+.. Enter username `alice` and password `{osac_admin_password}`, then click *Sign In*
 .. Approve the device authorization if prompted
 .. Return to the terminal — you should see `Authentication succeeded`
 +
@@ -366,7 +366,7 @@ Complete the login in a fresh incognito window:
 +
 .. Copy the URL from the terminal
 .. Open a new *incognito/private* browser window
-.. Click *sai-corp-oidc*, enter username `bob` and password `redhat123`
+.. Click *sai-corp-oidc*, enter username `bob` and password `{osac_admin_password}`
 .. Return to the terminal
 
 . Confirm Bob's identity and trigger JIT provisioning:
@@ -493,7 +493,7 @@ osac logout 2>/dev/null || true
 osac login --insecure --address "{osac_public_api_url}" --flow device
 ----
 +
-Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `alice` / `redhat123`.
+Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `alice` / `{osac_admin_password}`.
 
 . Confirm Alice now has the `tenant-admin` role:
 +
@@ -637,7 +637,7 @@ osac logout 2>/dev/null || true
 osac login --insecure --address "{osac_public_api_url}" --flow device
 ----
 +
-Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `bob` / `redhat123`.
+Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `bob` / `{osac_admin_password}`.
 
 . Confirm Bob's identity — note that `tenant-admin` does not appear in the roles:
 +
@@ -690,7 +690,7 @@ osac logout 2>/dev/null || true
 osac login --insecure --address "{osac_public_api_url}" --flow device
 ----
 +
-Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `alice` / `redhat123`.
+Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `alice` / `{osac_admin_password}`.
 
 . Confirm Alice's identity:
 +
