@@ -223,14 +223,15 @@ export OIDC_ISSUER="{osac_keycloak_url}/realms/sai-corp-idp"
 export OIDC_TOKEN_URL="{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token"
 export OIDC_AUTHORIZATION_URL="{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth"
 
-cat > ${HOME}/osac-demo/oidc-env.sh <<EOF
+cat << EOF >${HOME}/osac-demo/oidc-env.sh
 export OIDC_CLIENT_ID='${OIDC_CLIENT_ID}'
 export OIDC_CLIENT_SECRET='${OIDC_CLIENT_SECRET}'
 export OIDC_ISSUER='${OIDC_ISSUER}'
 export OIDC_TOKEN_URL='${OIDC_TOKEN_URL}'
 export OIDC_AUTHORIZATION_URL='${OIDC_AUTHORIZATION_URL}'
 EOF
-echo "OIDC environment saved to ${HOME}/osac-demo/oidc-env.sh"
+
+echo "OIDC environment saved to $\{HOME}/osac-demo/oidc-env.sh"
 ----
 
 . Register the identity provider in Red Hat Cloud Extensions. Log in as platform admin first:
@@ -313,7 +314,7 @@ NOTE: The `osac whoami` command reads the local JWT token only — it does not c
 [source,bash,role="execute",subs="attributes"]
 ----
 osac logout 2>/dev/null || true
-osac login --insecure --address "{osac_public_api_url}" --flow device
+osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
 ----
 +
 The CLI displays a URL and a one-time code. Complete the login in your browser:
@@ -359,7 +360,7 @@ This creates Alice's OSAC user record on the server. Without this call, Alice wo
 [source,bash,role="execute",subs="attributes"]
 ----
 osac logout 2>/dev/null || true
-osac login --insecure --address "{osac_public_api_url}" --flow device
+osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
 ----
 +
 Complete the login in a fresh incognito window:
@@ -490,7 +491,7 @@ Expected: state `READY`, role `tenant-admin`.
 [source,bash,role="execute",subs="attributes"]
 ----
 osac logout 2>/dev/null || true
-osac login --insecure --address "{osac_public_api_url}" --flow device
+osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
 ----
 +
 Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `alice` / `{osac_admin_password}`.
@@ -634,7 +635,7 @@ The real proof of multi-tenancy is enforcement. In this exercise, you log in as 
 [source,bash,role="execute",subs="attributes"]
 ----
 osac logout 2>/dev/null || true
-osac login --insecure --address "{osac_public_api_url}" --flow device
+osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
 ----
 +
 Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `bob` / `{osac_admin_password}`.
@@ -687,7 +688,7 @@ This `PermissionDenied` error confirms that RBAC is working: a viewer can read b
 [source,bash,role="execute",subs="attributes"]
 ----
 osac logout 2>/dev/null || true
-osac login --insecure --address "{osac_public_api_url}" --flow device
+osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
 ----
 +
 Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `alice` / `{osac_admin_password}`.
