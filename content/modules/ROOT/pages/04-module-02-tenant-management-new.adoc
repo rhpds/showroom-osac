@@ -204,7 +204,7 @@ curl -sk -X PUT "{osac_keycloak_url}/admin/realms/osac/identity-provider/instanc
   }' -w "Patch broker: HTTP %{http_code}\n" -o /dev/null
 ----
 
-. Create user `alice` in the corporate IdP realm:
+. Create user `alice` in the Sai corporate IdP realm:
 +
 [source,bash,role="execute",subs="attributes"]
 ----
@@ -222,7 +222,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   }' -w "Create alice: HTTP %\{http_code}\n" -o /dev/null
 ----
 
-. Create user `bob` in the corporate IdP realm:
+. Create user `bob` in the Sai corporate IdP realm:
 +
 [source,bash,role="execute",subs="attributes"]
 ----
