@@ -243,9 +243,9 @@ Use the *break glass credentials* that you saved when you created the tenant. Yo
 * *Authorization URL*: `{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth`
 * *Token URL*: `{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token`
 
-. The identity provider should reach `READY` status within a few seconds. If it does not, check the logs of the `fulfillment` pod in the `osac` namespace for errors.
+. The identity provider should reach `Ready` status within a few seconds. If it does not, check the logs of the `fulfillment` pod in the `osac` namespace for errors.
 
-. Verify the identity provider reaches `READY` status:
+. Verify the identity provider reaches `Ready` status:
 +
 [source,bash,role="execute"]
 ----
@@ -291,7 +291,8 @@ The CLI displays a URL and a one-time code. Complete the login in your browser:
 .. Open a new *incognito/private* browser window
 .. Paste the URL and press Enter
 .. Enter the code that the `osac login` command printed
-.. On the login page, click *sai-corp-oidc* (the federated identity provider)
+.. On the login page, enter `alice`, then click *Sign In*
+.. On the next login page, click *SAI Corp Corporate SSO* (the federated identity provider) at the bottom.
 .. Enter username `alice` and password `{osac_user_password}`, then click *Sign In*
 .. Approve the device authorization if prompted
 .. Return to the terminal — you should see `Authentication succeeded`
@@ -305,11 +306,11 @@ IMPORTANT: Always use a fresh incognito window for each device flow login. A cac
 osac whoami
 ----
 +
-Expected output:
-+
+.Expected output
 ----
 Logged in as: alice
 Tenant: sai-corp
+Roles: offline_access, uma_authorization, default-roles-my realm
 ----
 
 . Trigger JIT user provisioning by making an API call:
@@ -319,11 +320,31 @@ Tenant: sai-corp
 osac get projects
 ----
 +
+.Expected output
+----
+TENANT    DELETING  PROJECT  NAME  TITLE  STATE
+shared    -         -        -     -      ACTIVE
+sai-corp  -         -        -     -      ACTIVE
+----
++
 This creates Alice's OSAC user record on the server. Without this call, Alice would exist only in Keycloak but not in the Red Hat Cloud Extensions user directory.
+
+. Check if Alice can list users (this requires tenant-admin authority):
++
+[source,bash,role="execute"]
+----
+osac get users
+----
++
+.Expected output
+[source,bash]
+----
+TBD: something denied
+----
 
 ==== Onboard Bob
 
-[start=4]
+[start=7]
 . Log out Alice, then start the device flow login for Bob:
 +
 [source,bash,role="execute",subs="attributes"]
@@ -339,19 +360,32 @@ Complete the login in a fresh incognito window:
 .. Click *sai-corp-oidc*, enter username `bob` and password `{osac_user_password}`
 .. Return to the terminal
 
-. Confirm Bob's identity and trigger JIT provisioning:
+. Confirm Bob's identity:
 +
 [source,bash,role="execute"]
 ----
 osac whoami
-osac get projects
 ----
 +
-Expected output:
-+
+.Expected output
 ----
 Logged in as: bob
 Tenant: sai-corp
+Roles: offline_access, uma_authorization, default-roles-my realm
+----
+
+. Trigger JIT provisioning for bob:
++
+[source,bash,role="execute"]
+----
+osac get projects
+----
++
+.Expected output
+----
+TENANT    DELETING  PROJECT  NAME  TITLE  STATE
+shared    -         -        -     -      ACTIVE
+sai-corp  -         -        -     -      ACTIVE
 ----
 
 . Verify both users are now members of the SAI Corp Keycloak organization:
@@ -361,35 +395,27 @@ Tenant: sai-corp
 KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
   | jq -r '.access_token')
+
 ORG_ID=$(curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{osac_keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
+  "{osac_keycloak_url}/admin/realms/osac/organizations?search=sai-corp" \
   | jq -r '.[0].id')
+
 curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{osac_keycloak_url}/admin/realms/${REALM}/organizations/${ORG_ID}/members" \
+  "{osac_keycloak_url}/admin/realms/osac/organizations/${ORG_ID}/members" \
   | jq '[.[].username]'
 ----
 +
 You should see `alice`, `bob`, and the break-glass account in the list.
-
-=== Verify
-
-[source,bash,role="execute",subs="attributes"]
++
+.Expected output
+[source,bash]
 ----
-KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
-  -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
-  | jq -r '.access_token')
-ORG_ID=$(curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{osac_keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
-  | jq -r '.[0].id')
-MEMBERS=$(curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{osac_keycloak_url}/admin/realms/${REALM}/organizations/${ORG_ID}/members" \
-  | jq '[.[].username]')
-echo "$MEMBERS" | jq -e 'contains(["alice","bob"])' > /dev/null \
-  && echo "Both users onboarded" || echo "Missing users in org"
+[
+  "alice",
+  "bob",
+  "sai-corp-osac-break-glass"
+]
 ----
-
-[.solve-button-placeholder]#solve-button-placeholder#
-[.validate-button-placeholder]#validate-button-placeholder#
 
 == Exercise 4: Assign roles and manage projects
 
@@ -405,8 +431,10 @@ Alice needs tenant-admin authority to manage SAI Corp's projects and team access
 ----
 osac login --insecure \
   --issuer="{osac_keycloak_url}/realms/osac" \
-  --flow=password --user={osac_admin_user} --password={osac_admin_password} \
-  {osac_internal_api_url}
+  --flow=password \
+  --user={osac_admin_user} \
+  --password={osac_admin_password} \
+  {osac_fulfillment_internal_api_url}
 ----
 
 . List the OSAC users and find Alice's UUID:
@@ -414,6 +442,15 @@ osac login --insecure \
 [source,bash,role="execute"]
 ----
 osac get users
+----
++
+.Expected output
+[source,bash]
+----
+ID                                    DELETING  NAME                       USERNAME                   EMAIL                            ENABLED  TENANT
+01a08652-5c6d-7b47-bf5f-09e9bd83d5e1  -         sai-corp-osac-break-glass  sai-corp-osac-break-glass  break-glass@sai-corp.osac.local  true     sai-corp
+01a086a9-f7fe-7079-9a83-028d202cedb2  -         alice                      alice                      -                                true     sai-corp
+01a086ab-68a0-7bc3-b9fe-1991cef6ae11  -         bob                        bob                        -                                true     sai-corp
 ----
 
 . Extract Alice's user ID:
@@ -426,6 +463,7 @@ echo "ALICE_ID=${ALICE_ID}"
 +
 Confirm this is a UUID (36-character hex string with dashes). If it is empty, Alice has not logged in yet — return to Exercise 3.
 
+////
 . Create a RoleBinding to grant Alice the `tenant-admin` role:
 +
 [source,bash,role="execute"]
@@ -442,15 +480,34 @@ spec:
 EOF
 osac create -f ${HOME}/osac-demo/rolebinding.yaml
 ----
+////
+. Select the *Red Hat Cloud Extensions* tab on the right. You should still be logged in as the glass break user.
+. Navigate to *Role Bindings* and click *Create Role Binding*.
+. Create the role binding with the following properties:
+* *Name*: `tenant-admin-binding`
+* *Users*: Select `alice`
+* *Role*: `Tenant Administrator`
+. Click *Create*. The RoleBinding should reach `Ready` status within a few seconds.
 
-. Verify the RoleBinding is ready:
+. Verify the RoleBinding is ready in the *Terminal*:
 +
 [source,bash,role="execute"]
 ----
 osac get rolebinding -o yaml | grep -E 'name:|role:|state:|message:'
 ----
 +
-Expected: state `READY`, role `tenant-admin`.
+.Expected output
+[source,bash]
+----
+  name: tenant-admin-binding
+  role:
+    name: tenant-admin
+      name: alice
+  message: Role tenant-admin assigned to 1 user(s)
+  state: ROLE_BINDING_STATE_READY
+----
++
+Expected: state `ROLE_BINDING_STATE_READY`, role `tenant-admin`.
 
 ==== Verify Alice's tenant-admin access
 
@@ -460,10 +517,10 @@ Expected: state `READY`, role `tenant-admin`.
 [source,bash,role="execute",subs="attributes"]
 ----
 osac logout 2>/dev/null || true
-osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
+osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
 ----
 +
-Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `alice` / `{osac_admin_password}`.
+Complete the login in a fresh incognito window. Log in with `alice` / `{osac_user_password}`.
 
 . Confirm Alice now has the `tenant-admin` role:
 +
@@ -477,7 +534,7 @@ Expected output includes `tenant-admin` in the Roles list:
 ----
 Logged in as: alice
 Tenant: sai-corp
-Roles: tenant-admin, ...
+Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
 ----
 
 . Verify Alice can now list users (this requires tenant-admin authority):
@@ -505,13 +562,12 @@ spec:
   title: Default Project
   description: Primary project for SAI Corp
 EOF
-osac create -f ${HOME}/osac-demo/sai-project.yaml | tee ${HOME}/osac-demo/project-create.txt
+osac create -f ${HOME}/osac-demo/sai-project.yaml
 ----
 +
-Expected output:
-+
+.Expected output
 ----
-Created project with name 'default' and identifier '<uuid>'.
+Created project with name 'default' and identifier '01a086c1-51b3-7953-a149-334a7d0acf19'.
 ----
 
 . Save the project ID for later use:
@@ -529,8 +585,18 @@ echo "PROJ_ID=${PROJ_ID}" | tee ${HOME}/osac-demo/proj-id.sh
 osac get projects
 ----
 +
-You should see the `default` project in `ACTIVE` state. You may also see a row with `STATE=UNSPECIFIED` and no name — this is the tenant root project, created automatically with the tenant. This is normal.
+.Expected output
+[source,bash]
+----
+TENANT    DELETING  PROJECT  NAME     TITLE            STATE
+shared    -         -        -        -                ACTIVE
+sai-corp  -         -        -        -                ACTIVE
+sai-corp  -         -        default  Default Project  ACTIVE
+----
++
+You should see the `default` project in `ACTIVE` state. You may also see a row with  no name — this is the tenant root project, created automatically with the tenant. This is normal. And the `shared` project is a system project that is always present.
 
+////
 . Find Bob's user ID:
 +
 [source,bash,role="execute"]
@@ -561,6 +627,16 @@ Expected output:
 ----
 Created projectmembership with identifier '<uuid>'.
 ----
+////
+
+. Switch to the *Red Hat Cloud Extensions* tab on the right. You should still be logged in as the glass break user.
+. Log out and log back in as `Alice` with password `{osac_user_password}`.
+. Navigate to *Projects* and select *Default Project*.
+. Click the *+ Create project membership* link and enter the following values:
+* *Name*: `bob-default-project`
+* *Users*: Select `bob`
+* *Role*: `Viewer`
+. Click *Create*. The ProjectMembership should reach `Ready` status within a few seconds.
 
 . Verify the membership is ready:
 +
@@ -575,21 +651,6 @@ Expected output:
 TENANT    ...  STATE  PROJECT  USERS     ROLE
 sai-corp  ...  READY  default  <bob-id>  VIEWER
 ----
-
-=== Verify
-
-[source,bash,role="execute"]
-----
-echo "=== RoleBinding ==="
-osac get rolebinding -o yaml | grep -E 'state:' | head -1
-echo "=== Project ==="
-osac get projects | grep default
-echo "=== Membership ==="
-osac get projectmemberships | grep VIEWER
-----
-
-[.solve-button-placeholder]#solve-button-placeholder#
-[.validate-button-placeholder]#validate-button-placeholder#
 
 == Exercise 5: Verify RBAC enforcement and clean up
 
