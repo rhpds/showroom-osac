@@ -49,50 +49,16 @@ osac login --insecure \
   {osac_fulfillment_internal_api_url}
 ----
 
-. In the Red Hat Cloud Extensions console navigate to *Administration* -> *Tenants*.
-. Create a new tenant named `sai-corp`.
-// . Create the tenant manifest for SAI Corp:
-// +
-// [source,bash,role="execute"]
-// ----
-// cat > ${HOME}/osac-demo/sai-tenant.yaml <<'EOF'
-// "@type": type.googleapis.com/osac.private.v1.Tenant
-// metadata:
-//   name: sai-corp
-// EOF
-// ----
-
-// . Create the tenant. The output includes a one-time break-glass password:
-// +
-// [source,bash,role="execute"]
-// ----
-// osac create -f ${HOME}/osac-demo/sai-tenant.yaml | tee ${HOME}/osac-demo/sai-tenant-create.txt
-// ----
-// +
-// Expected output:
-// +
-// ----
-// Created tenant with name 'sai-corp' and identifier 'sai-corp'.
-
-// Break-glass account credentials (shown only once, save them now):
-//   Username: sai-corp-osac-break-glass
-//   Password: <generated>
-
-// This is a temporary password that must be changed on first login.
-// ----
+. Switch to the *Red Hat Cloud Extensions* tab on the right.
+. Navigate to *Administration* -> *Tenants*.
+. Create a new tenant named `sai-corp`. There are no other parameters except for the name.
 +
 IMPORTANT: Copy and save the break-glass password now. It is displayed only during tenant creation and cannot be retrieved later.
 
-. Confirm the tenant is synced:
-+
-[source,bash,role="execute"]
-----
-osac get tenants
-----
-+
-You should see `sai-corp` alongside the built-in `shared` and `system` tenants, all in `SYNCED` state.
+. The Tenant should show `Synced` within a few seconds of creation.
 
-. Verify the break-glass user was provisioned. The password is intentionally absent from this output:
+. Switch back to the *Terminal* tab.
+. Verify the break-glass user was provisioned:
 +
 [source,bash,role="execute"]
 ----
@@ -218,7 +184,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
     "email": "alice@sai-corp.example.com",
     "enabled": true,
     "emailVerified": true,
-    "credentials": [{"type": "password", "value": "{osac_admin_password}", "temporary": false}]
+    "credentials": [{"type": "password", "value": "{osac_user_password}", "temporary": false}]
   }' -w "Create alice: HTTP %\{http_code}\n" -o /dev/null
 ----
 
@@ -236,7 +202,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
     "email": "bob@sai-corp.example.com",
     "enabled": true,
     "emailVerified": true,
-    "credentials": [{"type": "password", "value": "{osac_admin_password}", "temporary": false}]
+    "credentials": [{"type": "password", "value": "{osac_user_password}", "temporary": false}]
   }' -w "Create bob: HTTP %\{http_code}\n" -o /dev/null
 ----
 
@@ -261,9 +227,11 @@ EOF
 echo "OIDC environment saved to $\{HOME}/osac-demo/oidc-env.sh"
 ----
 
-. Now log into the Red Hat Cloud Extensions platform as the the SAI Corp break glass user. If you are logged in as platform admin (`{osac_admin_user}`), log out first.
+. Switch back to the *Red Hat Cloud Extensions* tab on the right.
+. Log out of the platform if you are logged in as platform admin (`{osac_admin_user}`).
+. Now log into the Red Hat Cloud Extensions platform as the the *SAI Corp break glass user*.
 +
-Use the break glass credentials that you saved when you created the tenant. Your user should be `sai-corp-osac-break-glass`. You will be prompted to change your password. While you can change it to anything you want the rest of the lab will be using `{osac_user_password}` so it is recommended to change it to that value for consistency.
+Use the *break glass credentials* that you saved when you created the tenant. Your user should be `sai-corp-osac-break-glass`. You will be prompted to change your password. While you can change it to anything you want the rest of the lab will be using `{osac_user_password}` so it is recommended to change it to that value for consistency.
 
 . Once logged in you should already be on the *Identity Providers* page.
 . Create a new identity provider with the following properties:
@@ -302,12 +270,19 @@ NOTE: The `osac whoami` command reads the local JWT token only — it does not c
 
 ==== Onboard Alice
 
-. Log out any existing session, then start the device flow login for Alice:
+. Switch to the *Terminal* tab and log out any existing session.
+. Log out any existing session:
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-osac logout 2>/dev/null || true
-osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
+osac logout
+----
+
+. Start the device flow login for Alice:
++
+[source,bash,role="execute",subs="attributes"]
+----
+osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
 ----
 +
 The CLI displays a URL and a one-time code. Complete the login in your browser:
@@ -315,8 +290,9 @@ The CLI displays a URL and a one-time code. Complete the login in your browser:
 .. Copy the URL displayed in the terminal
 .. Open a new *incognito/private* browser window
 .. Paste the URL and press Enter
+.. Enter the code that the `osac login` command printed
 .. On the login page, click *sai-corp-oidc* (the federated identity provider)
-.. Enter username `alice` and password `{osac_admin_password}`, then click *Sign In*
+.. Enter username `alice` and password `{osac_user_password}`, then click *Sign In*
 .. Approve the device authorization if prompted
 .. Return to the terminal — you should see `Authentication succeeded`
 +
@@ -352,15 +328,15 @@ This creates Alice's OSAC user record on the server. Without this call, Alice wo
 +
 [source,bash,role="execute",subs="attributes"]
 ----
-osac logout 2>/dev/null || true
-osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
+osac logout
+osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
 ----
 +
 Complete the login in a fresh incognito window:
 +
 .. Copy the URL from the terminal
 .. Open a new *incognito/private* browser window
-.. Click *sai-corp-oidc*, enter username `bob` and password `{osac_admin_password}`
+.. Click *sai-corp-oidc*, enter username `bob` and password `{osac_user_password}`
 .. Return to the terminal
 
 . Confirm Bob's identity and trigger JIT provisioning:
