@@ -181,6 +181,29 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/clients" \
   }' -w "Create client: HTTP %\{http_code}\n" -o /dev/null
 ----
 
+. Add the client secret to the osac broker:
++
+[source,bash,role="execute",subs="attributes"]
+----
+curl -sk -X PUT "{osac_keycloak_url}/admin/realms/osac/identity-provider/instances/sai-corp-sai-corp" \
+  -H "Authorization: Bearer ${KC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alias": "sai-corp-sai-corp",
+    "displayName": "SAI Corp Corporate SSO",
+    "providerId": "oidc",
+    "enabled": true,
+    "config": {
+      "clientId": "osac-federation",
+      "clientSecret": "osac-demo-secret",
+      "clientAuthMethod": "client_secret_post",
+      "issuer": "{osac_keycloak_url}/realms/sai-corp-idp",
+      "authorizationUrl": "{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth",
+      "tokenUrl": "{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token"
+    }
+  }' -w "Patch broker: HTTP %{http_code}\n" -o /dev/null
+----
+
 . Create user `alice` in the corporate IdP realm:
 +
 [source,bash,role="execute",subs="attributes"]
@@ -190,6 +213,8 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "alice",
+    "firstName": "Alice",
+    "lastName": "Sai",
     "email": "alice@sai-corp.example.com",
     "enabled": true,
     "emailVerified": true,
@@ -206,6 +231,8 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "bob",
+    "firstName": "Bob",
+    "lastName": "Sai",
     "email": "bob@sai-corp.example.com",
     "enabled": true,
     "emailVerified": true,
@@ -249,44 +276,6 @@ Use the break glass credentials that you saved when you created the tenant. Your
 * *Token URL*: `{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token`
 
 . The identity provider should reach `READY` status within a few seconds. If it does not, check the logs of the `fulfillment` pod in the `osac` namespace for errors.
-
-// . Register the identity provider in Red Hat Cloud Extensions. Log in as platform admin first:
-// +
-// [source,bash,role="execute",subs="attributes"]
-// ----
-// osac login --insecure \
-//   --issuer="{osac_keycloak_url}/realms/osac" \
-//   --flow=password --user={osac_admin_user} --password={osac_admin_password} \
-//   {osac_internal_api_url}
-// ----
-
-// . Create the IdentityProvider resource:
-// +
-// [source,bash,role="execute"]
-// ----
-// cat > ${HOME}/osac-demo/idp.yaml <<EOF
-// "@type": type.googleapis.com/osac.private.v1.IdentityProvider
-// metadata:
-//   name: oidc
-//   tenant: ${TENANT}
-// spec:
-//   title: "SAI Corp Corporate SSO"
-//   enabled: true
-//   oidc:
-//     authorizationUrl: "${OIDC_AUTHORIZATION_URL}"
-//     tokenUrl: "${OIDC_TOKEN_URL}"
-//     clientId: "${OIDC_CLIENT_ID}"
-//     clientSecret: "${OIDC_CLIENT_SECRET}"
-//     issuer: "${OIDC_ISSUER}"
-// EOF
-// osac create -f ${HOME}/osac-demo/idp.yaml
-// ----
-// +
-// Expected output:
-// +
-// ----
-// Created identityprovider with name 'oidc'.
-// ----
 
 . Verify the identity provider reaches `READY` status:
 +
