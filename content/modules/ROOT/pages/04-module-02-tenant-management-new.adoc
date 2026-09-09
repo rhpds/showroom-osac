@@ -596,7 +596,6 @@ sai-corp  -         -        default  Default Project  ACTIVE
 +
 You should see the `default` project in `ACTIVE` state. You may also see a row with  no name — this is the tenant root project, created automatically with the tenant. This is normal. And the `shared` project is a system project that is always present.
 
-////
 . Find Bob's user ID:
 +
 [source,bash,role="execute"]
@@ -612,31 +611,22 @@ echo "BOB_ID=${BOB_ID}"
 cat > ${HOME}/osac-demo/bob-membership.yaml <<EOF
 "@type": type.googleapis.com/osac.public.v1.ProjectMembership
 metadata:
+  name: bob-viewer
   tenant: sai-corp
   project: default
 spec:
   role: PROJECT_MEMBERSHIP_ROLE_VIEWER
   users:
-    - ${BOB_ID}
+  - id: "${BOB_ID}"
 EOF
+
 osac create -f ${HOME}/osac-demo/bob-membership.yaml
 ----
 +
-Expected output:
-+
+.Expected output
 ----
 Created projectmembership with identifier '<uuid>'.
 ----
-////
-
-. Switch to the *Red Hat Cloud Extensions* tab on the right. You should still be logged in as the glass break user.
-. Log out and log back in as `Alice` with password `{osac_user_password}`.
-. Navigate to *Projects* and select *Default Project*.
-. Click the *+ Create project membership* link and enter the following values:
-* *Name*: `bob-default-project`
-* *Users*: Select `bob`
-* *Role*: `Viewer`
-. Click *Create*. The ProjectMembership should reach `Ready` status within a few seconds.
 
 . Verify the membership is ready:
 +
