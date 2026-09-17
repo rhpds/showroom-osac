@@ -9,9 +9,9 @@ You're a Platform Engineer at Sovereign Cloud Corp, a European government servic
 
 The mandate is clear: no workload data leaves the region, all access is audited, and tenants must be fully isolated from one another. Your manager put it this way: "We have government clients who cannot place their workloads on public cloud. We need a sovereign platform that gives them the control and compliance guarantees they require — and we need it running on OpenShift."
 
-*Your assignment*: Deploy, explore, and operate the Red Hat Cloud Extensions platform. That means standing up multi-tenant environments, configuring Ceph storage, and using the osac CLI to provision workloads through a service catalog.
+*Your assignment*: Deploy, explore, and operate the Red Hat Cloud Extensions platform. That means standing up multi-tenant environments, configuring storage, and using the `osac` CLI to provision workloads through a service catalog.
 
-*The objective*: Demonstrate a working sovereign cloud environment where isolated tenants can request and receive compute workloads through an automated service catalog — all running on OpenShift {ocp_version}.
+*The objective*: Demonstrate a working sovereign cloud environment where isolated tenants can request and receive compute workloads through an automated service catalog — all running on OpenShift Container Platform.
 
 == Success criteria for your mission
 
