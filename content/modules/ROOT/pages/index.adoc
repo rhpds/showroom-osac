@@ -1,6 +1,6 @@
 = Introduction to Red Hat Cloud Extensions
 
-Welcome to the Introduction to Red Hat Cloud Extensions workshop!
+Welcome to Introduction to Red Hat Cloud Extensions!
 
 You're a Platform Engineer at Sovereign Cloud Corp, a European government services provider. Leadership has handed you a critical mission: deploy a sovereign cloud platform on OpenShift that meets strict data sovereignty and regulatory compliance requirements. The platform must support multiple government tenants, automate workload provisioning through a service catalog, and integrate with Keycloak for identity management.
 
@@ -11,8 +11,8 @@ This isn't just another cloud deployment. Your government clients need to know t
 In this workshop, you will:
 
 * Navigate and understand the Red Hat Cloud Extensions platform architecture and components
-* Create and manage multi-tenant environments with Ceph storage
-* Use the osac CLI to create catalog items and deploy workloads
+* Create and manage multi-tenant environments with storage
+* Use the Cloud Extensions user interface as well as the `osac` CLI to create catalog items and deploy workloads
 * Verify platform health and tenant readiness
 
 == Who this is for
@@ -26,9 +26,13 @@ This workshop is designed for Platform Engineers and Cloud Architects who want t
 Before starting this workshop, you should have:
 
 * Familiarity with OpenShift or Kubernetes concepts (pods, namespaces, operators)
+* OpenShift concepts — projects, namespaces, operators, and the `oc` CLI
+* Kubernetes resource types, including Custom Resource Definitions (CRDs)
+* Reading and editing YAML
+* Familiarity with Virtual Machines and VM management concepts
+* Linux command-line usage at an intermediate level
 * Basic command-line experience with `oc` or `kubectl`
 * Understanding of multi-tenancy and role-based access control (RBAC)
-* (Optional) Familiarity with Ceph storage concepts
 
 == Workshop environment
 
@@ -37,73 +41,23 @@ Your environment includes a pre-deployed OpenShift cluster with Red Hat Cloud Ex
 You will work through the modules using two tabs in your lab interface:
 
 * *Instructions*: - on the left, for step-by-step guidance and explanations
+* *Lab*: - on the right, for access to the Red Hat Cloud Extensions UI, OpenShift Console, and a terminal for CLI commands
+** *Red Hat Cloud Extensions Console* - to administer Red Hat Cloud Extensions
+** *OpenShift Console* — for visual exploration of the cluster and platform components
+** *Keycloak Console* - to explore identity management and user roles
+** *Terminal* — for CLI commands using the `oc` and `osac` tools
 
-* *Red Hat Cloud Extensions Console* - to administer Red Hat Cloud Extensions
-* *OpenShift Console* — for visual exploration of the cluster and platform components
-* *Terminal* — for CLI commands using the `oc` and `osac` tools
+Your access details are provided in the **Credentials** page for reference. They are also provided in the instructions at the point where you need them.
 
-Your access details:
+== Timing and Schedule
 
-=== Red Hat Cloud Extensions
+=== Full Workshop (90 minutes)
 
-* *Red Hat Cloud Extensions UI*: {osac_ui_url}^. You do not need to follow this link - use the tab on the right. Use the credentials below to log into the Red Hat Cloud Extensions UI.
-* *Red Hat Cloud Extensions admin credentials*:
-+
-.*Admin user*
-[source,bash,role=execute,subs=attributes]
-----
-{osac_admin_user}
-----
-+
-.*Admin user password*
-[source,bash,role=execute,subs=attributes]
-----
-{osac_admin_password}
-----
+* *Module 1*: Exploring the Red Hat Cloud Extensions Platform (30 minutes)
+* *Module 2*: Managing Tenants (30 minutes)
+* *Module 3*: Catalog Items and Workloads (30 minutes)
 
-// * *Common user password*: `{osac_user_password}`
-
-* Switch to the *Terminal* tab and log into Red Hat Cloud Extensions from the command line:
-+
-[source,bash,role=execute,subs=attributes]
-----
-osac login --insecure \
-  --issuer="https://keycloak-keycloak.{openshift_cluster_ingress_domain}/realms/osac" \
-  --flow=password \
-  --user={osac_admin_user} \
-  --password={osac_admin_password} \
-  https://fulfillment-internal-api-osac.{openshift_cluster_ingress_domain}
-----
-
-=== Keycloak
-
-You do not need to log into Keycloak for this workshop, but you can explore the Keycloak admin console if you wish.
-
-* *Keycloak UI*: {osac_keycloak_url}^
-* *Admin user*: `{osac_keycloak_admin_user}`
-* *Admin password*: `{osac_keycloak_admin_password}`
-
-=== OpenShift
-
-You can explore the OpenShift cluster and Red Hat Cloud Extensions components through the OpenShift Console.
-
-* *OpenShift Console*: {openshift_console_url}^. You do not need to follow this link - use the tab on the right. Use the credentials below to log into the OpenShift Console.
-+
-.*Cluster admin user*
-[source,bash,role=execute,subs=attributes]
-----
-{openshift_cluster_admin_username}
-----
-+
-.*Cluster admin user password*
-[source,bash,role=execute,subs=attributes]
-----
-{openshift_cluster_admin_password}
-----
-
-== Estimated time
-
-This workshop takes approximately **90 minutes** to complete across three modules of roughly 30 minutes each.
+Each module builds on the previous one. No formal breaks are scheduled — pause between modules as needed.
 
 Work at your own pace. If time is short, focus on Modules 1 and 2 for the core platform concepts.
 
