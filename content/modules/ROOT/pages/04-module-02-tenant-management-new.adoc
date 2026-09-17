@@ -74,7 +74,7 @@ osac get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
   "name": "break-glass-credentials"
 }
 ----
-
+////
 . Verify that Red Hat Cloud Extensions automatically created a Keycloak organization for the tenant:
 +
 [source,role=execute,subs=attributes]
@@ -89,7 +89,7 @@ curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
 ----
 +
 You should see the `sai-corp` organization with `enabled: true`.
-
+////
 . Confirm the tenant namespace was created on the cluster:
 +
 [source,role=execute]
@@ -122,8 +122,9 @@ This exercise uses the `curl` command to create Keycloak realms, clients, and us
 ----
 KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
-  | jq -r '.access_token')
+  | jq -r .access_token)
 
+echo
 echo "Token obtained: ${KC_TOKEN:0:20}..."
 ----
 
