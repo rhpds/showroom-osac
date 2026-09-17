@@ -79,10 +79,10 @@ Confirm your baseline health check passed before moving on:
 
 [source,role=execute,subs=attributes]
 ----
-oc get pods -n osac --field-selector=status.phase!=Running --field-selector=status.phase!=Succeeded 2>/dev/null | grep -v "No resources found" && echo "WARNING: unhealthy pods detected" || echo "All pods healthy"
+oc get pods -n osac
 ----
 
-Expected result: `All pods healthy`
+Expected result: All pods `Running` or `Completed`.
 
 == Exercise 2: Explore the Red Hat Cloud Extensions web UI
 
@@ -104,48 +104,25 @@ With the platform confirmed healthy, log in to the Red Hat Cloud Extensions web 
 
 . In the browser UI, locate and explore the following sections:
 +
-* **Tenants** — list of provisioned tenants (currently empty — you will create tenants in Module 2)
-* **Catalog** — available service catalog items
-* **Settings** — platform configuration and integrations
-
-. Switch to the *Terminal* tab.
-. From the CLI, inspect the Red Hat Cloud Extensions UI deployment to understand its configuration:
-+
-[source,role=execute,subs=attributes]
-----
-oc describe deployment osac-ui -n osac | grep -A 20 "Environment:"
-----
-
-. Check the fulfillment service, which processes catalog requests behind the UI:
-+
-[source,role=execute,subs=attributes]
-----
-oc get deployment fulfillment-controller -n osac -o jsonpath='{.status.readyReplicas}'
-----
-+
-The output should show `1` or more ready replicas.
-
-=== Verify
-
-. Confirm the Red Hat Cloud Extensions UI and fulfillment service are responding:
-+
-[source,role=execute,subs=attributes]
-----
-oc rollout status deployment/osac-ui -n osac && \
-oc rollout status deployment/fulfillment-controller -n osac
-----
-+
-.Expected output:
-----
-deployment "osac-ui" successfully rolled out
-deployment "fulfillment-service" successfully rolled out
-----
+* **Tenants** — list of provisioned tenants. This is the view you land in right after logging in. If you need to go back to the Tenangs view it is under *Administration* in the navigation area on the left. Currently there are only the `shared` and `system` tenants. You will create a new tenant in Module 2.
+* **Catalog** — available service catalog items. Currently empty.
+* **Projects** - list of projects in the environment. Currently only the `default` project exists. You will create new projects in Module 2.
+* **Infrastructure** — platform configuration and integrations.
+** **Storage**
+** **Instance Types**
+** **External IP Pools**
+** **Bare metal instance types**
+** **Disk Images**
+* **Networking** — platform network configuration.
+** **Virtual Networks** - empty because no tenants exist yet.
+** **Security Groups** - empty because no tenants exist yet.
+* **Secrets**
 
 == Exercise 3: Examine the Keycloak realm configuration
 
 Keycloak handles identity management for the entire Red Hat Cloud Extensions platform. Every tenant gets its own identity context tied to the `osac` realm. Understanding this configuration is essential before you create tenants in Module 2.
 
-. Confirm the Keycloak pods are running and ready:
+. Switch to the *Terminal* tab on the right and confirm the Keycloak pods are running and ready:
 +
 [source,role=execute,subs=attributes]
 ----
@@ -159,11 +136,34 @@ oc get pods -n keycloak
 oc describe deployment keycloak-service -n keycloak | grep -E "(Replicas|Image|Ready)"
 ----
 
-. Switch to the Keycloak admin console tab on the right.
+. Switch to the *Keycloak* admin console tab on the right.
+. Log in as the *Keycloak admin*:
++
+.*Admin user*
+[source,role=copy,subs=attributes]
+----
+{osac_keycloak_admin_user}
+----
++
+.*Admin user password*
+[source,role=copy,subs=attributes]
+----
+{osac_keycloak_admin_password}
+----
++
+[TIP]
+====
+You may see the following warning when logging in:
+
+`Your login attempt timed out. Login will start from the beginning.`
+
+This is normal if this environment has been idle for a while. Simply log in again and you will be taken to the Keycloak admin console.
+====
+
 . In the Keycloak admin console, navigate to the `osac` realm:
 .. Click the realm selector in the top-left corner
 .. Select **osac** from the list
-.. Review the **Realm Settings** tab — note the session timeouts and token lifetimes configured for government compliance
+.. Review the **Realm Settings** under **Configuration** — note the session timeouts and token lifetimes configured for government compliance
 
 . From the CLI, check the Keycloak service endpoints:
 +
@@ -179,16 +179,7 @@ oc get endpoints keycloak -n keycloak
 oc get configmaps -n keycloak | grep keycloak
 ----
 
-. Review the realm configuration if a ConfigMap is present:
-+
-[source,role=execute,subs=attributes]
-----
-oc get configmap keycloak-realm -n keycloak -o jsonpath='{.data}' | jq
-----
-
-=== Verify
-
-Confirm Keycloak is serving the `osac` realm:
+. Confirm Keycloak is serving the `osac` realm:
 
 [source,role=execute,subs=attributes]
 ----
@@ -218,7 +209,7 @@ oc get kafka -n osac-kafka
 oc describe kafka -n osac-kafka
 ----
 +
-Look for the `Status` section. All listeners should show `ready: true`.
+Look for the `Status` section. There should be no obvious errors.
 
 . Check the Kafka broker pods:
 +
@@ -254,26 +245,11 @@ oc get kafka -n osac-kafka -o jsonpath='{.items[0].status.conditions}' | jq
 +
 All conditions should show `"type": "Ready"` with `"status": "True"`.
 
-=== Verify
-
-Confirm all Kafka components are ready:
-
-[source,role=execute,subs=attributes]
-----
-oc wait --for=condition=Ready kafka --all -n osac-kafka --timeout=60s
-----
-
-.Expected output:
-----
-kafka.kafka.strimzi.io/osac-kafka condition met
-----
-
 == Learning outcomes checkpoint
 
 Before moving to Module 2, confirm you can answer these questions:
 
 * Which namespace contains all Red Hat Cloud Extensions platform components?
-* What role does the fulfillment service play in relation to the Red Hat Cloud Extensions UI?
 * Which Keycloak realm governs Red Hat Cloud Extensions tenant identities?
 * What types of events does Kafka carry in the Red Hat Cloud Extensions platform?
 
