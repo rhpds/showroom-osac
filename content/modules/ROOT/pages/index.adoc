@@ -60,7 +60,3 @@ Your access details are provided in the **Credentials** page for reference. They
 Each module builds on the previous one. No formal breaks are scheduled — pause between modules as needed.
 
 Work at your own pace. If time is short, focus on Modules 1 and 2 for the core platform concepts.
-
-== Let's get started!
-
-Click on **Workshop Overview** in the navigation to begin.

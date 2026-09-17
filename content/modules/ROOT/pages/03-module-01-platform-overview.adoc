@@ -90,8 +90,17 @@ With the platform confirmed healthy, log in to the Red Hat Cloud Extensions web 
 
 . Switch to the *Cloud Extensions* tab on the right. Login using the platform admin credentials:
 +
-* Username: `{osac_admin_user}`
-* Password: `{osac_admin_password}`
+.*Admin user*
+[source,bash,role=copy,subs=attributes]
+----
+{osac_admin_user}
+----
++
+.*Admin user password*
+[source,bash,role=copy,subs=attributes]
+----
+{osac_admin_password}
+----
 
 . In the browser UI, locate and explore the following sections:
 +
@@ -99,6 +108,7 @@ With the platform confirmed healthy, log in to the Red Hat Cloud Extensions web 
 * **Catalog** — available service catalog items
 * **Settings** — platform configuration and integrations
 
+. Switch to the *Terminal* tab.
 . From the CLI, inspect the Red Hat Cloud Extensions UI deployment to understand its configuration:
 +
 [source,bash,role="execute",subs=attributes]
@@ -117,15 +127,15 @@ The output should show `1` or more ready replicas.
 
 === Verify
 
-Confirm the Red Hat Cloud Extensions UI and fulfillment service are responding:
-
+. Confirm the Red Hat Cloud Extensions UI and fulfillment service are responding:
++
 [source,bash,role="execute",subs=attributes]
 ----
 oc rollout status deployment/osac-ui -n osac && \
 oc rollout status deployment/fulfillment-controller -n osac
 ----
-
-Expected output:
++
+.Expected output:
 ----
 deployment "osac-ui" successfully rolled out
 deployment "fulfillment-service" successfully rolled out
