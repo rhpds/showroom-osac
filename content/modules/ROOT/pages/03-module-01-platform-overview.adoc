@@ -22,12 +22,15 @@ By the end of this module, you'll be able to:
 
 Sovereign Cloud Corp's platform runs in the `osac` namespace on OpenShift. Before exploring anything else, confirm that every operator and service is running. A healthy platform is your baseline.
 
-. Switch to the terminal tab. and run:
-. Log in to the OpenShift cluster with admin credentials:
+. On the right switch to the *Terminal* tab.
+. Log in to the OpenShift cluster with cluster admin credentials:
 +
 [source,bash,role="execute",subs=attributes]
 ----
-oc login {openshift_api_url} -u {openshift_cluster_admin_username} -p {openshift_cluster_admin_password} --insecure-skip-tls-verify=false
+oc login {openshift_api_url} \
+  --username {openshift_cluster_admin_username} \
+  --password {openshift_cluster_admin_password} \
+  --insecure-skip-tls-verify
 ----
 
 . Verify you are targeting the correct cluster and confirm your identity:
