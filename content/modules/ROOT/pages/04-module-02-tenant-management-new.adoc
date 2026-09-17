@@ -25,21 +25,23 @@ When a platform administrator creates a tenant in Red Hat Cloud Extensions, the 
 
 === Steps
 
-. Set up shell variables for this module. These values are used throughout all exercises:
+. Set up shell variables for this module and save them in `.bashrc`. These values are used throughout all exercises:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
+cat << EOF >${HOME}/.bashrc
 export TENANT=sai-corp
 export TENANT_ADMIN=alice
 export TENANT_USER=bob
 export REALM=osac
+EOF
+
 mkdir -p ${HOME}/osac-demo
-echo "Setup OK: TENANT=$TENANT ADMIN=$TENANT_ADMIN USER=$TENANT_USER"
 ----
 
-. Log in to the Red Hat Cloud Extensions platform *internal* fulfillment API as the platform administrator:
+. Log in to the *Red Hat Cloud Extensions* platform *internal* fulfillment API as the *platform administrator*:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 osac login --insecure \
   --issuer="{osac_keycloak_url}/realms/osac" \
@@ -57,10 +59,10 @@ IMPORTANT: Copy and save the break-glass password now. It is displayed only duri
 
 . The Tenant should show `Synced` within a few seconds of creation.
 
-. Switch back to the *Terminal* tab.
+. Switch to the *Terminal* tab.
 . Verify the break-glass user was provisioned:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 osac get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
 ----
@@ -75,11 +77,12 @@ osac get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
 
 . Verify that Red Hat Cloud Extensions automatically created a Keycloak organization for the tenant:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
   | jq -r '.access_token')
+
 curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
   "{osac_keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
   | jq '[.[] | {id, name, enabled}]'
@@ -89,7 +92,7 @@ You should see the `sai-corp` organization with `enabled: true`.
 
 . Confirm the tenant namespace was created on the cluster:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 oc get ns sai-corp
 ----
@@ -98,23 +101,35 @@ The namespace should show `Active` status.
 
 == Exercise 2: Set up a corporate identity provider
 
-SAI Corp employees need to authenticate through their corporate identity provider rather than receiving individual platform passwords. In this exercise, you create a Keycloak realm that simulates SAI Corp's corporate IdP, then register it with Red Hat Cloud Extensions so the platform can federate authentication.
+SAI Corp employees need to authenticate through their corporate identity provider rather than receiving individual platform passwords.
 
-=== Steps
+On this lab environment, Red Hat Cloud Extensions is already using Keycloak as the platform identity provider (realm `osac`).
+
+In this exercise, you create another Keycloak realm that simulates SAI Corp's corporate IdP, then register it with Red Hat Cloud Extensions so the platform can federate authentication.
+
+You create two users, *Alice* and *Bob*, in the SAI Corp realm. Alice will later be the tenant administrator, and Bob will be a project viewer. For the purposes of this exercise, both users will have the same password `{osac_user_password}`.
+
+=== Set up Keycloak
+
+[NOTE]
+====
+This exercise uses the `curl` command to create Keycloak realms, clients, and users. You could also use the Keycloak admin console, but for the purposes of this exercise the CLI is faster and more repeatable.
+====
 
 . Obtain a Keycloak admin token:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
   | jq -r '.access_token')
+
 echo "Token obtained: ${KC_TOKEN:0:20}..."
 ----
 
 . Create the `sai-corp-idp` realm to simulate SAI Corp's corporate identity provider:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 curl -sk -X POST "{osac_keycloak_url}/admin/realms" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -130,7 +145,7 @@ Expected: `HTTP 201` (created) or `HTTP 409` (already exists).
 
 . Create an OIDC client in the `sai-corp-idp` realm for Red Hat Cloud Extensions federation:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/clients" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -149,7 +164,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/clients" \
 
 . Add the client secret to the osac broker:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 curl -sk -X PUT "{osac_keycloak_url}/admin/realms/osac/identity-provider/instances/sai-corp-sai-corp" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -172,7 +187,7 @@ curl -sk -X PUT "{osac_keycloak_url}/admin/realms/osac/identity-provider/instanc
 
 . Create user `alice` in the Sai corporate IdP realm:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -190,7 +205,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
 
 . Create user `bob` in the Sai corporate IdP realm:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -208,7 +223,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
 
 . Set the OIDC endpoint variables and save them for later exercises:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 export OIDC_CLIENT_ID=osac-federation
 export OIDC_CLIENT_SECRET=osac-demo-secret
@@ -216,7 +231,7 @@ export OIDC_ISSUER="{osac_keycloak_url}/realms/sai-corp-idp"
 export OIDC_TOKEN_URL="{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token"
 export OIDC_AUTHORIZATION_URL="{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth"
 
-cat << EOF >${HOME}/osac-demo/oidc-env.sh
+cat << EOF >${HOME}/.bashrc
 export OIDC_CLIENT_ID='${OIDC_CLIENT_ID}'
 export OIDC_CLIENT_SECRET='${OIDC_CLIENT_SECRET}'
 export OIDC_ISSUER='${OIDC_ISSUER}'
@@ -224,8 +239,10 @@ export OIDC_TOKEN_URL='${OIDC_TOKEN_URL}'
 export OIDC_AUTHORIZATION_URL='${OIDC_AUTHORIZATION_URL}'
 EOF
 
-echo "OIDC environment saved to $\{HOME}/osac-demo/oidc-env.sh"
+echo "OIDC environment saved to $\{HOME}/.bashrc"
 ----
+
+=== Register the new Identity Provider with Red Hat Cloud Extensions
 
 . Switch back to the *Red Hat Cloud Extensions* tab on the right.
 . Log out of the platform if you are logged in as platform admin (`{osac_admin_user}`).
@@ -247,13 +264,12 @@ Use the *break glass credentials* that you saved when you created the tenant. Yo
 
 . Verify the identity provider reaches `Ready` status:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 osac get identityprovider sai-corp --output yaml | grep -E 'phase:|message:|client_id:'
 ----
 +
-Expected output:
-+
+.Expected output
 ----
   client_id: osac-federation
   message: 'Identity provider created successfully with alias: sai-corp-sai-corp'
@@ -273,19 +289,19 @@ NOTE: The `osac whoami` command reads the local JWT token only — it does not c
 . Switch to the *Terminal* tab and log out any existing session.
 . Log out any existing session:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 osac logout
 ----
 
 . Start the device flow login for Alice:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
 ----
 +
-The CLI displays a URL and a one-time code. Complete the login in your browser:
+The CLI displays a URL and a one-time code. Complete the login in your browser (not the Showroom interface):
 +
 .. Copy the URL displayed in the terminal
 .. Open a new *incognito/private* browser window
@@ -299,9 +315,9 @@ The CLI displays a URL and a one-time code. Complete the login in your browser:
 +
 IMPORTANT: Always use a fresh incognito window for each device flow login. A cached browser session may use the wrong identity.
 
-. Confirm Alice's identity:
+. Back in the terminal, confirm Alice's identity:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 osac whoami
 ----
@@ -315,7 +331,7 @@ Roles: offline_access, uma_authorization, default-roles-my realm
 
 . Trigger JIT user provisioning by making an API call:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 osac get projects
 ----
@@ -331,7 +347,7 @@ This creates Alice's OSAC user record on the server. Without this call, Alice wo
 
 . Check if Alice can list users (this requires tenant-admin authority):
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 osac get users
 ----
@@ -344,16 +360,15 @@ TBD: something denied
 
 ==== Onboard Bob
 
-[start=7]
 . Log out Alice, then start the device flow login for Bob:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 osac logout
 osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
 ----
 +
-Complete the login in a fresh incognito window:
+Complete the login in a fresh *incognito* window:
 +
 .. Copy the URL from the terminal
 .. Open a new *incognito/private* browser window
@@ -362,7 +377,7 @@ Complete the login in a fresh incognito window:
 
 . Confirm Bob's identity:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 osac whoami
 ----
@@ -376,7 +391,7 @@ Roles: offline_access, uma_authorization, default-roles-my realm
 
 . Trigger JIT provisioning for bob:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 osac get projects
 ----
@@ -390,7 +405,7 @@ sai-corp  -         -        -     -      ACTIVE
 
 . Verify both users are now members of the SAI Corp Keycloak organization:
 +
-[source,bash,role="execute",subs="attributes"]
+[source,role=execute,subs=attributes]
 ----
 KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
@@ -408,7 +423,7 @@ curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
 You should see `alice`, `bob`, and the break-glass account in the list.
 +
 .Expected output
-[source,bash]
+[source]
 ----
 [
   "alice",
