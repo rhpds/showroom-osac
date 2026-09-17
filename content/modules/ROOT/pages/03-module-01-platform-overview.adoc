@@ -25,7 +25,7 @@ Sovereign Cloud Corp's platform runs in the `osac` namespace on OpenShift. Befor
 . On the right switch to the *Terminal* tab.
 . Log in to the OpenShift cluster with cluster admin credentials:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc login {openshift_api_url} \
   --username {openshift_cluster_admin_username} \
@@ -35,7 +35,7 @@ oc login {openshift_api_url} \
 
 . Verify you are targeting the correct cluster and confirm your identity:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
 oc whoami
 oc cluster-info
@@ -43,7 +43,7 @@ oc cluster-info
 
 . Check that all pods in the `osac` namespace are running:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get pods -n osac
 ----
@@ -52,21 +52,21 @@ Expected output: all pods should show `Running` or `Completed` status. No pod sh
 
 . Confirm all ClusterServiceVersions (CSVs) show `Succeeded`:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get csv -n osac
 ----
 
 . List the key services exposed in the namespace:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get svc -n osac
 ----
 
 . Retrieve the routes to confirm which endpoints are externally reachable:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get routes -n osac
 ----
@@ -77,7 +77,7 @@ You should see routes for `osac-ui`, `keycloak`, and any additional services the
 
 Confirm your baseline health check passed before moving on:
 
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get pods -n osac --field-selector=status.phase!=Running --field-selector=status.phase!=Succeeded 2>/dev/null | grep -v "No resources found" && echo "WARNING: unhealthy pods detected" || echo "All pods healthy"
 ----
@@ -91,13 +91,13 @@ With the platform confirmed healthy, log in to the Red Hat Cloud Extensions web 
 . Switch to the *Cloud Extensions* tab on the right. Login using the platform admin credentials:
 +
 .*Admin user*
-[source,bash,role=copy,subs=attributes]
+[source,role=copy,subs=attributes]
 ----
 {osac_admin_user}
 ----
 +
 .*Admin user password*
-[source,bash,role=copy,subs=attributes]
+[source,role=copy,subs=attributes]
 ----
 {osac_admin_password}
 ----
@@ -111,14 +111,14 @@ With the platform confirmed healthy, log in to the Red Hat Cloud Extensions web 
 . Switch to the *Terminal* tab.
 . From the CLI, inspect the Red Hat Cloud Extensions UI deployment to understand its configuration:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc describe deployment osac-ui -n osac | grep -A 20 "Environment:"
 ----
 
 . Check the fulfillment service, which processes catalog requests behind the UI:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get deployment fulfillment-controller -n osac -o jsonpath='{.status.readyReplicas}'
 ----
@@ -129,7 +129,7 @@ The output should show `1` or more ready replicas.
 
 . Confirm the Red Hat Cloud Extensions UI and fulfillment service are responding:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc rollout status deployment/osac-ui -n osac && \
 oc rollout status deployment/fulfillment-controller -n osac
@@ -147,14 +147,14 @@ Keycloak handles identity management for the entire Red Hat Cloud Extensions pla
 
 . Confirm the Keycloak pods are running and ready:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get pods -n keycloak
 ----
 
 . Check the Keycloak deployment details:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc describe deployment keycloak-service -n keycloak | grep -E "(Replicas|Image|Ready)"
 ----
@@ -167,21 +167,21 @@ oc describe deployment keycloak-service -n keycloak | grep -E "(Replicas|Image|R
 
 . From the CLI, check the Keycloak service endpoints:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get endpoints keycloak -n keycloak
 ----
 
 . Inspect the Keycloak ConfigMap to review realm import configuration:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get configmaps -n keycloak | grep keycloak
 ----
 
 . Review the realm configuration if a ConfigMap is present:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get configmap keycloak-realm -n keycloak -o jsonpath='{.data}' | jq
 ----
@@ -190,7 +190,7 @@ oc get configmap keycloak-realm -n keycloak -o jsonpath='{.data}' | jq
 
 Confirm Keycloak is serving the `osac` realm:
 
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 curl -sk {osac_keycloak_url}/realms/osac | python3 -c "import sys,json; d=json.load(sys.stdin); print('Realm:', d.get('realm'), '| Public Key available:', bool(d.get('public_key')))"
 ----
@@ -206,14 +206,14 @@ Red Hat Cloud Extensions uses Kafka as its event backbone. Every catalog request
 
 . List Kafka resources in the `osac` namespace:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get kafka -n osac-kafka
 ----
 
 . Describe the Kafka custom resource to review its configuration:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc describe kafka -n osac-kafka
 ----
@@ -222,7 +222,7 @@ Look for the `Status` section. All listeners should show `ready: true`.
 
 . Check the Kafka broker pods:
 +
-[source,bash,role="execute",subs=attributes ]
+[source,role=execute,subs=attributes ]
 ----
 oc get pods -n osac-kafka -l strimzi.io/kind=Kafka
 ----
@@ -231,7 +231,7 @@ You should see at least one broker pod in `Running` state.
 
 . List the Kafka topics that Red Hat Cloud Extensions has created:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get kafkatopics -n osac-kafka
 ----
@@ -240,14 +240,14 @@ Topics prefixed with `osac-` handle platform events. Note the names — you will
 
 . Check KafkaUsers configured for Red Hat Cloud Extensions service-to-service communication:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get kafkausers -n osac-kafka
 ----
 
 . Review the Kafka cluster status conditions:
 +
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc get kafka -n osac-kafka -o jsonpath='{.items[0].status.conditions}' | jq
 ----
@@ -258,12 +258,12 @@ All conditions should show `"type": "Ready"` with `"status": "True"`.
 
 Confirm all Kafka components are ready:
 
-[source,bash,role="execute",subs=attributes]
+[source,role=execute,subs=attributes]
 ----
 oc wait --for=condition=Ready kafka --all -n osac-kafka --timeout=60s
 ----
 
-Expected output:
+.Expected output:
 ----
 kafka.kafka.strimzi.io/osac-kafka condition met
 ----
