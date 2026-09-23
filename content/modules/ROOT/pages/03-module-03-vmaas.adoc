@@ -39,61 +39,36 @@ osac login --insecure \
   {osac_fulfillment_internal_api_url}
 ----
 
-. Check whether a storage backend and storage tier already exist:
+. Create a storage backend using the LVMS provider and capture its UUID:
 +
 [source,role=execute]
 ----
-osac get storagebackend
-osac get storagetier
-----
-+
-If both commands return a `local` entry, skip to step 6.
-
-. Create a storage backend using the LVMS provider:
-+
-[source,role=execute]
-----
-osac create storagebackend \
+BACKEND_OUTPUT=$(osac create storagebackend \
   --name local \
   --provider lvms \
   --endpoint n/a \
   --username n/a \
-  --password n/a
+  --password n/a)
+
+echo "${BACKEND_OUTPUT}"
+BACKEND_ID=$(echo "${BACKEND_OUTPUT}" | grep -o "'[^']*'" | tr -d "'")
+echo "BACKEND_ID=${BACKEND_ID}"
 ----
 +
 .Sample output
 ----
-Created storagebackend with name 'local' and identifier '<uuid>'.
+Created storage backend '01a0ced0-a5fe-793b-9f6e-061d5f7d16fd'.
+BACKEND_ID=01a0ced0-a5fe-793b-9f6e-061d5f7d16fd
 ----
 
-. Retrieve the backend UUID and create the storage tier:
+. Create the storage tier using the backend UUID:
 +
 [source,role=execute]
 ----
-BACKEND_ID=$(osac get storagebackend local -o json | jq -r '.id')
-
 osac create storagetier \
   --name local \
   --backend-id "${BACKEND_ID}" \
   --protocol BLOCK
-----
-+
-.Sample output
-----
-Created storagetier with name 'local' and identifier '<uuid>'.
-----
-
-. Verify the storage tier is active:
-+
-[source,role=execute]
-----
-osac get storagetier
-----
-+
-.Sample output
-----
-NAME   STATE   ...
-local  ACTIVE  ...
 ----
 
 . Label the LVM storage class for the `sai-corp` tenant so the platform maps the `local` tier to the correct Kubernetes storage class:
