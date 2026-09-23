@@ -724,7 +724,7 @@ Expected output:
 ----
 Logged in as: bob
 Tenant: sai-corp
-Roles: offline_access, uma_authorization, ...
+Roles: offline_access, uma_authorization, default-roles-my realm
 ----
 
 . Bob can list projects (viewer access):
@@ -734,20 +734,27 @@ Roles: offline_access, uma_authorization, ...
 osac get projects
 ----
 +
+.Example output
+----
+TENANT    DELETING  PROJECT  NAME     TITLE            STATE
+shared    -         -        -        -                ACTIVE
+sai-corp  -         -        -        -                ACTIVE
+sai-corp  -         -        default  Default Project  ACTIVE
+----
++
 You should see the `default` project in the list.
 
 . Bob cannot delete the project (RBAC enforcement):
 +
 [source,role="execute"]
 ----
-source ${HOME}/osac-demo/proj-id.sh
-osac delete project ${PROJ_ID}
+osac delete project default
 ----
 +
 Expected output:
 +
 ----
-Failed to delete project '<PROJ_ID>': rpc error: code = PermissionDenied desc = permission denied
+Failed to delete project '01a0ce71-71b1-742d-add3-3f2364b7430c': rpc error: code = PermissionDenied desc = permission denied
 ----
 +
 This `PermissionDenied` error confirms that RBAC is working: a viewer can read but not modify resources.
