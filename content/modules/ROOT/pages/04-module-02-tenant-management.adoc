@@ -1,363 +1,809 @@
-= Module 2: Managing Tenants
+= Module 2: Tenant Onboarding and Identity Management
 :source-highlighter: rouge
 :toc: macro
 :toclevels: 2
 
 toc::[]
 
-Sovereign Cloud Corp's compliance team has approved the platform architecture, and now it's time to put multi-tenancy to work. The Finance department needs its own isolated environment — dedicated storage, resource quotas, and network boundaries that keep their financial workloads separate from every other department on the platform.
+Sovereign Cloud Corp has signed a new government agency client: SAI Corp. The agency needs a fully isolated tenant on the platform with federated single sign-on through their corporate identity provider. Their IT administrator, Alice, needs tenant-admin authority to manage projects and team access. Their analyst, Bob, needs read-only access to a specific project.
 
-In this module, you'll examine how Red Hat cloud extensions implements multi-tenancy through its `Tenant` custom resource, explore the built-in `shared` and `system` tenants, and create a new tenant for the Finance department with Ceph-backed storage.
+In this module, you onboard SAI Corp as a tenant using the `osac` CLI, configure SSO federation through a Keycloak realm acting as the corporate identity provider, and prove that role-based access control enforces the right boundaries — a viewer can list resources but cannot modify them.
 
 == Learning objectives
 
 By the end of this module, you'll be able to:
 
-* Examine the `shared` and `system` tenants and interpret their lifecycle status
-* Create a new department tenant using a YAML manifest
-* Verify a tenant reaches `Ready` status with Ceph storage provisioned
-* Inspect a tenant's namespace, resource quotas, and network policies
+* Create a tenant and verify automatic Keycloak organization and namespace provisioning
+* Configure an external identity provider for federated SSO
+* Onboard users through SSO and understand JIT user provisioning
+* Assign tenant-admin and project viewer roles using RoleBindings and ProjectMemberships
+* Verify RBAC enforcement: viewers can read but cannot delete
 
-== Multi-tenancy in Red Hat cloud extensions
+== Exercise 1: Create a tenant and verify onboarding
 
-Red Hat cloud extensions uses a custom Kubernetes resource called `Tenant` to represent isolated organizational units on the platform. When you create a Tenant resource, the Red Hat cloud extensions operator takes care of everything needed to set up that environment:
-
-* **Namespace provisioning**: A dedicated namespace is created on the OpenShift cluster
-* **Storage provisioning**: A PersistentVolumeClaim backed by the `ocs-storagecluster-ceph-rbd` storage class is created automatically
-* **Resource controls**: `ResourceQuota` and `LimitRange` objects define the tenant's capacity limits
-* **Network isolation**: `NetworkPolicy` rules prevent cross-tenant traffic — a key sovereignty requirement
-* **Identity registration**: The tenant is registered in Keycloak so access is tied to authenticated identities
-
-Two tenants exist by default after Red Hat cloud extensions installation:
-
-* **`shared`**: Used by platform services that need to be accessible across tenant boundaries
-* **`system`**: Reserved for platform infrastructure components managed by the operator
-
-These built-in tenants show you exactly what a healthy, fully provisioned tenant looks like before you create your own.
-
-== Exercise 1: Examine the existing tenants
-
-Before creating new tenants, take a look at what the Red Hat cloud extensions operator has already provisioned. Understanding the `shared` and `system` tenants gives you a reference point for what `Ready` looks like — and what to check if something goes wrong later.
-
-=== Prerequisites
-
-* Module 1 is complete and you can reach the OpenShift API from your terminal
-* You are logged in to the OpenShift CLI with cluster-admin privileges
+When a platform administrator creates a tenant in Red Hat cloud extensions, the platform automatically provisions a Keycloak organization, a dedicated namespace, and a break-glass emergency access account. In this exercise, you create the `sai-corp` tenant and verify that all of these resources were provisioned correctly.
 
 === Steps
 
-. Confirm you are logged in to the cluster:
+. Set up shell variables for this module and save them in `.bashrc`. These values are used throughout all exercises:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
-oc whoami
-----
-+
-You should see `admin` or your administrator username.
-
-. List all Tenant resources managed by the Red Hat cloud extensions operator:
-+
-[source,bash,role="execute"]
-----
-oc get tenants -n osac
-----
-+
-Both `shared` and `system` should appear with a `Ready` status. If you see neither, check that the `osac-operator` pod is running.
-
-. Examine the `shared` tenant in detail:
-+
-[source,bash,role="execute"]
-----
-oc get tenant shared -n osac -o yaml
-----
-+
-Review the `spec` section to see how storage and resource limits are defined. Look at `status.phase` to confirm the tenant is `Ready`, and check `status.conditions` for any recent events.
-
-. Check the conditions reported on the `system` tenant:
-+
-[source,bash,role="execute"]
-----
-oc get tenant system -n osac \
-  -o jsonpath='{.status.conditions}' | python3 -m json.tool
-----
-
-. Find the namespaces that were created for these tenants:
-+
-[source,bash,role="execute"]
-----
-oc get namespaces -l osac.redhat.com/tenant --show-labels 2>/dev/null \
-  || oc get namespaces | grep -E 'shared|system|osac'
-----
-
-. Inspect the ResourceQuota applied to the `shared` tenant namespace:
-+
-[source,bash,role="execute"]
-----
-oc get resourcequota -A -l osac.redhat.com/tenant=shared 2>/dev/null \
-  || oc get resourcequota -A | grep shared
-----
-
-. Review the NetworkPolicy rules protecting the `shared` tenant:
-+
-[source,bash,role="execute"]
-----
-oc get networkpolicy -A | grep -E 'shared|system'
-----
-
-=== Verify
-
-Run the following check to confirm both default tenants are healthy before moving on:
-
-[source,bash,role="execute"]
-----
-echo "=== Default Tenants ==="
-oc get tenants -n osac
-----
-
-[.validate-button-placeholder]#validate-button-placeholder#
-
-== Exercise 2: Create a tenant for the Finance department
-
-The Finance department processes regulated financial data and needs a tenant that isolates their workloads from all other departments on the platform. You'll create the `finance` tenant with a YAML manifest, specifying the Ceph storage class, resource quotas, and network boundaries.
-
-=== Steps
-
-. Create the tenant manifest for the Finance department:
-+
-[source,bash,role="execute"]
-----
-cat > /tmp/finance-tenant.yaml << 'EOF'
-apiVersion: osac.redhat.com/v1alpha1
-kind: Tenant
-metadata:
-  name: finance
-  namespace: osac
-  labels:
-    department: finance
-    tier: production
-    sovereignty-zone: eu-gov
-spec:
-  displayName: "Finance Department"
-  description: "Sovereign Cloud Corp Finance department tenant"
-  storageClassName: ocs-storagecluster-ceph-rbd
-  storageCapacity: "50Gi"
-  resourceQuota:
-    requests.cpu: "4"
-    requests.memory: "8Gi"
-    limits.cpu: "8"
-    limits.memory: "16Gi"
-    persistentvolumeclaims: "10"
-  networkPolicy:
-    ingressFromNamespaces:
-      - osac
-    egressEnabled: true
+cat << EOF >>${HOME}/.bashrc
+export TENANT=sai-corp
+export TENANT_ADMIN=alice
+export TENANT_USER=bob
+export REALM=osac
 EOF
+
+source ${HOME}/.bashrc
+
+mkdir -p ${HOME}/osac-demo
 ----
 
-. Apply the manifest to create the tenant:
+. Log in to the *Red Hat cloud extensions* platform *internal* fulfillment API as the *platform administrator*:
 +
-[source,bash,role="execute"]
+[source,role=execute,subs=attributes]
 ----
-oc apply -f /tmp/finance-tenant.yaml
+osac login --insecure \
+  --issuer="{osac_keycloak_url}/realms/osac" \
+  --flow=password \
+  --user={osac_admin_user} \
+  --password={osac_admin_password} \
+  {osac_fulfillment_internal_api_url}
 ----
 
-. Watch the tenant status as the Red Hat cloud extensions operator processes it:
+. Switch to the *Red Hat cloud extensions* tab on the right.
+. Navigate to *Administration* -> *Tenants*.
+. Create a new tenant named `sai-corp`. There are no other parameters except for the name.
 +
-[source,bash,role="execute"]
-----
-oc get tenant finance -n osac -w
-----
-+
-The Red Hat cloud extensions operator moves the tenant from `Provisioning` to `Ready` as it creates the namespace, provisions Ceph storage, and applies resource quotas and network policies. This typically takes 30–90 seconds. Press `Ctrl+C` once you see the status change to `Ready`.
+IMPORTANT: Copy and save the break-glass password now. It is displayed only during tenant creation and cannot be retrieved later.
 
-. Confirm the tenant phase is `Ready`:
+. The Tenant should show `Synced` within a few seconds of creation.
+
+. Switch to the *Terminal* tab.
+. Verify the break-glass user was provisioned:
 +
-[source,bash,role="execute"]
+[source,role=execute]
 ----
-oc get tenant finance -n osac \
-  -o jsonpath='{.status.phase}{"\n"}'
+osac get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
+----
++
+.Expected output:
+[source,json]
+----
+{
+  "id": "01a0812d-96b2-7d94-a25a-f963c40d5322",
+  "name": "break-glass-credentials"
+}
+----
+
+. Verify that Red Hat cloud extensions automatically created a Keycloak organization for the tenant:
++
+[source,role=execute,subs=attributes]
+----
+KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
+  -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
+  | jq -r '.access_token')
+
+curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
+  "{osac_keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
+  | jq '[.[] | {id, name, enabled}]'
+----
++
+.Sample output
+[source,json]
+----
+[
+  {
+    "id": "823e4c18-7617-4fd8-906e-108293f3d7a4",
+    "name": "sai-corp",
+    "enabled": true
+  }
+]
+----
++
+You should see the `sai-corp` organization with `enabled: true`.
+
+. Confirm the tenant namespace was created on the cluster:
++
+[source,role=execute]
+----
+oc get ns sai-corp
+----
++
+The namespace should show `Active` status.
+
+== Exercise 2: Set up a corporate identity provider
+
+SAI Corp employees need to authenticate through their corporate identity provider rather than receiving individual platform passwords.
+
+On this lab environment, Red Hat cloud extensions is already using Keycloak as the platform identity provider (realm `osac`).
+
+In this exercise, you create another Keycloak realm that simulates SAI Corp's corporate IdP, then register it with Red Hat cloud extensions so the platform can federate authentication.
+
+You create two users, *Alice* and *Bob*, in the SAI Corp realm. Alice will later be the tenant administrator, and Bob will be a project viewer. For the purposes of this exercise, both users will have the same password, `{osac_user_password}`.
+
+=== Set up Keycloak
+
+[NOTE]
+====
+This exercise uses the `curl` command to create Keycloak realms, clients, and users. You could also use the Keycloak admin console, but for the purposes of this exercise the CLI is faster and more repeatable.
+====
+
+. Obtain a Keycloak admin token:
++
+[source,role=execute,subs=attributes]
+----
+KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
+  -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
+  | jq -r .access_token)
+
+echo
+echo "Token obtained: ${KC_TOKEN:0:20}..."
+----
+
+. Create the `sai-corp-idp` realm to simulate SAI Corp's corporate identity provider:
++
+[source,role=execute,subs=attributes]
+----
+curl -sk -X POST "{osac_keycloak_url}/admin/realms" \
+  -H "Authorization: Bearer ${KC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "realm": "sai-corp-idp",
+    "enabled": true,
+    "displayName": "SAI Corp Corporate SSO"
+  }' -w "Create realm: HTTP %\{http_code}\n" -o /dev/null
+----
++
+Expected: `HTTP 201` (created) or `HTTP 409` (already exists).
+
+. Create an OIDC client in the `sai-corp-idp` realm for Red Hat cloud extensions federation:
++
+[source,role=execute,subs=attributes]
+----
+curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/clients" \
+  -H "Authorization: Bearer ${KC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientId": "osac-federation",
+    "enabled": true,
+    "protocol": "openid-connect",
+    "publicClient": false,
+    "secret": "osac-demo-secret",
+    "redirectUris": ["*"],
+    "directAccessGrantsEnabled": true,
+    "standardFlowEnabled": true
+  }' -w "Create client: HTTP %\{http_code}\n" -o /dev/null
+----
++
+Expected: `HTTP 201` (created) or `HTTP 409` (already exists).
+
+. Create user `alice` in the Sai corporate IdP realm:
++
+[source,role=execute,subs=attributes]
+----
+curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
+  -H "Authorization: Bearer ${KC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "alice",
+    "firstName": "Alice",
+    "lastName": "Sai",
+    "email": "alice@sai-corp.example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "credentials": [{"type": "password", "value": "{osac_user_password}", "temporary": false}]
+  }' -w "Create alice: HTTP %\{http_code}\n" -o /dev/null
+----
+
+. Create user `bob` in the Sai corporate IdP realm:
++
+[source,role=execute,subs=attributes]
+----
+curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
+  -H "Authorization: Bearer ${KC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "bob",
+    "firstName": "Bob",
+    "lastName": "Sai",
+    "email": "bob@sai-corp.example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "credentials": [{"type": "password", "value": "{osac_user_password}", "temporary": false}]
+  }' -w "Create bob: HTTP %\{http_code}\n" -o /dev/null
+----
+
+. Set the OIDC endpoint variables and save them for later exercises:
++
+[source,role=execute,subs=attributes]
+----
+cat << EOF >>${HOME}/.bashrc
+export OIDC_CLIENT_ID='osac-federation'
+export OIDC_CLIENT_SECRET='osac-demo-secret'
+export OIDC_ISSUER='{osac_keycloak_url}/realms/sai-corp-idp'
+export OIDC_TOKEN_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token'
+export OIDC_AUTHORIZATION_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth'
+EOF
+
+source ${HOME}/.bashrc
+
+echo "OIDC environment saved to $\{HOME}/.bashrc"
+----
+
+=== Register the new Identity Provider with Red Hat cloud extensions
+
+. Switch back to the *Red Hat cloud extensions* tab on the right.
+. Log out of the platform if you are logged in as platform admin (`{osac_admin_user}`).
+. Now log into the Red Hat cloud extensions platform as the the *SAI Corp break glass user*.
++
+Use the *break glass credentials* that you saved when you created the tenant.
++
+Your user should be `sai-corp-osac-break-glass`.
++
+You will be prompted to change your password.
++
+While you can change it to anything you want the rest of the lab will be using `{osac_user_password}` so it is recommended to change it to that value for consistency.
+
+. Once logged in you should already be on the *Identity Providers* page.
+. Before you can continue you need to create a `Secret` with the client secret to be used for Keycloak.
++
+Switch to the *Terminal* tab and log in as the `sai-corp-osac-break-glass` user:
++
+[source,role=execute,subs=attributes]
+----
+osac login --insecure \
+  --issuer="https://keycloak-keycloak.{openshift_cluster_ingress_domain}/realms/osac" \
+  --flow=password \
+  --user=sai-corp-osac-break-glass \
+  --password={osac_user_password} \
+  https://fulfillment-internal-api-osac.{openshift_cluster_ingress_domain}
+----
+
+. The Client secret must be stored in a secret of type `value` in Red Hat cloud extensions.
++
+Create a secret named `sai-corp-oidc-secret` in the `sai-corp` tenant namespace with the OIDC client secret:
++
+[source,role=execute,subs=attributes]
+----
+echo -n "${OIDC_CLIENT_SECRET}" | osac \
+  create secret --name idp-client-secret \
+  --type value --from-file=value=-
+----
++
+.Expected Output
+----
+Created secret 'idp-client-secret' (ID: 01a0ce65-e2dc-7860-97e2-c1192478de8d).
+----
+
+. Verify the secret was created:
++
+[source,role=execute,subs=attributes]
+----
+osac get secret idp-client-secret -o yaml
+----
++
+.Sample output
+[source,yaml]
+----
+'@type': type.googleapis.com/osac.public.v1.Secret
+data:
+  value: b3NhYy1kZW1vLXNlY3JldA==
+id: 01a0cdbe-6c22-744a-af92-2e4087ca9be1
+metadata:
+  creation_timestamp: "2026-09-23T10:10:03.934248Z"
+  creator: 01a0cdb2-8a38-768d-a47e-e36be3c1a999
+  name: idp-client-secret
+  tenant: sai-corp
+type: SECRET_TYPE_VALUE
+----
+
+. Now switch back to the *Red Hat cloud extensions* tab and create a new identity provider with the following properties:
+* *Name*: `sai-corp`
+* *Title*: `SAI Corp Corporate SSO`
+* *Client ID*: `osac-federation`
+* *Client Secret*: Select `idp-client-secret` from the dropdown
+* *Issuer*: `{osac_keycloak_url}/realms/sai-corp-idp`
+* *Authorization URL*: `{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth`
+* *Token URL*: `{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token`
+
+. The identity provider should reach `Ready` status within a few seconds. If it does not, check the logs of the `fulfillment` pod in the `osac` namespace for errors.
+
+. Switch to the *Terminal* tab and verify the identity provider reaches `Ready` status:
++
+[source,role=execute]
+----
+osac get identityprovider sai-corp --output yaml | grep -E 'phase:|message:|client_id:'
+----
++
+.Expected output
+----
+  client_id: osac-federation
+  message: 'Identity provider created successfully with alias: sai-corp-sai-corp'
+  phase: IDENTITY_PROVIDER_PHASE_READY
+----
+
+== Exercise 3: Onboard tenant users via SSO
+
+With the corporate identity provider configured, SAI Corp employees can now authenticate through federated SSO. In this exercise, Alice and Bob log in for the first time using the device flow. Each login automatically adds them to the SAI Corp Keycloak organization. You also trigger JIT (just-in-time) user provisioning by making an API call after each login.
+
+NOTE: The `osac whoami` command reads the local JWT token only — it does not contact the server. To create an OSAC user record, you must make at least one real API call (such as `osac get projects`) after logging in.
+
+=== Steps
+
+==== Onboard Alice
+
+. Switch to the *Terminal* tab and log out any existing session.
+. Log out any existing session:
++
+[source,role=execute,subs=attributes]
+----
+osac logout
+----
+
+. Start the device flow login for *Alice*:
++
+[source,role=execute,subs=attributes]
+----
+osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
+----
++
+The CLI displays a URL and a one-time code. Complete the login in your browser (not the Showroom interface):
++
+.. Copy the URL displayed in the terminal
+.. Open a new *incognito/private* browser window
+.. Paste the URL and press Enter
+.. Enter the code that the `osac login` command printed
+.. On the login page, enter `alice`, then click *Sign In*
+.. On the next login page, click *SAI Corp Corporate SSO* (the federated identity provider) at the bottom.
+.. Enter username `alice` and password `{osac_user_password}`, then click *Sign In*
+.. Approve the device authorization if prompted
+.. Return to the terminal — you should see `Authentication succeeded`
++
+IMPORTANT: Always use a fresh incognito window for each device flow login. A cached browser session may use the wrong identity.
+
+. Back in the terminal, confirm Alice's identity:
++
+[source,role=execute]
+----
+osac whoami
+----
++
+.Expected output
+----
+Logged in as: alice
+Tenant: sai-corp
+Roles: offline_access, uma_authorization, default-roles-my realm
+----
+
+. Trigger JIT user provisioning by making an API call:
++
+[source,role=execute]
+----
+osac get projects
+----
++
+.Expected output
+----
+TENANT    DELETING  PROJECT  NAME  TITLE  STATE
+shared    -         -        -     -      ACTIVE
+sai-corp  -         -        -     -      ACTIVE
+----
++
+This creates Alice's OSAC user record on the server. Without this call, Alice would exist only in Keycloak but not in the Red Hat cloud extensions user directory.
+
+. Check if Alice can list users (this requires tenant-admin authority):
++
+[source,role=execute]
+----
+osac get users
+----
++
+.Expected output
+[source]
+----
+Error: rpc error: code = PermissionDenied desc = permission denied
+----
+
+. Log out Alice:
++
+[source,role=execute,subs=attributes]
+----
+osac logout
+----
+
+==== Onboard Bob
+
+. Start the device flow login for Bob:
++
+[source,role=execute,subs=attributes]
+----
+osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
+----
++
+Complete the login in a *fresh incognito* window:
++
+.. Copy the URL displayed in the terminal
+.. Open a new *incognito/private* browser window
+.. Paste the URL and press Enter
+.. Enter the code that the `osac login` command printed
+.. On the login page, enter `bob`, then click *Sign In*
+.. On the next login page, click *SAI Corp Corporate SSO* (the federated identity provider) at the bottom.
+.. Enter username `bob` and password `{osac_user_password}`, then click *Sign In*
+.. Approve the device authorization if prompted
+.. Return to the terminal — you should see `Authentication succeeded`
++
+IMPORTANT: Always use a fresh incognito window for each device flow login. A cached browser session may use the wrong identity.
+
+. Confirm Bob's identity:
++
+[source,role=execute]
+----
+osac whoami
+----
++
+.Expected output
+----
+Logged in as: bob
+Tenant: sai-corp
+Roles: offline_access, uma_authorization, default-roles-my realm
+----
+
+. Trigger JIT provisioning for bob:
++
+[source,role=execute]
+----
+osac get projects
+----
++
+.Expected output
+----
+TENANT    DELETING  PROJECT  NAME  TITLE  STATE
+shared    -         -        -     -      ACTIVE
+sai-corp  -         -        -     -      ACTIVE
+----
+
+. Verify both users are now members of the SAI Corp Keycloak organization:
++
+[source,role=execute,subs=attributes]
+----
+KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
+  -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
+  | jq -r '.access_token')
+
+ORG_ID=$(curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
+  "{osac_keycloak_url}/admin/realms/osac/organizations?search=sai-corp" \
+  | jq -r '.[0].id')
+
+curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
+  "{osac_keycloak_url}/admin/realms/osac/organizations/${ORG_ID}/members" \
+  | jq '[.[].username]'
+----
++
+You should see `alice`, `bob`, and the break-glass account in the list.
++
+.Expected output
+[source]
+----
+[
+  "alice",
+  "bob",
+  "sai-corp-osac-break-glass"
+]
+----
+
+== Exercise 4: Assign roles and manage projects
+
+Alice needs tenant-admin authority to manage SAI Corp's projects and team access. Bob needs viewer access to a specific project. In this exercise, you assign roles using the platform's RoleBinding and ProjectMembership resources, then create a project and grant Bob read-only access.
+
+=== Steps
+
+==== Assign Alice as tenant admin
+
+. Log in as the platform administrator:
++
+[source,role="execute",subs="attributes"]
+----
+osac login --insecure \
+  --issuer="{osac_keycloak_url}/realms/osac" \
+  --flow=password \
+  --user={osac_admin_user} \
+  --password={osac_admin_password} \
+  {osac_fulfillment_internal_api_url}
+----
+
+. List the OSAC users and find Alice's UUID:
++
+[source,role="execute"]
+----
+osac get users
+----
++
+.Expected output
+[source]
+----
+ID                                    DELETING  NAME                       USERNAME                   EMAIL                            ENABLED  TENANT
+01a08652-5c6d-7b47-bf5f-09e9bd83d5e1  -         sai-corp-osac-break-glass  sai-corp-osac-break-glass  break-glass@sai-corp.osac.local  true     sai-corp
+01a086a9-f7fe-7079-9a83-028d202cedb2  -         alice                      alice                      -                                true     sai-corp
+01a086ab-68a0-7bc3-b9fe-1991cef6ae11  -         bob                        bob                        -                                true     sai-corp
+----
+
+. Extract Alice's user ID:
++
+[source,role="execute"]
+----
+ALICE_ID=$(osac get user alice -o json | jq -r .id)
+
+echo "ALICE_ID=${ALICE_ID}"
+----
++
+Confirm this is a UUID (36-character hex string with dashes). If it is empty, Alice has not logged in yet — return to Exercise 3.
+
+. Select the *Red Hat cloud extensions* tab on the right. You should still be logged in as the glass break user.
+. Navigate to *Role Bindings* and click *Create Role Binding*.
+. Create the role binding with the following properties:
+* *Name*: `tenant-admin-binding`
+* *Users*: Select `alice`
+* *Role*: `Tenant Administrator`
+. Click *Create*. The RoleBinding should reach `Ready` status within a few seconds.
+
+. In the *Terminal*, verify the RoleBinding is ready:
++
+[source,role="execute"]
+----
+osac get rolebinding -o yaml | grep -E 'name:|role:|state:|message:'
+----
++
+.Expected output
+[source]
+----
+  name: tenant-admin-binding
+  role:
+    name: tenant-admin
+      name: alice
+  message: Role tenant-admin assigned to 1 user(s)
+  state: ROLE_BINDING_STATE_READY
+----
++
+Expected: state `ROLE_BINDING_STATE_READY`, role `tenant-admin`.
+
+==== Verify Alice's tenant-admin access
+
+. Log in as Alice via the device flow to prove the `tenant-admin` role is in her token:
++
+[source,role="execute",subs="attributes"]
+----
+osac logout
+osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
+----
++
+Complete the login in a *fresh incognito* window. Log in with `alice` / `{osac_user_password}`.
+
+. Confirm Alice now has the `tenant-admin` role:
++
+[source,role="execute"]
+----
+osac whoami
+----
++
+Expected output includes `tenant-admin` in the Roles list:
++
+----
+Logged in as: alice
+Tenant: sai-corp
+Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
+----
+
+. Verify Alice can now list users (this requires `tenant-admin` authority):
++
+[source,role="execute"]
+----
+osac get users
+----
++
+You should see both `alice` and `bob` in the user list.
+
+==== Create a project and add Bob as viewer
+
+. Create a project for SAI Corp:
++
+[source,role="execute"]
+----
+cat > ${HOME}/osac-demo/sai-project.yaml <<'EOF'
+"@type": type.googleapis.com/osac.public.v1.Project
+metadata:
+  name: default
+  tenant: sai-corp
+spec:
+  title: Default Project
+  description: Primary project for SAI Corp
+EOF
+osac create -f ${HOME}/osac-demo/sai-project.yaml
+----
++
+.Expected output
+----
+Created project with name 'default' and identifier '01a086c1-51b3-7953-a149-334a7d0acf19'.
+----
+
+. List projects to confirm creation:
++
+[source,role="execute"]
+----
+osac get projects
+----
++
+.Expected output
+[source]
+----
+TENANT    DELETING  PROJECT  NAME     TITLE            STATE
+shared    -         -        -        -                ACTIVE
+sai-corp  -         -        -        -                ACTIVE
+sai-corp  -         -        default  Default Project  ACTIVE
+----
++
+You should see the `default` project in `ACTIVE` state. You may also see a row with  no name — this is the tenant root project, created automatically with the tenant. This is normal. And the `shared` project is a system project that is always present.
+
+. Save the project ID for later use:
++
+[source,role="execute"]
+----
+export PROJ_ID=$(osac get project default -o json | jq -r .id)
+
+echo "PROJ_ID=${PROJ_ID}"
+echo "PROJ_ID=${PROJ_ID}" >> $HOME/.bashrc
+----
+
+. Find Bob's user ID:
++
+[source,role="execute"]
+----
+BOB_ID=$(osac get user bob -o json | jq -r .id)
+
+echo "BOB_ID=${BOB_ID}"
+----
+
+. Grant Bob `viewer` access to the project using a `ProjectMembership`:
++
+[source,role="execute"]
+----
+cat > ${HOME}/osac-demo/bob-membership.yaml <<EOF
+"@type": type.googleapis.com/osac.public.v1.ProjectMembership
+metadata:
+  name: bob-viewer
+  tenant: sai-corp
+  project: default
+spec:
+  role: PROJECT_MEMBERSHIP_ROLE_VIEWER
+  users:
+  - id: "${BOB_ID}"
+EOF
+
+osac create -f ${HOME}/osac-demo/bob-membership.yaml
+----
++
+.Expected output
+----
+Created projectmembership with identifier '<uuid>'.
+----
+
+. Verify the membership is ready:
++
+[source,role="execute"]
+----
+osac get projectmemberships
 ----
 +
 Expected output:
 +
 ----
-Ready
+TENANT    ...  STATE  PROJECT  USERS     ROLE
+sai-corp  ...  READY  default  <bob-id>  VIEWER
 ----
 
-. Verify a namespace was created for the Finance tenant:
-+
-[source,bash,role="execute"]
-----
-oc get namespaces | grep finance
-----
+== Exercise 5: Verify RBAC enforcement
 
-=== Verify
-
-[source,bash,role="execute"]
-----
-oc get tenant finance -n osac \
-  -o jsonpath='Phase: {.status.phase}{"\n"}'
-oc get namespaces | grep finance
-----
-
-[.validate-button-placeholder]#validate-button-placeholder#
-
-== Exercise 3: Inspect the tenant's resources
-
-A `Ready` status confirms the operator finished provisioning. Now inspect the actual resources it created — storage, quotas, and network policies — to confirm the Finance tenant meets Sovereign Cloud Corp's isolation requirements before handing it off to the Finance team.
+The real proof of multi-tenancy is enforcement. In this exercise, you log in as Bob to confirm that a viewer can list projects but cannot delete them. Then you log back in as Alice to clean up the project and membership, demonstrating that tenant-admin authority is required for destructive operations.
 
 === Steps
 
-. Set a shell variable for the Finance tenant namespace so subsequent commands are shorter:
+==== Verify Bob's viewer restrictions
+
+. Log in as Bob via the device flow:
 +
-[source,bash,role="execute"]
+[source,role="execute",subs="attributes"]
 ----
-export FINANCE_NS=$(oc get namespaces | grep finance | awk '{print $1}' | head -1)
-echo "Finance namespace: $FINANCE_NS"
+osac logout
+osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
+----
++
+Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `bob` / `{osac_admin_password}`.
+
+. Confirm Bob's identity — note that `tenant-admin` does not appear in the roles:
++
+[source,role="execute"]
+----
+osac whoami
+----
++
+Expected output:
++
+----
+Logged in as: bob
+Tenant: sai-corp
+Roles: offline_access, uma_authorization, ...
 ----
 
-. Verify the Ceph RBD PersistentVolumeClaim was created and is bound:
+. Bob can list projects (viewer access):
 +
-[source,bash,role="execute"]
+[source,role="execute"]
 ----
-oc get pvc -n $FINANCE_NS
+osac get projects
 ----
 +
-The PVC should show `Bound` status. A `Pending` status means the Ceph cluster is not ready — see the troubleshooting section.
+You should see the `default` project in the list.
 
-. Confirm the storage class used by the PVC:
+. Bob cannot delete the project (RBAC enforcement):
 +
-[source,bash,role="execute"]
+[source,role="execute"]
 ----
-oc get pvc -n $FINANCE_NS \
-  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.storageClassName}{"\t"}{.status.phase}{"\n"}{end}'
+source ${HOME}/osac-demo/proj-id.sh
+osac delete project ${PROJ_ID}
 ----
 +
-The storage class should be `ocs-storagecluster-ceph-rbd` — Ceph block storage that stays within the sovereign cluster.
+Expected output:
++
+----
+Failed to delete project '<PROJ_ID>': rpc error: code = PermissionDenied desc = permission denied
+----
++
+This `PermissionDenied` error confirms that RBAC is working: a viewer can read but not modify resources.
 
-. Inspect the ResourceQuota applied by the Red Hat cloud extensions operator:
-+
-[source,bash,role="execute"]
-----
-oc get resourcequota -n $FINANCE_NS -o yaml
-----
-+
-Verify the CPU, memory, and PVC limits match the values you specified in the tenant manifest.
+== Troubleshooting
 
-. Check whether a LimitRange is also in place:
-+
-[source,bash,role="execute"]
-----
-oc get limitrange -n $FINANCE_NS
-----
+=== IdP login shows "Unexpected error when authenticating with identity provider"
 
-. Review the NetworkPolicy rules that isolate the Finance tenant:
+**Issue**: Browser login redirects to an error page instead of the corporate IdP login form.
 +
-[source,bash,role="execute"]
-----
-oc get networkpolicy -n $FINANCE_NS -o yaml
-----
-+
-Look for policies that allow ingress only from the `osac` namespace and deny cross-tenant traffic by default.
+**Solution**: This usually indicates an issuer mismatch between the identity provider configuration and the Keycloak broker. Verify the OIDC endpoints match:
 
-. Get a full summary of the tenant with `oc describe`:
-+
-[source,bash,role="execute"]
+[source,role="execute"]
 ----
-oc describe tenant finance -n osac
+osac get identityprovider oidc --output yaml | grep -E 'issuer:|authorizationUrl:|tokenUrl:'
 ----
 
-=== Verify
+=== Logged in as the wrong user
 
-Run this combined check to confirm all tenant resources are present and healthy:
+**Issue**: `osac whoami` shows an unexpected username after device flow login. +
+**Solution**: Use a fresh incognito/private browser window for every device flow login. A cached browser session reuses the previous identity. Log out and try again with a clean window.
 
-[source,bash,role="execute"]
-----
-export FINANCE_NS=$(oc get namespaces | grep finance | awk '{print $1}' | head -1)
-echo "=== Tenant Phase ==="
-oc get tenant finance -n osac \
-  -o jsonpath='{.status.phase}{"\n"}'
-echo "=== PVC Status ==="
-oc get pvc -n $FINANCE_NS
-echo "=== Resource Quota ==="
-oc get resourcequota -n $FINANCE_NS
-echo "=== Network Policies ==="
-oc get networkpolicy -n $FINANCE_NS
-----
+=== `osac get users` returns PermissionDenied
 
-[.validate-button-placeholder]#validate-button-placeholder#
+**Issue**: Running `osac get users` fails with PermissionDenied. +
+**Solution**: This command requires `tenant-admin` authority. It is expected to fail for regular users like Bob. Only platform administrators and tenant-admins can list users.
 
 == Learning outcomes checkpoint
 
 Review what you completed in this module:
 
-* [x] Examined the built-in `shared` and `system` tenants and confirmed they are in a `Ready` state with associated namespaces, quotas, and network policies
-* [x] Created a `finance` tenant using a YAML manifest, specifying Ceph storage, resource quotas, and network boundaries
-* [x] Watched the Red Hat cloud extensions operator provision the tenant and verified it reached `Ready` status
-* [x] Confirmed Ceph RBD storage is `Bound`, resource quotas are applied, and network policies enforce isolation
+* [x] Created the `sai-corp` tenant and saved the one-time break-glass credentials
+* [x] Verified automatic provisioning of the Keycloak organization and tenant namespace
+* [x] Created a secret for the OIDC client
+* [x] Configured a corporate identity provider for federated SSO
+* [x] Onboarded Alice and Bob through device flow login with JIT user provisioning
+* [x] Assigned Alice as tenant-admin using a RoleBinding
+* [x] Created a project and granted Bob viewer access via ProjectMembership
+* [x] Confirmed RBAC enforcement: Bob can list but cannot delete resources
 
-[.solve-button-placeholder]#solve-button-placeholder#
+== Module summary
 
-== Troubleshooting
-
-=== Tenant stays in `Provisioning` state
-
-**Issue**: The `finance` tenant does not reach `Ready` and stays in `Provisioning`. +
-**Solution**: Check the Red Hat cloud extensions operator logs for provisioning errors:
-
-[source,bash,role="execute"]
-----
-oc logs -l app=osac-operator -n osac --tail=50
-----
-
-=== PVC stays in `Pending` state
-
-**Issue**: The PersistentVolumeClaim shows `Pending` instead of `Bound`. +
-**Solution**: Verify the Ceph storage class exists and the storage cluster is healthy:
-
-[source,bash,role="execute"]
-----
-oc get storageclass ocs-storagecluster-ceph-rbd
-oc get cephcluster -A
-----
-
-=== Tenant creation returns a validation error
-
-**Issue**: `oc apply` rejects the manifest with a CRD validation error. +
-**Solution**: Confirm the `Tenant` CRD is installed on the cluster:
-
-[source,bash,role="execute"]
-----
-oc get crd | grep osac
-oc api-resources | grep -i tenant
-----
-
-=== Namespace not created after tenant reaches `Ready`
-
-**Issue**: The tenant shows `Ready` but no corresponding namespace appears. +
-**Solution**: Check the Red Hat cloud extensions namespace events for namespace creation failures:
-
-[source,bash,role="execute"]
-----
-oc get events -n osac --sort-by='.lastTimestamp' | tail -20
-----
-
-== Module 2 summary
-
-The Finance department now has a fully provisioned, isolated environment on Red Hat cloud extensions. Their namespace is backed by Ceph storage, bounded by resource quotas, and protected by network policies that enforce Sovereign Cloud Corp's data sovereignty requirements.
-
-**What you accomplished:**
-
-* Examined the `shared` and `system` tenants to understand the target state for a healthy tenant
-* Created a `finance` tenant with a YAML manifest specifying Ceph RBD storage and resource quotas
-* Verified the tenant reached `Ready` status with all associated resources provisioned by the operator
-* Confirmed storage is bound, quotas are applied, and network isolation is in place
+SAI Corp is now onboarded with full identity federation and role-based access control. Their employees authenticate through their corporate identity provider, and the platform enforces the boundaries between administrators and viewers.
 
 **Key takeaways for Sovereign Cloud Corp:**
 
-* Tenant resources are fully declarative — every environment is reproducible from a manifest in version control
-* Ceph RBD storage is provisioned automatically when a tenant is created, so sovereign financial data never leaves the cluster
-* Network isolation between tenants is enforced at the platform level, which simplifies compliance audits for regulated government workloads
-
-**Next module preview:**
-Module 3 covers the Red Hat cloud extensions service catalog — you'll publish catalog items and deploy workloads into the Finance tenant using the fulfillment service and osac CLI.
+* Tenant creation is fully automated — the platform handles Keycloak organization, namespace, and emergency access provisioning in a single operation
+* Identity federation means corporate users never receive platform passwords; authentication flows through their existing IdP
+* RBAC operates at two levels: RoleBindings for tenant-wide authority and ProjectMemberships for project-scoped access
+* The break-glass account provides emergency access when the corporate IdP is unavailable — its password must be saved at creation time
