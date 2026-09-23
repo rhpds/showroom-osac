@@ -15,7 +15,7 @@ By the end of this module, you'll be able to:
 
 * Configure a storage backend and storage tier for tenant workloads
 * Create disk images and instance types as platform-level building blocks
-* Author and publish a `ComputeInstanceCatalogItem` with field definitions
+* Author and publish a `ComputeInstanceCatalogItem` referencing a VM template
 * Deploy a virtual machine from the catalog as a tenant administrator
 * Verify that RBAC enforcement prevents unauthorized VM operations
 
@@ -96,6 +96,11 @@ Ready [{"product":"osac-sai-corp-local","tier":"local"}]
 +
 The tenant must show `Ready` and list a class with `"tier":"local"` before proceeding.
 
+[HINT]
+====
+You can also verify that storage is setup in the Red Hat cloud extensions UI. As a platform administrator, navigate to *Infrastructure → Storage Tiers* and confirm that the `local` backend and tier is listed with a green status of `Active`.
+====
+
 == Exercise 2: Publish VM building blocks to the catalog
 
 A tenant cannot deploy a virtual machine without three platform-level resources: a *disk image* (the OS source), an *instance type* (CPU and memory sizing), and a *catalog item* (the self-service template that ties them together). In this exercise, you create all three as the platform administrator.
@@ -133,8 +138,8 @@ osac get diskimage fedora
 +
 .Sample output
 ----
-NAME    STATE      ARCHITECTURE  SOURCE
-fedora  AVAILABLE  amd64         quay.io/containerdisks/fedora:latest
+NAME    DELETING  SOURCE_REF                            GUEST_OS_FAMILY  ARCHITECTURE  LIFECYCLE  TENANT
+fedora  -         quay.io/containerdisks/fedora:latest  LINUX            AMD64         AVAILABLE  shared
 ----
 
 . Create an instance type that defines the VM sizing — 1 vCPU and 2 GiB RAM:
@@ -143,7 +148,7 @@ fedora  AVAILABLE  amd64         quay.io/containerdisks/fedora:latest
 ----
 osac create instancetype \
   --name small-1-2 \
-  --cores 1 \
+  --vcpus 1 \
   --memory-gib 2 \
   --description 'Small - 1 vCPU, 2 GiB RAM'
 ----
@@ -157,11 +162,11 @@ osac get instancetype small-1-2
 +
 .Sample output
 ----
-NAME       STATE   CORES  MEMORY_GIB  DESCRIPTION
-small-1-2  ACTIVE  1      2           Small - 1 vCPU, 2 GiB RAM
+NAME       DELETING  VCPUS  MEMORY  GPUS  GPU NAME  STATE   DESCRIPTION
+small-1-2  -         1      2       0     -         ACTIVE  Small - 1 vCPU, 2 GiB RAM
 ----
 
-. Create the catalog item definition file. The `field_definitions` section declares which parameters tenants can customize when ordering a VM:
+. Create the catalog item definition file. The catalog item references the `ocp_virt_vm` template, which tells the platform to provision an OpenShift Virtualization VM. All VM parameters (disk image, instance type, boot disk size, etc.) are passed as CLI flags when creating the compute instance:
 +
 [source,role=execute]
 ----
@@ -174,36 +179,8 @@ description: Standard Linux virtual machine for tenant workloads
 template:
   id: osac.templates.ocp_virt_vm
 published: true
-field_definitions:
-  - path: boot_disk.size_gib
-    display_name: Boot Disk Size (GiB)
-    editable: true
-    default: "10"
-  - path: boot_disk.storage_tier
-    display_name: Boot Disk Storage Tier
-    editable: true
-    default: local
-  - path: disk_image
-    display_name: Disk image
-    editable: true
-    default: fedora
-  - path: instance_type
-    display_name: Instance type
-    editable: true
-  - path: run_strategy
-    display_name: Run Strategy
-    editable: true
-    default: Always
-  - path: user_data
-    display_name: Cloud Init User Data
-    editable: true
-  - path: network_attachments
-    display_name: Network attachments
-    editable: true
 EOF
 ----
-+
-IMPORTANT: The `boot_disk.storage_tier` default must be the plain string `local`. Using `{name: local}` fails protobuf validation. Catalog items created through the UI sometimes omit this field, causing VM creation to fail with `boot_disk.storage_tier is required`.
 
 . Apply the catalog item:
 +
@@ -214,7 +191,7 @@ osac create -f ${HOME}/osac-demo/standard-linux-vm.yaml
 +
 .Sample output
 ----
-Created computeinstancecatalogitem with name 'standard-linux-vm' and identifier '<uuid>'.
+Created computeinstancecatalogitem name 'standard-linux-vm' and identifier '01a0cef5-8a40-71e7-ad78-17a9ba6f8d13'.
 ----
 
 . Verify the catalog item is published:
@@ -339,25 +316,114 @@ osac create computeinstance \
   --name portal-vm \
   --catalog-item "${CATALOG_ID}" \
   --instance-type small-1-2 \
+  --disk-image fedora \
   --boot-disk-size 10 \
+  --boot-disk-storage-tier local \
   --run-strategy Always \
+  --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}" \
   --user-data '#cloud-config
 user: osac-admin
 password: password
 chpasswd:
   expire: false
-ssh_pwauth: true' \
-  --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}"
+ssh_pwauth: true'
 ----
 +
 .Sample output
 ----
 Created computeinstance with name 'portal-vm' and identifier '<uuid>'.
 ----
-+
-Do not pass `--boot-disk-storage-tier` when the catalog item already defaults to `local`.
 
-. Wait for the VM to reach `RUNNING` status. This typically takes 30 to 90 seconds as the platform pulls the disk image and starts the guest:
+. The VM will initially fail to import the disk image because CDI tries to pull from quay.io inside the pod network, which does not have external access on this cluster. This is a known issue. You need to switch to a *platform administrator* session briefly to fix the DataVolume import method.
++
+Log in as the platform administrator:
++
+[source,role=execute,subs=attributes]
+----
+osac login --insecure \
+  --issuer="{osac_keycloak_url}/realms/osac" \
+  --flow=password \
+  --user={osac_admin_user} \
+  --password={osac_admin_password} \
+  {osac_fulfillment_internal_api_url}
+----
+
+. Identify the VM and DataVolume names. The platform generates internal names that differ from the name you specified:
++
+[source,role=execute]
+----
+VM_NS=$(oc get vm -A --no-headers | grep -v NAME | head -1 | awk '{print $1}')
+VM_NAME=$(oc get vm -A --no-headers | grep -v NAME | head -1 | awk '{print $2}')
+DV_NAME=$(oc get dv -n "${VM_NS}" --no-headers | awk '{print $1}')
+
+echo "VM_NS=${VM_NS}"
+echo "VM_NAME=${VM_NAME}"
+echo "DV_NAME=${DV_NAME}"
+----
+
+. Halt the VM, delete the stuck DataVolume, and recreate it with `pullMethod: node` so the image is pulled through the node's network instead:
++
+[source,role=execute]
+----
+oc patch vm "${VM_NAME}" -n "${VM_NS}" --type=merge \
+  -p '{"spec":{"runStrategy":"Halted"}}'
+sleep 5
+
+oc delete dv "${DV_NAME}" -n "${VM_NS}" --wait=true --timeout=180s
+
+oc get pvc -n "${VM_NS}" --no-headers | awk '/prime-/{print $1}' \
+  | xargs -r -n1 oc delete pvc -n "${VM_NS}" --wait=false
+
+cat <<EOF | oc apply -f -
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: ${DV_NAME}
+  namespace: ${VM_NS}
+  annotations:
+    cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+spec:
+  source:
+    registry:
+      url: docker://quay.io/containerdisks/fedora:latest
+      pullMethod: node
+  pvc:
+    accessModes: [ReadWriteOnce]
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: lvms-vg1
+EOF
+----
+
+. Watch the DataVolume until it reaches `Succeeded`:
++
+[source,role=execute]
+----
+oc get dv "${DV_NAME}" -n "${VM_NS}" -w
+----
++
+Press `Ctrl+C` when the status shows `Succeeded`.
+
+. Restart the VM:
++
+[source,role=execute]
+----
+oc patch vm "${VM_NAME}" -n "${VM_NS}" --type=merge \
+  -p '{"spec":{"runStrategy":"Always"}}'
+----
+
+. Switch back to Alice's session and wait for the VM to reach `RUNNING`:
++
+[source,role=execute,subs=attributes]
+----
+osac logout
+osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
+----
++
+Complete the device flow login as Alice in a *fresh incognito* window.
+
+. Check the VM status:
 +
 [source,role=execute]
 ----
@@ -371,17 +437,15 @@ sai-corp  portal-vm  RUNNING  10.200.0.x   ...
 ----
 +
 Repeat the command until the state shows `RUNNING` and an IP address appears in the tenant subnet range (e.g., `10.200.x.x`).
-+
-If the VM stays in `STARTING` for more than two minutes, see the <<troubleshooting>> section.
 
-. Verify the underlying KubeVirt resources were created on the OpenShift cluster:
+. Verify the underlying KubeVirt resources on the OpenShift cluster:
 +
 [source,role=execute]
 ----
-oc get vm,vmi -A | grep -E 'NAME|portal'
+oc get vm,vmi -A --no-headers
 ----
 +
-Both the `VirtualMachine` and `VirtualMachineInstance` objects should show `Running`.
+The `VirtualMachine` and `VirtualMachineInstance` objects should show `Running`.
 
 . Access the VM serial console:
 +
@@ -500,65 +564,7 @@ Wait for the rollout to complete, then retry the failing `osac` command. You do 
 
 === Disk import stuck — no route to quay.io
 
-**Issue**: The VM stays in `STARTING` and the DataVolume shows `ImportInProgress` with events reporting `no route to host` to `quay.io`. +
-**Cause**: The default CDI import method tries to pull the container disk from inside the pod network, which may not have external access. +
-**Solution**: Recreate the DataVolume with `pullMethod: node`, which uses the node's network to pull the image:
-
-[source,role=execute]
-----
-DV_NS=$(oc get dv -A --no-headers | grep root-disk | awk '{print $1}')
-DV_NAME=$(oc get dv -A --no-headers | grep root-disk | awk '{print $2}')
-VM_NAME=${DV_NAME%-root-disk}
-
-echo "Repairing: ${DV_NS}/${DV_NAME} for VM ${VM_NAME}"
-----
-
-Then halt the VM, delete the stuck DataVolume, and recreate it with `pullMethod: node`:
-
-[source,role=execute]
-----
-oc patch vm "${VM_NAME}" -n "${DV_NS}" --type=merge \
-  -p '{"spec":{"runStrategy":"Halted"}}' || true
-sleep 5
-oc delete dv "${DV_NAME}" -n "${DV_NS}" --wait=true --timeout=180s
-
-LABELS=$(oc get dv "${DV_NAME}" -n "${DV_NS}" -o json 2>/dev/null | jq -c '.metadata.labels // {}')
-LABELS=${LABELS:-'{}'}
-SC=$(oc get pvc -n "${DV_NS}" --no-headers 2>/dev/null | head -1 | awk '{print $7}')
-SC=${SC:-lvms-vg1}
-
-cat <<EOF | oc apply -f -
-apiVersion: cdi.kubevirt.io/v1beta1
-kind: DataVolume
-metadata:
-  name: ${DV_NAME}
-  namespace: ${DV_NS}
-  labels: ${LABELS}
-  annotations:
-    cdi.kubevirt.io/storage.bind.immediate.requested: "true"
-spec:
-  source:
-    registry:
-      url: docker://quay.io/containerdisks/fedora:latest
-      pullMethod: node
-  pvc:
-    accessModes: [ReadWriteOnce]
-    resources:
-      requests:
-        storage: 10Gi
-    storageClassName: ${SC}
-EOF
-
-oc get dv "${DV_NAME}" -n "${DV_NS}" -w
-----
-
-Press `Ctrl+C` when the DataVolume shows `Succeeded`, then restart the VM:
-
-[source,role=execute]
-----
-oc patch vm "${VM_NAME}" -n "${DV_NS}" --type=merge \
-  -p '{"spec":{"runStrategy":"Always"}}'
-----
+NOTE: This issue is handled in Exercise 4 as a required step. If you need to repeat the fix (for example, after recreating a VM), follow the same pattern: halt the VM, delete the DataVolume, recreate it with `pullMethod: node`, and restart the VM.
 
 == Learning outcomes checkpoint
 
@@ -567,7 +573,7 @@ Review what you completed in this module:
 * [x] Configured a storage backend and storage tier for tenant workloads
 * [x] Labeled the Kubernetes storage class to map the `local` tier to the `sai-corp` tenant
 * [x] Created a Fedora disk image and a compute instance type as platform building blocks
-* [x] Authored and published a `ComputeInstanceCatalogItem` with editable field definitions
+* [x] Authored and published a `ComputeInstanceCatalogItem` referencing the OpenShift Virtualization template
 * [x] Deployed a virtual machine from the catalog as tenant administrator Alice
 * [x] Verified the VM reached `RUNNING` state with an IP address on the tenant subnet
 * [x] Confirmed RBAC enforcement: Bob can view the VM but cannot create or delete one
@@ -579,6 +585,6 @@ SAI Corp can now provision virtual machines on demand through the Red Hat cloud 
 **Key takeaways for Sovereign Cloud Corp:**
 
 * *Storage tiers bridge Kubernetes and the catalog*: The `local` tier links a Kubernetes storage class to the fulfillment workflow. Without this mapping, VM creation fails at the boot disk step.
-* *Catalog items are self-service templates*: The `field_definitions` in a catalog item control what tenants can customize. Defaults (like `storage_tier: local` and `disk_image: fedora`) reduce what tenants need to specify at ordering time.
+* *Catalog items are self-service templates*: A catalog item references a VM template and makes it available in the service catalog. Tenants specify parameters like disk image, instance type, and networking at ordering time via CLI flags.
 * *RBAC extends to workloads*: The same RoleBinding and ProjectMembership model from Module 2 governs compute instances. A viewer can see workloads but cannot create or destroy them.
 * *Platform admin vs. tenant admin separation*: Storage, images, instance types, and catalog items are platform-level concerns. VM deployment is a tenant-level action. This separation lets platform teams control what is available while tenants control what is deployed.
