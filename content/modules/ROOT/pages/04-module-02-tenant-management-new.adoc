@@ -761,71 +761,6 @@ Failed to delete project '<PROJ_ID>': rpc error: code = PermissionDenied desc = 
 +
 This `PermissionDenied` error confirms that RBAC is working: a viewer can read but not modify resources.
 
-==== Clean up as Alice
-
-. Log in as Alice via the device flow:
-+
-[source,role="execute",subs="attributes"]
-----
-osac logout
-osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
-----
-+
-Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `alice` / `{osac_admin_password}`.
-
-. Confirm Alice's identity:
-+
-[source,role="execute"]
-----
-osac whoami
-----
-
-. Delete all project memberships first. Memberships must be removed before the project can be deleted:
-+
-[source,role="execute"]
-----
-osac get projectmemberships
-osac get projectmemberships 2>/dev/null \
-  | awk 'NR>1 && $1=="sai-corp"{print $3}' \
-  | while read -r pmid; do
-      [[ -n "$pmid" && "$pmid" != "-" ]] && osac delete projectmembership "$pmid" || true
-    done
-----
-
-. Delete the project:
-+
-[source,role="execute"]
-----
-source ${HOME}/osac-demo/proj-id.sh
-osac delete project ${PROJ_ID}
-----
-+
-Expected output:
-+
-----
-Deleted project '<PROJ_ID>'.
-----
-
-. Confirm the cleanup:
-+
-[source,role="execute"]
-----
-osac get projects
-----
-+
-The `default` project should be gone. The tenant root project (`UNSPECIFIED` state) remains — this is normal.
-
-=== Verify
-
-[source,role="execute"]
-----
-osac get projects | grep -q "default" \
-  && echo "Project still exists" || echo "Cleanup complete"
-----
-
-[.solve-button-placeholder]#solve-button-placeholder#
-[.validate-button-placeholder]#validate-button-placeholder#
-
 == Troubleshooting
 
 === IdP login shows "Unexpected error when authenticating with identity provider"
@@ -837,17 +772,6 @@ osac get projects | grep -q "default" \
 [source,role="execute"]
 ----
 osac get identityprovider oidc --output yaml | grep -E 'issuer:|authorizationUrl:|tokenUrl:'
-----
-
-=== Project stuck in DELETING state
-
-**Issue**: After deleting a project, it remains with `DELETING=Yes` in `osac get projects`.
-+
-**Solution**: Delete all ProjectMembership resources associated with the project first, then retry the delete. If it remains stuck, clear the finalizers:
-
-[source,role="execute"]
-----
-EDITOR='sed -i "s/  finalizers:$/  finalizers: []/"' osac edit project ${PROJ_ID}
 ----
 
 === Logged in as the wrong user
@@ -866,6 +790,7 @@ Review what you completed in this module:
 
 * [x] Created the `sai-corp` tenant and saved the one-time break-glass credentials
 * [x] Verified automatic provisioning of the Keycloak organization and tenant namespace
+* [x] Created a secret for the OIDC client
 * [x] Configured a corporate identity provider for federated SSO
 * [x] Onboarded Alice and Bob through device flow login with JIT user provisioning
 * [x] Assigned Alice as tenant-admin using a RoleBinding
@@ -876,21 +801,9 @@ Review what you completed in this module:
 
 SAI Corp is now onboarded with full identity federation and role-based access control. Their employees authenticate through their corporate identity provider, and the platform enforces the boundaries between administrators and viewers.
 
-**What you accomplished:**
-
-* Created a tenant and verified that Red Hat cloud extensions automatically provisions the Keycloak organization, namespace, and break-glass account
-* Configured federated SSO by registering an external identity provider
-* Onboarded users through device flow login and triggered JIT user provisioning
-* Assigned a tenant-admin role and created a project with viewer membership
-* Proved that RBAC enforcement works: viewers can read resources but cannot modify or delete them
-
 **Key takeaways for Sovereign Cloud Corp:**
 
 * Tenant creation is fully automated — the platform handles Keycloak organization, namespace, and emergency access provisioning in a single operation
 * Identity federation means corporate users never receive platform passwords; authentication flows through their existing IdP
 * RBAC operates at two levels: RoleBindings for tenant-wide authority and ProjectMemberships for project-scoped access
 * The break-glass account provides emergency access when the corporate IdP is unavailable — its password must be saved at creation time
-
-**Next module preview:**
-
-Module 3 covers the Red Hat cloud extensions service catalog — you'll publish catalog items and deploy workloads into the tenant environment using the fulfillment service.
