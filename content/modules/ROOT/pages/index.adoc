@@ -55,8 +55,8 @@ Your access details are provided in the **Credentials** page for reference. They
 
 * *Module 1*: Exploring the Red Hat cloud extensions Platform (30 minutes)
 * *Module 2*: Managing Tenants (30 minutes)
-* *Module 3*: Catalog Items and Workloads (30 minutes)
+* *Module 3*: Virtual Machine as a Service — VMaaS (30 minutes)
 
 Each module builds on the previous one. No formal breaks are scheduled — pause between modules as needed.
 
-Work at your own pace. If time is short, focus on Modules 1 and 2 for the core platform concepts.
+Work at your own pace. If time is short, focus on Modules 1 and 2 for the core platform concepts. Module 3 requires Module 2 (it uses the tenant and users created there).

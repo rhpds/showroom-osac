@@ -69,7 +69,7 @@ IMPORTANT: Copy and save the break-glass password now. It is displayed only duri
 osac get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
 ----
 +
-.Expected output:
+.Sample output
 [source,json]
 ----
 {
@@ -318,7 +318,7 @@ type: SECRET_TYPE_VALUE
 osac get identityprovider sai-corp --output yaml | grep -E 'phase:|message:|client_id:'
 ----
 +
-.Expected output
+.Sample output
 ----
   client_id: osac-federation
   message: 'Identity provider created successfully with alias: sai-corp-sai-corp'
@@ -371,7 +371,7 @@ IMPORTANT: Always use a fresh incognito window for each device flow login. A cac
 osac whoami
 ----
 +
-.Expected output
+.Sample output
 ----
 Logged in as: alice
 Tenant: sai-corp
@@ -385,7 +385,7 @@ Roles: offline_access, uma_authorization, default-roles-my realm
 osac get projects
 ----
 +
-.Expected output
+.Sample output
 ----
 TENANT    DELETING  PROJECT  NAME  TITLE  STATE
 shared    -         -        -     -      ACTIVE
@@ -401,7 +401,7 @@ This creates Alice's OSAC user record on the server. Without this call, Alice wo
 osac get users
 ----
 +
-.Expected output
+.Sample output
 [source]
 ----
 Error: rpc error: code = PermissionDenied desc = permission denied
@@ -444,7 +444,7 @@ IMPORTANT: Always use a fresh incognito window for each device flow login. A cac
 osac whoami
 ----
 +
-.Expected output
+.Sample output
 ----
 Logged in as: bob
 Tenant: sai-corp
@@ -458,7 +458,7 @@ Roles: offline_access, uma_authorization, default-roles-my realm
 osac get projects
 ----
 +
-.Expected output
+.Sample output
 ----
 TENANT    DELETING  PROJECT  NAME  TITLE  STATE
 shared    -         -        -     -      ACTIVE
@@ -484,7 +484,7 @@ curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
 +
 You should see `alice`, `bob`, and the break-glass account in the list.
 +
-.Expected output
+.Sample output
 [source]
 ----
 [
@@ -521,7 +521,7 @@ osac login --insecure \
 osac get users
 ----
 +
-.Expected output
+.Sample output
 [source]
 ----
 ID                                    DELETING  NAME                       USERNAME                   EMAIL                            ENABLED  TENANT
@@ -556,7 +556,7 @@ Confirm this is a UUID (36-character hex string with dashes). If it is empty, Al
 osac get rolebinding -o yaml | grep -E 'name:|role:|state:|message:'
 ----
 +
-.Expected output
+.Sample output
 [source]
 ----
   name: tenant-admin-binding
@@ -623,7 +623,7 @@ EOF
 osac create -f ${HOME}/osac-demo/sai-project.yaml
 ----
 +
-.Expected output
+.Sample output
 ----
 Created project with name 'default' and identifier '01a086c1-51b3-7953-a149-334a7d0acf19'.
 ----
@@ -635,7 +635,7 @@ Created project with name 'default' and identifier '01a086c1-51b3-7953-a149-334a
 osac get projects
 ----
 +
-.Expected output
+.Sample output
 [source]
 ----
 TENANT    DELETING  PROJECT  NAME     TITLE            STATE
@@ -675,7 +675,7 @@ EOF
 osac create -f ${HOME}/osac-demo/bob-membership.yaml
 ----
 +
-.Expected output
+.Sample output
 ----
 Created projectmembership with identifier '<uuid>'.
 ----

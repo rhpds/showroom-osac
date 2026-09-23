@@ -1,0 +1,609 @@
+= Module 3: Virtual Machine as a Service (VMaaS)
+:source-highlighter: rouge
+:toc: macro
+:toclevels: 2
+
+toc::[]
+
+SAI Corp's tenant is onboarded, users are federated, and role-based access control is enforced. But SAI Corp's teams still cannot do anything with the platform — they need compute. Specifically, they need virtual machines they can provision on demand without filing a ticket.
+
+In this module, you close that gap. As the Sovereign Cloud Corp platform administrator, you configure the storage, disk images, instance types, and catalog items that make self-service VM provisioning possible. Then Alice, SAI Corp's tenant administrator, deploys a virtual machine from the catalog. Finally, you verify that Bob, the project viewer, can see the VM but cannot create or delete one — proving that RBAC extends to workloads.
+
+== Learning objectives
+
+By the end of this module, you'll be able to:
+
+* Configure a storage backend and storage tier for tenant workloads
+* Create disk images and instance types as platform-level building blocks
+* Author and publish a `ComputeInstanceCatalogItem` with field definitions
+* Deploy a virtual machine from the catalog as a tenant administrator
+* Verify that RBAC enforcement prevents unauthorized VM operations
+
+== Exercise 1: Configure storage for tenant workloads
+
+Before any tenant can deploy a virtual machine, the platform needs a storage tier. The VM creation workflow in Red Hat cloud extensions requires a storage tier named `local` — this is the tier that the fulfillment service requests from Ansible Automation Platform when provisioning boot disks.
+
+In this exercise, you create the storage backend and tier as the platform administrator, then label the Kubernetes storage class so the `sai-corp` tenant can use it.
+
+=== Steps
+
+. Log in to the Red Hat cloud extensions platform as the *platform administrator*:
++
+[source,role=execute,subs=attributes]
+----
+osac login --insecure \
+  --issuer="{osac_keycloak_url}/realms/osac" \
+  --flow=password \
+  --user={osac_admin_user} \
+  --password={osac_admin_password} \
+  {osac_fulfillment_internal_api_url}
+----
+
+. Check whether a storage backend and storage tier already exist:
++
+[source,role=execute]
+----
+osac get storagebackend
+osac get storagetier
+----
++
+If both commands return a `local` entry, skip to step 6.
+
+. Create a storage backend using the LVMS provider:
++
+[source,role=execute]
+----
+osac create storagebackend \
+  --name local \
+  --provider lvms \
+  --endpoint n/a \
+  --username n/a \
+  --password n/a
+----
++
+.Sample output
+----
+Created storagebackend with name 'local' and identifier '<uuid>'.
+----
+
+. Retrieve the backend UUID and create the storage tier:
++
+[source,role=execute]
+----
+BACKEND_ID=$(osac get storagebackend local -o json | jq -r '.id')
+
+osac create storagetier \
+  --name local \
+  --backend-id "${BACKEND_ID}" \
+  --protocol BLOCK
+----
++
+.Sample output
+----
+Created storagetier with name 'local' and identifier '<uuid>'.
+----
+
+. Verify the storage tier is active:
++
+[source,role=execute]
+----
+osac get storagetier
+----
++
+.Sample output
+----
+NAME   STATE   ...
+local  ACTIVE  ...
+----
+
+. Label the LVM storage class for the `sai-corp` tenant so the platform maps the `local` tier to the correct Kubernetes storage class:
++
+[source,role=execute]
+----
+oc label sc lvms-vg1 \
+  osac.openshift.io/tenant="sai-corp" \
+  osac.openshift.io/storage-tier=local \
+  --overwrite
+----
+
+. Verify the tenant shows `Ready` with the `local` storage tier:
++
+[source,role=execute]
+----
+oc get tenant sai-corp -n osac \
+  -o jsonpath='{.status.phase} {.status.storageClasses}{"\n"}'
+----
++
+.Sample output
+----
+Ready [{"product":"osac-sai-corp-local","tier":"local"}]
+----
++
+The tenant must show `Ready` and list a class with `"tier":"local"` before proceeding.
+
+== Exercise 2: Publish VM building blocks to the catalog
+
+A tenant cannot deploy a virtual machine without three platform-level resources: a *disk image* (the OS source), an *instance type* (CPU and memory sizing), and a *catalog item* (the self-service template that ties them together). In this exercise, you create all three as the platform administrator.
+
+=== Steps
+
+. Ensure you are still logged in as the platform administrator. If not, log in again:
++
+[source,role=execute,subs=attributes]
+----
+osac login --insecure \
+  --issuer="{osac_keycloak_url}/realms/osac" \
+  --flow=password \
+  --user={osac_admin_user} \
+  --password={osac_admin_password} \
+  {osac_fulfillment_internal_api_url}
+----
+
+. Create a Fedora disk image from the public container disk registry:
++
+[source,role=execute]
+----
+osac create diskimage \
+  --name fedora \
+  --source-ref quay.io/containerdisks/fedora:latest \
+  --architecture amd64
+----
+
+. Verify the disk image reaches `AVAILABLE` status:
++
+[source,role=execute]
+----
+osac get diskimage fedora
+----
++
+.Sample output
+----
+NAME    STATE      ARCHITECTURE  SOURCE
+fedora  AVAILABLE  amd64         quay.io/containerdisks/fedora:latest
+----
+
+. Create an instance type that defines the VM sizing — 1 vCPU and 2 GiB RAM:
++
+[source,role=execute]
+----
+osac create instancetype \
+  --name small-1-2 \
+  --cores 1 \
+  --memory-gib 2 \
+  --description 'Small - 1 vCPU, 2 GiB RAM'
+----
+
+. Verify the instance type is active:
++
+[source,role=execute]
+----
+osac get instancetype small-1-2
+----
++
+.Sample output
+----
+NAME       STATE   CORES  MEMORY_GIB  DESCRIPTION
+small-1-2  ACTIVE  1      2           Small - 1 vCPU, 2 GiB RAM
+----
+
+. Create the catalog item definition file. The `field_definitions` section declares which parameters tenants can customize when ordering a VM:
++
+[source,role=execute]
+----
+cat > ${HOME}/osac-demo/standard-linux-vm.yaml <<'EOF'
+"@type": type.googleapis.com/osac.public.v1.ComputeInstanceCatalogItem
+metadata:
+  name: standard-linux-vm
+title: Standard Linux VM
+description: Standard Linux virtual machine for tenant workloads
+template:
+  id: osac.templates.ocp_virt_vm
+published: true
+field_definitions:
+  - path: boot_disk.size_gib
+    display_name: Boot Disk Size (GiB)
+    editable: true
+    default: "10"
+  - path: boot_disk.storage_tier
+    display_name: Boot Disk Storage Tier
+    editable: true
+    default: local
+  - path: disk_image
+    display_name: Disk image
+    editable: true
+    default: fedora
+  - path: instance_type
+    display_name: Instance type
+    editable: true
+  - path: run_strategy
+    display_name: Run Strategy
+    editable: true
+    default: Always
+  - path: user_data
+    display_name: Cloud Init User Data
+    editable: true
+  - path: network_attachments
+    display_name: Network attachments
+    editable: true
+EOF
+----
++
+IMPORTANT: The `boot_disk.storage_tier` default must be the plain string `local`. Using `{name: local}` fails protobuf validation. Catalog items created through the UI sometimes omit this field, causing VM creation to fail with `boot_disk.storage_tier is required`.
+
+. Apply the catalog item:
++
+[source,role=execute]
+----
+osac create -f ${HOME}/osac-demo/standard-linux-vm.yaml
+----
++
+.Sample output
+----
+Created computeinstancecatalogitem with name 'standard-linux-vm' and identifier '<uuid>'.
+----
+
+. Verify the catalog item is published:
++
+[source,role=execute]
+----
+osac get computeinstancecatalogitem standard-linux-vm
+----
++
+Confirm the catalog item shows as *published*.
+
+. Save the catalog item UUID for use in later exercises. Tenant users reference catalog items by UUID because name lookup is tenant-scoped:
++
+[source,role=execute]
+----
+CATALOG_ID=$(osac get computeinstancecatalogitem standard-linux-vm -o json | jq -r '.id')
+
+echo "CATALOG_ID=${CATALOG_ID}"
+echo "export CATALOG_ID=${CATALOG_ID}" >> ${HOME}/.bashrc
+----
+
+== Exercise 3: Verify tenant networking
+
+When a tenant is created, Red Hat cloud extensions automatically provisions a default virtual network, subnet, and security group. These resources provide the network foundation for virtual machines. In this exercise, Alice logs in and verifies that the networking resources are ready before deploying a VM.
+
+=== Steps
+
+. Log out the platform administrator session:
++
+[source,role=execute]
+----
+osac logout
+----
+
+. Log in as *Alice* via the device flow:
++
+[source,role=execute,subs=attributes]
+----
+osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
+----
++
+Complete the login in a *fresh incognito* window:
++
+.. Copy the URL displayed in the terminal
+.. Open a new *incognito/private* browser window
+.. Paste the URL and press Enter
+.. Enter the code that the `osac login` command printed
+.. On the login page, enter `alice`, then click *Sign In*
+.. Click *SAI Corp Corporate SSO* at the bottom
+.. Enter username `alice` and password `{osac_user_password}`, then click *Sign In*
+.. Return to the terminal — you should see `Authentication succeeded`
++
+IMPORTANT: Always use a fresh incognito window for each device flow login. A cached browser session may use the wrong identity.
+
+. Confirm Alice's identity and tenant-admin role:
++
+[source,role=execute]
+----
+osac whoami
+----
++
+.Sample output
+----
+Logged in as: alice
+Tenant: sai-corp
+Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
+----
++
+If `tenant-admin` does not appear in the roles, return to Module 2 Exercise 4 and complete the RoleBinding.
+
+. Verify the auto-provisioned networking resources are ready:
++
+[source,role=execute]
+----
+osac get virtualnetwork
+osac get subnet
+osac get securitygroup
+----
++
+All three resources should show `READY` status. The typical default CIDR is `10.200.0.0/16` for the virtual network and `10.200.0.0/20` for the subnet.
+
+. Save the subnet and security group IDs for VM creation:
++
+[source,role=execute]
+----
+SUBNET_ID=$(osac get subnet default-ipv4 -o json | jq -r '.id')
+SG_ID=$(osac get securitygroup default -o json | jq -r '.id')
+
+echo "SUBNET_ID=${SUBNET_ID}"
+echo "SG_ID=${SG_ID}"
+----
++
+Both values must be UUIDs. If either shows `null`, the networking resources have not finished provisioning — wait a moment and retry.
+
+== Exercise 4: Deploy a virtual machine
+
+Everything is in place: storage, disk image, instance type, catalog item, and tenant networking. In this exercise, Alice deploys a virtual machine from the catalog and verifies it reaches `RUNNING` state with an IP address on the tenant subnet.
+
+=== Steps
+
+. Source the environment to pick up the catalog item UUID saved in Exercise 2:
++
+[source,role=execute]
+----
+source ${HOME}/.bashrc
+echo "CATALOG_ID=${CATALOG_ID}"
+----
++
+If the variable is empty, retrieve it:
++
+[source,role=execute]
+----
+CATALOG_ID=$(osac get computeinstancecatalogitem -o json | jq -r '.items[] | select(.metadata.name=="standard-linux-vm") | .id')
+echo "CATALOG_ID=${CATALOG_ID}"
+----
+
+. Create a virtual machine from the catalog. The `--user-data` flag passes cloud-init configuration that sets up a guest login account:
++
+[source,role=execute]
+----
+osac create computeinstance \
+  --name portal-vm \
+  --catalog-item "${CATALOG_ID}" \
+  --instance-type small-1-2 \
+  --boot-disk-size 10 \
+  --run-strategy Always \
+  --user-data '#cloud-config
+user: osac-admin
+password: password
+chpasswd:
+  expire: false
+ssh_pwauth: true' \
+  --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}"
+----
++
+.Sample output
+----
+Created computeinstance with name 'portal-vm' and identifier '<uuid>'.
+----
++
+Do not pass `--boot-disk-storage-tier` when the catalog item already defaults to `local`.
+
+. Wait for the VM to reach `RUNNING` status. This typically takes 30 to 90 seconds as the platform pulls the disk image and starts the guest:
++
+[source,role=execute]
+----
+osac get computeinstance
+----
++
+.Sample output
+----
+TENANT    NAME       STATE    ADDRESS      ...
+sai-corp  portal-vm  RUNNING  10.200.0.x   ...
+----
++
+Repeat the command until the state shows `RUNNING` and an IP address appears in the tenant subnet range (e.g., `10.200.x.x`).
++
+If the VM stays in `STARTING` for more than two minutes, see the <<troubleshooting>> section.
+
+. Verify the underlying KubeVirt resources were created on the OpenShift cluster:
++
+[source,role=execute]
+----
+oc get vm,vmi -A | grep -E 'NAME|portal'
+----
++
+Both the `VirtualMachine` and `VirtualMachineInstance` objects should show `Running`.
+
+. Access the VM serial console:
++
+[source,role=execute]
+----
+osac console serial computeinstance portal-vm
+----
++
+Log in with username `osac-admin` and password `password`. Type `exit` and press `Ctrl+]` to disconnect from the console.
+
+== Exercise 5: Verify tenant user access
+
+RBAC enforcement extends beyond tenant management to workloads. In this exercise, Bob — who has `viewer` access to the default project — can see the running VM but cannot create or delete one. This proves that the platform's access control model applies consistently across all resource types.
+
+=== Steps
+
+. Log out Alice's session:
++
+[source,role=execute]
+----
+osac logout
+----
+
+. Log in as *Bob* via the device flow:
++
+[source,role=execute,subs=attributes]
+----
+osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
+----
++
+Complete the login in a *fresh incognito* window. Click *SAI Corp Corporate SSO* and enter `bob` / `{osac_user_password}`.
++
+IMPORTANT: Always use a fresh incognito window. A cached browser session may use the wrong identity.
+
+. Confirm Bob's identity — note that `tenant-admin` does not appear in the roles:
++
+[source,role=execute]
+----
+osac whoami
+----
++
+.Sample output
+----
+Logged in as: bob
+Tenant: sai-corp
+Roles: offline_access, uma_authorization, default-roles-my realm
+----
+
+. Bob can list compute instances (viewer access):
++
+[source,role=execute]
+----
+osac get computeinstance
+----
++
+.Sample output
+----
+TENANT    NAME       STATE    ADDRESS      ...
+sai-corp  portal-vm  RUNNING  10.200.0.x   ...
+----
++
+Bob can see Alice's VM — viewer access includes read permissions on compute instances.
+
+. Bob cannot delete the VM (RBAC enforcement):
++
+[source,role=execute]
+----
+osac delete computeinstance portal-vm
+----
++
+.Sample output
+----
+Failed to delete computeinstance 'portal-vm': rpc error: code = PermissionDenied desc = permission denied
+----
++
+The `PermissionDenied` error confirms that RBAC is enforced: a viewer can list workloads but cannot modify or delete them.
+
+. Bob cannot create a new VM either:
++
+[source,role=execute]
+----
+source ${HOME}/.bashrc
+
+osac create computeinstance \
+  --name bob-unauthorized-vm \
+  --catalog-item "${CATALOG_ID}" \
+  --instance-type small-1-2 \
+  --boot-disk-size 10 \
+  --run-strategy Always \
+  --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}"
+----
++
+.Sample output
+----
+Error: rpc error: code = PermissionDenied desc = permission denied
+----
++
+This confirms that only tenant administrators can create compute instances.
+
+[[troubleshooting]]
+== Troubleshooting
+
+=== Internal API 503 or socket creation failure
+
+**Issue**: `osac` commands fail with HTTP 503 or `socket creation failure`. +
+**Cause**: The Envoy proxy in `fulfillment-ingress-proxy` hit its file descriptor limit (1024). The pod stays Ready but cannot accept new connections. +
+**Solution**: Restart the proxy pod:
+
+[source,role=execute]
+----
+oc rollout restart deploy/fulfillment-ingress-proxy -n osac
+oc rollout status deploy/fulfillment-ingress-proxy -n osac --timeout=180s
+----
+
+Wait for the rollout to complete, then retry the failing `osac` command. You do not need to log in again unless `osac whoami` fails.
+
+=== Disk import stuck — no route to quay.io
+
+**Issue**: The VM stays in `STARTING` and the DataVolume shows `ImportInProgress` with events reporting `no route to host` to `quay.io`. +
+**Cause**: The default CDI import method tries to pull the container disk from inside the pod network, which may not have external access. +
+**Solution**: Recreate the DataVolume with `pullMethod: node`, which uses the node's network to pull the image:
+
+[source,role=execute]
+----
+DV_NS=$(oc get dv -A --no-headers | grep root-disk | awk '{print $1}')
+DV_NAME=$(oc get dv -A --no-headers | grep root-disk | awk '{print $2}')
+VM_NAME=${DV_NAME%-root-disk}
+
+echo "Repairing: ${DV_NS}/${DV_NAME} for VM ${VM_NAME}"
+----
+
+Then halt the VM, delete the stuck DataVolume, and recreate it with `pullMethod: node`:
+
+[source,role=execute]
+----
+oc patch vm "${VM_NAME}" -n "${DV_NS}" --type=merge \
+  -p '{"spec":{"runStrategy":"Halted"}}' || true
+sleep 5
+oc delete dv "${DV_NAME}" -n "${DV_NS}" --wait=true --timeout=180s
+
+LABELS=$(oc get dv "${DV_NAME}" -n "${DV_NS}" -o json 2>/dev/null | jq -c '.metadata.labels // {}')
+LABELS=${LABELS:-'{}'}
+SC=$(oc get pvc -n "${DV_NS}" --no-headers 2>/dev/null | head -1 | awk '{print $7}')
+SC=${SC:-lvms-vg1}
+
+cat <<EOF | oc apply -f -
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: ${DV_NAME}
+  namespace: ${DV_NS}
+  labels: ${LABELS}
+  annotations:
+    cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+spec:
+  source:
+    registry:
+      url: docker://quay.io/containerdisks/fedora:latest
+      pullMethod: node
+  pvc:
+    accessModes: [ReadWriteOnce]
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: ${SC}
+EOF
+
+oc get dv "${DV_NAME}" -n "${DV_NS}" -w
+----
+
+Press `Ctrl+C` when the DataVolume shows `Succeeded`, then restart the VM:
+
+[source,role=execute]
+----
+oc patch vm "${VM_NAME}" -n "${DV_NS}" --type=merge \
+  -p '{"spec":{"runStrategy":"Always"}}'
+----
+
+== Learning outcomes checkpoint
+
+Review what you completed in this module:
+
+* [x] Configured a storage backend and storage tier for tenant workloads
+* [x] Labeled the Kubernetes storage class to map the `local` tier to the `sai-corp` tenant
+* [x] Created a Fedora disk image and a compute instance type as platform building blocks
+* [x] Authored and published a `ComputeInstanceCatalogItem` with editable field definitions
+* [x] Deployed a virtual machine from the catalog as tenant administrator Alice
+* [x] Verified the VM reached `RUNNING` state with an IP address on the tenant subnet
+* [x] Confirmed RBAC enforcement: Bob can view the VM but cannot create or delete one
+
+== Module summary
+
+SAI Corp can now provision virtual machines on demand through the Red Hat cloud extensions catalog. The platform administrator defined the building blocks once — storage, images, sizing, and the catalog template — and tenant administrators can consume them repeatedly without platform engineering involvement.
+
+**Key takeaways for Sovereign Cloud Corp:**
+
+* *Storage tiers bridge Kubernetes and the catalog*: The `local` tier links a Kubernetes storage class to the fulfillment workflow. Without this mapping, VM creation fails at the boot disk step.
+* *Catalog items are self-service templates*: The `field_definitions` in a catalog item control what tenants can customize. Defaults (like `storage_tier: local` and `disk_image: fedora`) reduce what tenants need to specify at ordering time.
+* *RBAC extends to workloads*: The same RoleBinding and ProjectMembership model from Module 2 governs compute instances. A viewer can see workloads but cannot create or destroy them.
+* *Platform admin vs. tenant admin separation*: Storage, images, instance types, and catalog items are platform-level concerns. VM deployment is a tenant-level action. This separation lets platform teams control what is available while tenants control what is deployed.
