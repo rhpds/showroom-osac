@@ -1,8 +1,8 @@
 * xref:index.adoc[Introduction to Red Hat cloud extensions]
 * xref:credentials.adoc[Credentials]
-* xref:01-overview.adoc[Overview]
+* xref:overview.adoc[Overview]
 
 .Modules
-* xref:03-module-01-platform-overview.adoc[Exploring the Red Hat cloud extensions Platform]
-* xref:04-module-02-tenant-management.adoc[Managing Tenants]
-* xref:05-module-03-catalog-and-workloads.adoc[Catalog Items and Workloads]
+* xref:01-module-01-platform-overview.adoc[Exploring the Red Hat cloud extensions Platform]
+* xref:02-module-02-tenant-management.adoc[Managing Tenants]
+* xref:03-module-03-catalog-and-workloads.adoc[Catalog Items and Workloads]
