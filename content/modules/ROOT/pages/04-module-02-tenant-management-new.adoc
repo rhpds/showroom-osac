@@ -36,6 +36,8 @@ export TENANT_USER=bob
 export REALM=osac
 EOF
 
+source ${HOME}/.bashrc
+
 mkdir -p ${HOME}/osac-demo
 ----
 
@@ -74,7 +76,7 @@ osac get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
   "name": "break-glass-credentials"
 }
 ----
-////
+
 . Verify that Red Hat Cloud Extensions automatically created a Keycloak organization for the tenant:
 +
 [source,role=execute,subs=attributes]
@@ -89,7 +91,7 @@ curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
 ----
 +
 You should see the `sai-corp` organization with `enabled: true`.
-////
+
 . Confirm the tenant namespace was created on the cluster:
 +
 [source,role=execute]
@@ -162,7 +164,10 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/clients" \
     "standardFlowEnabled": true
   }' -w "Create client: HTTP %\{http_code}\n" -o /dev/null
 ----
++
+Expected: `HTTP 201` (created) or `HTTP 409` (already exists).
 
+////
 . Add the client secret to the osac broker:
 +
 [source,role=execute,subs=attributes]
@@ -185,6 +190,9 @@ curl -sk -X PUT "{osac_keycloak_url}/admin/realms/osac/identity-provider/instanc
     }
   }' -w "Patch broker: HTTP %{http_code}\n" -o /dev/null
 ----
++
+Expected: `HTTP 201` (created) or `HTTP 409` (already exists). If you get `Patch broker: HTTP 401`, the broker may not be created yet. Wait a few seconds and try again.
+////
 
 . Create user `alice` in the Sai corporate IdP realm:
 +
@@ -226,21 +234,50 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
 +
 [source,role=execute,subs=attributes]
 ----
-export OIDC_CLIENT_ID=osac-federation
-export OIDC_CLIENT_SECRET=osac-demo-secret
-export OIDC_ISSUER="{osac_keycloak_url}/realms/sai-corp-idp"
-export OIDC_TOKEN_URL="{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token"
-export OIDC_AUTHORIZATION_URL="{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth"
-
 cat << EOF >${HOME}/.bashrc
-export OIDC_CLIENT_ID='${OIDC_CLIENT_ID}'
-export OIDC_CLIENT_SECRET='${OIDC_CLIENT_SECRET}'
-export OIDC_ISSUER='${OIDC_ISSUER}'
-export OIDC_TOKEN_URL='${OIDC_TOKEN_URL}'
-export OIDC_AUTHORIZATION_URL='${OIDC_AUTHORIZATION_URL}'
+export OIDC_CLIENT_ID='osac-federation'
+export OIDC_CLIENT_SECRET='osac-demo-secret'
+export OIDC_ISSUER='{osac_keycloak_url}/realms/sai-corp-idp'
+export OIDC_TOKEN_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token'
+export OIDC_AUTHORIZATION_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth'
 EOF
 
+source ${HOME}/.bashrc
+
 echo "OIDC environment saved to $\{HOME}/.bashrc"
+----
+
+=== Create a secret for the OIDC client secret
+
+The Client secret must be stored in a secret of type `value` in Red Hat cloud extensions.
+
+. In the *Terminal* tab, create a secret named `sai-corp-oidc-secret` in the `sai-corp` tenant namespace with the OIDC client secret:
++
+[source,role=execute,subs=attributes]
+----
+echo -n "${OIDC_CLIENT_SECRET}" | osac create secret --name idp-client-secret --type value --from-file=value=-
+----
+
+. Verify the secret was created:
++
+[source,role=execute,subs=attributes]
+----
+osac get secret idp-client-secret -o yaml
+----
++
+.Sample output
+[source,yaml]
+----
+'@type': type.googleapis.com/osac.public.v1.Secret
+data:
+  value: b3NhYy1kZW1vLXNlY3JldA==
+id: 01a0cdbe-6c22-744a-af92-2e4087ca9be1
+metadata:
+  creation_timestamp: "2026-09-23T10:10:03.934248Z"
+  creator: 01a0cdb2-8a38-768d-a47e-e36be3c1a999
+  name: idp-client-secret
+  tenant: sai-corp
+type: SECRET_TYPE_VALUE
 ----
 
 === Register the new Identity Provider with Red Hat Cloud Extensions
@@ -249,14 +286,20 @@ echo "OIDC environment saved to $\{HOME}/.bashrc"
 . Log out of the platform if you are logged in as platform admin (`{osac_admin_user}`).
 . Now log into the Red Hat Cloud Extensions platform as the the *SAI Corp break glass user*.
 +
-Use the *break glass credentials* that you saved when you created the tenant. Your user should be `sai-corp-osac-break-glass`. You will be prompted to change your password. While you can change it to anything you want the rest of the lab will be using `{osac_user_password}` so it is recommended to change it to that value for consistency.
+Use the *break glass credentials* that you saved when you created the tenant.
++
+Your user should be `sai-corp-osac-break-glass`.
++
+You will be prompted to change your password.
++
+While you can change it to anything you want the rest of the lab will be using `{osac_user_password}` so it is recommended to change it to that value for consistency.
 
 . Once logged in you should already be on the *Identity Providers* page.
 . Create a new identity provider with the following properties:
 * *Name*: `sai-corp`
 * *Title*: `SAI Corp Corporate SSO`
 * *Client ID*: `osac-federation`
-* *Client Secret*: `osac-demo-secret`
+* *Client Secret*: Select `idp-client-secret` from the dropdown
 * *Issuer*: `{osac_keycloak_url}/realms/sai-corp-idp`
 * *Authorization URL*: `{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth`
 * *Token URL*: `{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token`
