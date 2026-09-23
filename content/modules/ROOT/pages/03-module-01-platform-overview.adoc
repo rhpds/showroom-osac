@@ -1,24 +1,24 @@
-= Module 1: Exploring the Red Hat Cloud Extensions Platform
+= Module 1: Exploring the Red Hat cloud extensions Platform
 :source-highlighter: rouge
 :toc: macro
 :toclevels: 1
 
 toc::[]
 
-The infrastructure team at Sovereign Cloud Corp just handed you the keys to a freshly deployed Red Hat Cloud Extensions environment. Before onboarding any tenants or provisioning workloads, you need to know the platform inside and out. A misconfigured component today means a frustrated tenant tomorrow — and in a government services context, that has real consequences.
+The infrastructure team at Sovereign Cloud Corp just handed you the keys to a freshly deployed Red Hat cloud extensions environment. Before onboarding any tenants or provisioning workloads, you need to know the platform inside and out. A misconfigured component today means a frustrated tenant tomorrow — and in a government services context, that has real consequences.
 
-In this module, you walk through the deployed Red Hat Cloud Extensions platform. You verify that every component is healthy, explore the UI, and understand how Keycloak and Kafka tie the system together. By the time you finish, you'll have a clear picture of the platform's architecture and the confidence to move forward.
+In this module, you walk through the deployed Red Hat cloud extensions platform. You verify that every component is healthy, explore the UI, and understand how Keycloak and Kafka tie the system together. By the time you finish, you'll have a clear picture of the platform's architecture and the confidence to move forward.
 
 == Learning objectives
 
 By the end of this module, you'll be able to:
 
-* Verify all Red Hat Cloud Extensions operators and pods are running in the `osac` namespace
-* Navigate the Red Hat Cloud Extensions web UI and identify its key dashboard sections
+* Verify all Red Hat cloud extensions operators and pods are running in the `osac` namespace
+* Navigate the Red Hat cloud extensions web UI and identify its key dashboard sections
 * Examine the Keycloak realm configuration that governs tenant identity
 * Inspect the Kafka cluster and confirm the messaging infrastructure is healthy
 
-== Exercise 1: Verify the Red Hat Cloud Extensions namespace
+== Exercise 1: Verify the Red Hat cloud extensions namespace
 
 Sovereign Cloud Corp's platform runs in the `osac` namespace on OpenShift. Before exploring anything else, confirm that every operator and service is running. A healthy platform is your baseline.
 
@@ -84,11 +84,11 @@ oc get pods -n osac
 
 Expected result: All pods `Running` or `Completed`.
 
-== Exercise 2: Explore the Red Hat Cloud Extensions web UI
+== Exercise 2: Explore the Red Hat cloud extensions web UI
 
-With the platform confirmed healthy, log in to the Red Hat Cloud Extensions web UI. This is the central console that platform engineers and tenant administrators use to manage the environment.
+With the platform confirmed healthy, log in to the Red Hat cloud extensions web UI. This is the central console that platform engineers and tenant administrators use to manage the environment.
 
-. Switch to the *Cloud Extensions* tab on the right. Login using the platform admin credentials:
+. Switch to the *cloud extensions* tab on the right. Login using the platform admin credentials:
 +
 .*Admin user*
 [source,role=copy,subs=attributes]
@@ -120,7 +120,7 @@ With the platform confirmed healthy, log in to the Red Hat Cloud Extensions web 
 
 == Exercise 3: Examine the Keycloak realm configuration
 
-Keycloak handles identity management for the entire Red Hat Cloud Extensions platform. Every tenant gets its own identity context tied to the `osac` realm. Understanding this configuration is essential before you create tenants in Module 2.
+Keycloak handles identity management for the entire Red Hat cloud extensions platform. Every tenant gets its own identity context tied to the `osac` realm. Understanding this configuration is essential before you create tenants in Module 2.
 
 . Switch to the *Terminal* tab on the right and confirm the Keycloak pods are running and ready:
 +
@@ -193,7 +193,7 @@ Realm: osac | Public Key available: True
 
 == Exercise 4: Inspect the Kafka cluster
 
-Red Hat Cloud Extensions uses Kafka as its event backbone. Every catalog request, tenant lifecycle event, and workload status update flows through Kafka. A healthy Kafka cluster means the platform can process requests reliably and at scale.
+Red Hat cloud extensions uses Kafka as its event backbone. Every catalog request, tenant lifecycle event, and workload status update flows through Kafka. A healthy Kafka cluster means the platform can process requests reliably and at scale.
 
 . List Kafka resources in the `osac` namespace:
 +
@@ -220,7 +220,7 @@ oc get pods -n osac-kafka -l strimzi.io/kind=Kafka
 +
 You should see at least one broker pod in `Running` state.
 
-. List the Kafka topics that Red Hat Cloud Extensions has created:
+. List the Kafka topics that Red Hat cloud extensions has created:
 +
 [source,role=execute,subs=attributes]
 ----
@@ -229,7 +229,7 @@ oc get kafkatopics -n osac-kafka
 +
 Topics prefixed with `osac-` handle platform events. Note the names — you will see these referenced in Module 3 when catalog workloads generate events.
 
-. Check KafkaUsers configured for Red Hat Cloud Extensions service-to-service communication:
+. Check KafkaUsers configured for Red Hat cloud extensions service-to-service communication:
 +
 [source,role=execute,subs=attributes]
 ----
@@ -249,29 +249,29 @@ All conditions should show `"type": "Ready"` with `"status": "True"`.
 
 Before moving to Module 2, confirm you can answer these questions:
 
-* Which namespace contains all Red Hat Cloud Extensions platform components?
-* Which Keycloak realm governs Red Hat Cloud Extensions tenant identities?
-* What types of events does Kafka carry in the Red Hat Cloud Extensions platform?
+* Which namespace contains all Red Hat cloud extensions platform components?
+* Which Keycloak realm governs Red Hat cloud extensions tenant identities?
+* What types of events does Kafka carry in the Red Hat cloud extensions platform?
 
 If any of these are unclear, review the relevant exercise above or raise a question with the facilitator.
 
 == Module summary
 
-You have completed the platform orientation for Sovereign Cloud Corp's Red Hat Cloud Extensions environment.
+You have completed the platform orientation for Sovereign Cloud Corp's Red Hat cloud extensions environment.
 
 **What you accomplished:**
 
-* Verified all Red Hat Cloud Extensions operators, CSVs, and pods are healthy in the `osac` namespace
-* Explored the Red Hat Cloud Extensions web UI and located the Dashboard, Tenants, Catalog, and Settings sections
+* Verified all Red Hat cloud extensions operators, CSVs, and pods are healthy in the `osac` namespace
+* Explored the Red Hat cloud extensions web UI and located the Dashboard, Tenants, Catalog, and Settings sections
 * Confirmed the Keycloak `osac` realm is configured and serving identity tokens
 * Inspected the Kafka cluster, its topics, and its users
 
 **Key takeaways:**
 
-* Every platform operation in Red Hat Cloud Extensions flows through three core layers: identity (Keycloak), orchestration (osac-operator + fulfillment-service), and messaging (Kafka)
+* Every platform operation in Red Hat cloud extensions flows through three core layers: identity (Keycloak), orchestration (osac-operator + fulfillment-service), and messaging (Kafka)
 * Healthy CSVs are a prerequisite — a degraded operator means the platform cannot process tenant or workload requests
 * The `osac` Keycloak realm is the trust anchor for all tenant authentication; its availability is non-negotiable for sovereign operations
 
 **Next steps:**
 
-Module 2 covers tenant management. You will use what you learned here about the Red Hat Cloud Extensions namespace and Keycloak realm to create and configure multi-tenant environments backed by Ceph storage.
+Module 2 covers tenant management. You will use what you learned here about the Red Hat cloud extensions namespace and Keycloak realm to create and configure multi-tenant environments backed by Ceph storage.

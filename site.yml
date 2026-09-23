@@ -1,6 +1,6 @@
 ---
 site:
-  title: Introduction to Red Hat Cloud Extensions
+  title: Introduction to Red Hat cloud extensions
   start_page: modules::index.adoc
 
 content:

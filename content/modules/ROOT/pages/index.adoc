@@ -1,6 +1,6 @@
-= Introduction to Red Hat Cloud Extensions
+= Introduction to Red Hat cloud extensions
 
-Welcome to Introduction to Red Hat Cloud Extensions!
+Welcome to Introduction to Red Hat cloud extensions!
 
 You're a Platform Engineer at Sovereign Cloud Corp, a European government services provider. Leadership has handed you a critical mission: deploy a sovereign cloud platform on OpenShift that meets strict data sovereignty and regulatory compliance requirements. The platform must support multiple government tenants, automate workload provisioning through a service catalog, and integrate with Keycloak for identity management.
 
@@ -10,14 +10,14 @@ This isn't just another cloud deployment. Your government clients need to know t
 
 In this workshop, you will:
 
-* Navigate and understand the Red Hat Cloud Extensions platform architecture and components
+* Navigate and understand the Red Hat cloud extensions platform architecture and components
 * Create and manage multi-tenant environments with storage
-* Use the Cloud Extensions user interface as well as the `osac` CLI to create catalog items and deploy workloads
+* Use the cloud extensions user interface as well as the `osac` CLI to create catalog items and deploy workloads
 * Verify platform health and tenant readiness
 
 == Who this is for
 
-This workshop is designed for Platform Engineers and Cloud Architects who want to deploy and manage a complete Red Hat Cloud Extensions platform, including multi-tenant environments and automated workload provisioning.
+This workshop is designed for Platform Engineers and Cloud Architects who want to deploy and manage a complete Red Hat cloud extensions platform, including multi-tenant environments and automated workload provisioning.
 
 **Experience level**: Intermediate
 
@@ -36,13 +36,13 @@ Before starting this workshop, you should have:
 
 == Workshop environment
 
-Your environment includes a pre-deployed OpenShift cluster with Red Hat Cloud Extensions already installed. All platform components — the fulfillment service, Keycloak identity management, Kafka event streaming, and the Red Hat Cloud Extensions UI — are running and ready to use.
+Your environment includes a pre-deployed OpenShift cluster with Red Hat cloud extensions already installed. All platform components — the fulfillment service, Keycloak identity management, Kafka event streaming, and the Red Hat cloud extensions UI — are running and ready to use.
 
 You will work through the modules using two tabs in your lab interface:
 
 * *Instructions*: - on the left, for step-by-step guidance and explanations
-* *Lab*: - on the right, for access to the Red Hat Cloud Extensions UI, OpenShift Console, and a terminal for CLI commands
-** *Red Hat Cloud Extensions Console* - to administer Red Hat Cloud Extensions
+* *Lab*: - on the right, for access to the Red Hat cloud extensions UI, OpenShift Console, and a terminal for CLI commands
+** *Red Hat cloud extensions Console* - to administer Red Hat cloud extensions
 ** *OpenShift Console* — for visual exploration of the cluster and platform components
 ** *Keycloak Console* - to explore identity management and user roles
 ** *Terminal* — for CLI commands using the `oc` and `osac` tools
@@ -53,7 +53,7 @@ Your access details are provided in the **Credentials** page for reference. They
 
 === Full Workshop (90 minutes)
 
-* *Module 1*: Exploring the Red Hat Cloud Extensions Platform (30 minutes)
+* *Module 1*: Exploring the Red Hat cloud extensions Platform (30 minutes)
 * *Module 2*: Managing Tenants (30 minutes)
 * *Module 3*: Catalog Items and Workloads (30 minutes)
 
