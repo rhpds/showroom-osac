@@ -259,7 +259,7 @@ osac login --insecure \
   --flow=password \
   --user=sai-corp-osac-break-glass \
   --password={osac_user_password} \
-  https://fulfillment-internal-api-osac.{openshift_cluster_ingress_domain}
+  https://{osac_fulfillment_internal_api_url}
 ----
 
 . The Client secret must be stored in a secret of type `value` in Red Hat cloud extensions.
@@ -347,7 +347,7 @@ osac logout
 +
 [source,role=execute,subs=attributes]
 ----
-osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
+osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
 ----
 +
 The CLI displays a URL and a one-time code. Complete the login in your browser (not the Showroom interface):
@@ -420,7 +420,7 @@ osac logout
 +
 [source,role=execute,subs=attributes]
 ----
-osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
+osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
 ----
 +
 Complete the login in a *fresh incognito* window:
@@ -576,7 +576,7 @@ Expected: state `ROLE_BINDING_STATE_READY`, role `tenant-admin`.
 [source,role="execute",subs="attributes"]
 ----
 osac logout
-osac login --insecure --address "{osac_fulfillment_internal_api_url}" --flow device
+osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
 ----
 +
 Complete the login in a *fresh incognito* window. Log in with `alice` / `{osac_user_password}`.
@@ -656,15 +656,6 @@ echo "PROJ_ID=${PROJ_ID}"
 echo "PROJ_ID=${PROJ_ID}" >> $HOME/.bashrc
 ----
 
-. Find Bob's user ID:
-+
-[source,role="execute"]
-----
-BOB_ID=$(osac get user bob -o json | jq -r .id)
-
-echo "BOB_ID=${BOB_ID}"
-----
-
 . Grant Bob `viewer` access to the project using a `ProjectMembership`:
 +
 [source,role="execute"]
@@ -678,7 +669,7 @@ metadata:
 spec:
   role: PROJECT_MEMBERSHIP_ROLE_VIEWER
   users:
-  - id: "${BOB_ID}"
+  - name: bob
 EOF
 
 osac create -f ${HOME}/osac-demo/bob-membership.yaml
@@ -711,15 +702,15 @@ The real proof of multi-tenancy is enforcement. In this exercise, you log in as 
 
 ==== Verify Bob's viewer restrictions
 
-. Log in as Bob via the device flow:
+. Log in as *Bob* via the device flow:
 +
 [source,role="execute",subs="attributes"]
 ----
 osac logout
-osac login --insecure --address "{osac_fulfillment_api_url}" --flow device
+osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
 ----
 +
-Complete the login in a fresh incognito window. Click *sai-corp-oidc* and enter `bob` / `{osac_admin_password}`.
+Complete the login in a *fresh incognito* window. Click *sai-corp-oidc* and enter `bob` / `{osac_admin_password}`.
 
 . Confirm Bob's identity — note that `tenant-admin` does not appear in the roles:
 +
