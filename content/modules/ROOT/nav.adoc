@@ -3,6 +3,6 @@
 * xref:overview.adoc[Overview]
 
 .Modules
-* xref:01-module-01-platform-overview.adoc[Exploring the Red Hat cloud extensions Platform]
-* xref:02-module-02-tenant-management.adoc[Managing Tenants]
-* xref:03-module-03-vmaas.adoc[Virtual Machine as a Service (VMaaS)]
+* xref:module-01-platform-overview.adoc[Exploring the Red Hat cloud extensions Platform]
+* xref:module-02-tenant-management.adoc[Managing Tenants]
+* xref:module-03-vmaas.adoc[Virtual Machine as a Service (VMaaS)]
