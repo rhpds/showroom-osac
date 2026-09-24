@@ -75,7 +75,7 @@ if [ "${HTTP_CODE}" = "303" ] || [ "${HTTP_CODE}" = "302" ]; then
   curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" -D "${HDR_FILE}" -o /dev/null "${REDIRECT}"
   REDIRECT=$(fixurl "$(get_redirect)")
 else
-  BROKER_LINK=$(cat "${RESP_FILE}" | py_extract 'href="([^"]*broker/[^"]*sai-corp[^"]*)"')
+  BROKER_LINK=$(cat "${RESP_FILE}" | py_extract 'href="([^"]*broker/[^"]+/login[^"]*)"')
   REDIRECT=$(fixurl "${BROKER_LINK}")
   >&2 echo "Clicking IdP broker link."
 fi
