@@ -91,11 +91,11 @@ oc get tenant sai-corp -n osac \
 +
 .Sample output
 ----
-Ready [{"product":"osac-sai-corp-local","tier":"local"}]
+Ready [{"name":"lvms-vg1","tier":"local"}]
 ----
 +
 The tenant must show `Ready` and list a class with `"tier":"local"` before proceeding.
-
++
 [HINT]
 ====
 You can also verify that storage is setup in the Red Hat cloud extensions UI. As a platform administrator, navigate to *Infrastructure → Storage Tiers* and confirm that the `local` backend and tier is listed with a green status of `Active`.
@@ -201,7 +201,7 @@ Created computeinstancecatalogitem name 'standard-linux-vm' and identifier '01a0
 osac get computeinstancecatalogitem standard-linux-vm
 ----
 +
-Confirm the catalog item shows as *published*.
+Confirm the catalog item shows *true* in the *published* column.
 
 . Save the catalog item UUID for use in later exercises. Tenant users reference catalog items by UUID because name lookup is tenant-scoped:
 +
@@ -331,7 +331,7 @@ ssh_pwauth: true'
 +
 .Sample output
 ----
-Created computeinstance with name 'portal-vm' and identifier '<uuid>'.
+Created compute instance '01a0d377-5991-7e0e-8b3a-5135683208ec'.
 ----
 
 . The VM will initially fail to import the disk image because CDI tries to pull from quay.io inside the pod network, which does not have external access on this cluster. This is a known issue. You need to switch to a *platform administrator* session briefly to fix the DataVolume import method.
@@ -447,14 +447,35 @@ oc get vm,vmi -A --no-headers
 +
 The `VirtualMachine` and `VirtualMachineInstance` objects should show `Running`.
 
-. Access the VM serial console:
+. Access the VM serial console (you may need to press `Enter` to see the login prompt):
 +
 [source,role=execute]
 ----
 osac console serial computeinstance portal-vm
 ----
 +
-Log in with username `osac-admin` and password `password`. Type `exit` and press `Ctrl+]` to disconnect from the console.
+Log in with username `osac-admin` and password `password`.
+
+. Verify that Fedora has been deployed:
++
+[source,role=execute]
+----
+cat /etc/os-release
+----
++
+.Sample output
+----
+NAME="Fedora Linux"
+VERSION="44 (Cloud Edition)"
+RELEASE_TYPE=stable
+ID=fedora
+VERSION_ID=44
+VERSION_CODENAME=""
+PRETTY_NAME="Fedora Linux 44 (Cloud Edition)"
+...
+----
+
+. Disconnect from the VM by typing `exit` and then press `Ctrl+]` to disconnect from the console.
 
 == Exercise 5: Verify tenant user access
 
