@@ -128,7 +128,7 @@ You create two users, *Alice* and *Bob*, in the SAI Corp realm. Alice will later
 
 [NOTE]
 ====
-This exercise uses the `curl` command to create Keycloak realms, clients, and users. You could also use the Keycloak admin console, but for the purposes of this exercise the CLI is faster and more repeatable.
+This exercise uses the Keycloak REST API via the `curl` command to create Keycloak realms, clients, and users. You could also use the Keycloak admin console, but for the purposes of this exercise the CLI is faster and more repeatable.
 ====
 
 . Obtain a Keycloak admin token:
@@ -329,7 +329,15 @@ osac get identityprovider sai-corp --output yaml | grep -E 'phase:|message:|clie
 
 With the corporate identity provider configured, SAI Corp employees can now authenticate through federated SSO. In this exercise, Alice and Bob log in for the first time using the device flow. Each login automatically adds them to the SAI Corp Keycloak organization. You also trigger JIT (just-in-time) user provisioning by making an API call after each login.
 
-NOTE: The `osac whoami` command reads the local JWT token only — it does not contact the server. To create an OSAC user record, you must make at least one real API call (such as `osac get projects`) after logging in.
+[NOTE]
+====
+The `osac whoami` command reads the local JWT token only — it does not contact the server. To create an OSAC user record, you must make at least one real API call (such as `osac get projects`) after logging in.
+====
+
+[WARNING]
+====
+When the instructions below ask for a new *incognito/private* browser window, they mean that literally. *Close* your previous incognito window and open a new one for each device flow login. A cached browser session may use the wrong identity even if you open a new tab in that window.
+====
 
 === Steps
 
@@ -710,7 +718,7 @@ osac logout
 osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
 ----
 +
-Complete the login in a *fresh incognito* window. Click *sai-corp-oidc* and enter `bob` / `{osac_admin_password}`.
+Complete the login in a *fresh incognito* window. Click *sai-corp-oidc* and enter `bob` / `{osac_user_password}`.
 
 . Confirm Bob's identity — note that `tenant-admin` does not appear in the roles:
 +
@@ -764,7 +772,6 @@ This `PermissionDenied` error confirms that RBAC is working: a viewer can read b
 === IdP login shows "Unexpected error when authenticating with identity provider"
 
 **Issue**: Browser login redirects to an error page instead of the corporate IdP login form.
-+
 **Solution**: This usually indicates an issuer mismatch between the identity provider configuration and the Keycloak broker. Verify the OIDC endpoints match:
 
 [source,role="execute"]

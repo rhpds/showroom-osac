@@ -297,6 +297,7 @@ for sn in $(oc get subnet.osac.openshift.io -A -o jsonpath='{range .items[?(@.st
 done
 ----
 
+Wait a few seconds and try the previous command again. After a while the networking resources should show `READY` status.
 ====
 
 . Save the subnet and security group IDs for VM creation:
@@ -336,7 +337,7 @@ echo "CATALOG_ID=${CATALOG_ID}"
 
 . Create a virtual machine from the catalog. The `--user-data` flag passes cloud-init configuration that sets up a guest login account:
 +
-[source,role=execute]
+[source,role=execute,subs=attributes]
 ----
 osac create computeinstance \
   --name portal-vm \
@@ -348,8 +349,8 @@ osac create computeinstance \
   --run-strategy Always \
   --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}" \
   --user-data '#cloud-config
-user: osac-admin
-password: password
+user: fedora-admin
+password: {osac_user_password}
 chpasswd:
   expire: false
 ssh_pwauth: true'
@@ -480,7 +481,7 @@ The `VirtualMachine` and `VirtualMachineInstance` objects should show `Running`.
 osac console serial computeinstance portal-vm
 ----
 +
-Log in with username `osac-admin` and password `password`.
+Log in with username `fedora-admin` and password `{osac_user_password}`.
 
 . Verify that Fedora has been deployed:
 +
