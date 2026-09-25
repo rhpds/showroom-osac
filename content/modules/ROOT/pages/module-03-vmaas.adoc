@@ -272,6 +272,32 @@ osac get securitygroup
 ----
 +
 All three resources should show `READY` status. The typical default CIDR is `10.200.0.0/16` for the virtual network and `10.200.0.0/20` for the subnet.
++
+[HINT]
+====
+If any of the resources do not show `READY` you may need to fix a secret. In the terminal tab run the following commands to fix it:
+
+[source,role=execute]
+----
+export API=$(oc whoami --show-server)
+export TOKEN=$(oc create token -n osac osac-sa --duration=8760h)
+
+oc create secret generic network-fulfillment-ig \
+  --from-literal=K8S_AUTH_HOST="$API" \
+  --from-literal=K8S_AUTH_API_KEY="$TOKEN" \
+  --from-literal=K8S_AUTH_VERIFY_SSL=false
+
+for sn in $(oc get subnet.osac.openshift.io -A -o jsonpath='{range .items[?(@.status.phase=="Failed")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}'); do
+  NS=${sn%/*}; NAME=${sn#*/}
+  echo Patching subnet $NAME in namespace $NS
+  oc patch subnet.osac.openshift.io "$NAME" -n "$NS" --subresource=status --type=json \
+    --patch='[{"op":"replace","path":"/status/provisioningJobs","value":[]}]'
+  oc annotate subnet.osac.openshift.io "$NAME" -n "$NS" \
+    osac.openshift.io/reconcile="$(date -u +%s)" --overwrite
+done
+----
+
+====
 
 . Save the subnet and security group IDs for VM creation:
 +
