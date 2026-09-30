@@ -272,6 +272,7 @@ osac get securitygroup
 ----
 +
 All three resources should show `READY` status. The typical default CIDR is `10.200.0.0/16` for the virtual network and `10.200.0.0/20` for the subnet.
+////
 +
 [HINT]
 ====
@@ -299,6 +300,7 @@ done
 
 Wait a few seconds and try the previous command again. After a while the networking resources should show `READY` status.
 ====
+////
 
 . Save the subnet and security group IDs for VM creation:
 +
@@ -319,19 +321,11 @@ Everything is in place: storage, disk image, instance type, catalog item, and te
 
 === Steps
 
-. Source the environment to pick up the catalog item UUID saved in Exercise 2:
+. Retrieve the catalog item UUID for the `standard-linux-vm` catalog item:
 +
 [source,role=execute]
 ----
-source ${HOME}/.bashrc
-echo "CATALOG_ID=${CATALOG_ID}"
-----
-+
-If the variable is empty, retrieve it:
-+
-[source,role=execute]
-----
-CATALOG_ID=$(osac get computeinstancecatalogitem -o json | jq -r '.items[] | select(.metadata.name=="standard-linux-vm") | .id')
+CATALOG_ID=$(osac get computeinstancecatalogitem standard-linux-vm -o json | jq -r .id')
 echo "CATALOG_ID=${CATALOG_ID}"
 ----
 
@@ -440,7 +434,7 @@ oc patch vm "${VM_NAME}" -n "${VM_NS}" --type=merge \
   -p '{"spec":{"runStrategy":"Always"}}'
 ----
 
-. Switch back to Alice's session and wait for the VM to reach `RUNNING`:
+. Switch back to Alice's session (password: `{osac_user_password}`) and wait for the VM to reach `RUNNING`:
 +
 [source,role=execute,subs=attributes]
 ----
@@ -578,12 +572,20 @@ The `PermissionDenied` error confirms that RBAC is enforced: a viewer can list w
 source ${HOME}/.bashrc
 
 osac create computeinstance \
-  --name bob-unauthorized-vm \
+  --name vm-not-allowed \
   --catalog-item "${CATALOG_ID}" \
   --instance-type small-1-2 \
+  --disk-image fedora \
   --boot-disk-size 10 \
+  --boot-disk-storage-tier local \
   --run-strategy Always \
-  --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}"
+  --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}" \
+  --user-data '#cloud-config
+user: fedora-admin
+password: {osac_user_password}
+chpasswd:
+  expire: false
+ssh_pwauth: true'
 ----
 +
 .Sample output
@@ -592,27 +594,6 @@ Error: rpc error: code = PermissionDenied desc = permission denied
 ----
 +
 This confirms that only tenant administrators can create compute instances.
-
-[[troubleshooting]]
-== Troubleshooting
-
-=== Internal API 503 or socket creation failure
-
-**Issue**: `osac` commands fail with HTTP 503 or `socket creation failure`. +
-**Cause**: The Envoy proxy in `fulfillment-ingress-proxy` hit its file descriptor limit (1024). The pod stays Ready but cannot accept new connections. +
-**Solution**: Restart the proxy pod:
-
-[source,role=execute]
-----
-oc rollout restart deploy/fulfillment-ingress-proxy -n osac
-oc rollout status deploy/fulfillment-ingress-proxy -n osac --timeout=180s
-----
-
-Wait for the rollout to complete, then retry the failing `osac` command. You do not need to log in again unless `osac whoami` fails.
-
-=== Disk import stuck — no route to quay.io
-
-NOTE: This issue is handled in Exercise 4 as a required step. If you need to repeat the fix (for example, after recreating a VM), follow the same pattern: halt the VM, delete the DataVolume, recreate it with `pullMethod: node`, and restart the VM.
 
 == Learning outcomes checkpoint
 
