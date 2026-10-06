@@ -25,20 +25,27 @@ When a platform administrator creates a tenant in Red Hat cloud extensions, the 
 
 === Steps
 
-. Set up shell variables for this module and save them in `.bashrc`. These values are used throughout all exercises:
+// . Set up shell variables for this module and save them in `.bashrc`. These values are used throughout all exercises:
+// +
+// [source,role=execute]
+// ----
+// cat << EOF >>${HOME}/.bashrc
+// export TENANT=sai-corp
+// export TENANT_ADMIN=alice
+// export TENANT_USER=bob
+// export REALM=osac
+// EOF
+
+// source ${HOME}/.bashrc
+
+// mkdir -p ${HOME}/osac-demo
+// ----
+
+. Create a directory to collect various YAML files used in this module:
 +
 [source,role=execute]
 ----
-cat << EOF >>${HOME}/.bashrc
-export TENANT=sai-corp
-export TENANT_ADMIN=alice
-export TENANT_USER=bob
-export REALM=osac
-EOF
-
-source ${HOME}/.bashrc
-
-mkdir -p ${HOME}/osac-demo
+mkdir -p ${HOME}/yaml
 ----
 
 . Log in to the *Red Hat cloud extensions* platform *internal* fulfillment API as the *platform administrator*:
@@ -87,7 +94,7 @@ KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-c
   | jq -r '.access_token')
 
 curl -sk -H "Authorization: Bearer ${KC_TOKEN}" \
-  "{osac_keycloak_url}/admin/realms/${REALM}/organizations?search=sai-corp" \
+  "{osac_keycloak_url}/admin/realms/osac/organizations?search=sai-corp" \
   | jq '[.[] | {id, name, enabled}]'
 ----
 +
@@ -619,7 +626,7 @@ You should see both `alice` and `bob` in the user list.
 +
 [source,role="execute"]
 ----
-cat > ${HOME}/osac-demo/sai-project.yaml <<'EOF'
+cat > ${HOME}/yaml/sai-project.yaml <<'EOF'
 "@type": type.googleapis.com/osac.public.v1.Project
 metadata:
   name: default
@@ -628,7 +635,8 @@ spec:
   title: Default Project
   description: Primary project for SAI Corp
 EOF
-osac create -f ${HOME}/osac-demo/sai-project.yaml
+
+osac create -f ${HOME}/yaml/sai-project.yaml
 ----
 +
 .Sample output
@@ -668,7 +676,7 @@ echo "PROJ_ID=${PROJ_ID}" >> $HOME/.bashrc
 +
 [source,role="execute"]
 ----
-cat > ${HOME}/osac-demo/bob-membership.yaml <<EOF
+cat > ${HOME}/yaml/bob-membership.yaml <<EOF
 "@type": type.googleapis.com/osac.public.v1.ProjectMembership
 metadata:
   name: bob-viewer
@@ -680,14 +688,14 @@ spec:
   - name: bob
 EOF
 
-osac create -f ${HOME}/osac-demo/bob-membership.yaml
+osac create -f ${HOME}/yaml/bob-membership.yaml
 ----
 +
 .Sample output
 ----
 Created projectmembership with identifier '<uuid>'.
 ----
-
+////
 . Verify the membership is ready:
 +
 [source,role="execute"]
@@ -701,6 +709,7 @@ Expected output:
 TENANT    ...  STATE  PROJECT  USERS     ROLE
 sai-corp  ...  READY  default  <bob-id>  VIEWER
 ----
+////
 
 == Exercise 5: Verify RBAC enforcement
 
@@ -766,28 +775,6 @@ Failed to delete project '01a0ce71-71b1-742d-add3-3f2364b7430c': rpc error: code
 ----
 +
 This `PermissionDenied` error confirms that RBAC is working: a viewer can read but not modify resources.
-
-== Troubleshooting
-
-=== IdP login shows "Unexpected error when authenticating with identity provider"
-
-**Issue**: Browser login redirects to an error page instead of the corporate IdP login form.
-**Solution**: This usually indicates an issuer mismatch between the identity provider configuration and the Keycloak broker. Verify the OIDC endpoints match:
-
-[source,role="execute"]
-----
-osac get identityprovider oidc --output yaml | grep -E 'issuer:|authorizationUrl:|tokenUrl:'
-----
-
-=== Logged in as the wrong user
-
-**Issue**: `osac whoami` shows an unexpected username after device flow login. +
-**Solution**: Use a fresh incognito/private browser window for every device flow login. A cached browser session reuses the previous identity. Log out and try again with a clean window.
-
-=== `osac get users` returns PermissionDenied
-
-**Issue**: Running `osac get users` fails with PermissionDenied. +
-**Solution**: This command requires `tenant-admin` authority. It is expected to fail for regular users like Bob. Only platform administrators and tenant-admins can list users.
 
 == Learning outcomes checkpoint
 

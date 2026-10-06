@@ -94,7 +94,10 @@ oc get tenant sai-corp -n osac \
 Ready [{"name":"lvms-vg1","tier":"local"}]
 ----
 +
+[WARNING]
+====
 The tenant must show `Ready` and list a class with `"tier":"local"` before proceeding.
+====
 +
 [HINT]
 ====
@@ -133,7 +136,7 @@ osac create diskimage \
 +
 [source,role=execute]
 ----
-osac get diskimage fedora
+osac get diskimage
 ----
 +
 .Sample output
@@ -157,7 +160,7 @@ osac create instancetype \
 +
 [source,role=execute]
 ----
-osac get instancetype small-1-2
+osac get instancetype
 ----
 +
 .Sample output
@@ -170,7 +173,7 @@ small-1-2  -         1      2       0     -         ACTIVE  Small - 1 vCPU, 2 Gi
 +
 [source,role=execute]
 ----
-cat > ${HOME}/osac-demo/standard-linux-vm.yaml <<'EOF'
+cat > ${HOME}/yaml/standard-linux-vm.yaml <<'EOF'
 "@type": type.googleapis.com/osac.public.v1.ComputeInstanceCatalogItem
 metadata:
   name: standard-linux-vm
@@ -186,7 +189,7 @@ EOF
 +
 [source,role=execute]
 ----
-osac create -f ${HOME}/osac-demo/standard-linux-vm.yaml
+osac create -f ${HOME}/yaml/standard-linux-vm.yaml
 ----
 +
 .Sample output
@@ -198,7 +201,13 @@ Created computeinstancecatalogitem name 'standard-linux-vm' and identifier '01a0
 +
 [source,role=execute]
 ----
-osac get computeinstancecatalogitem standard-linux-vm
+osac get computeinstancecatalogitem
+----
++
+.Sample output
+----
+TENANT  DELETING  PROJECT  ID                                    NAME               TITLE              PUBLISHED
+shared  -         -        01a10b45-4a45-7590-8fec-06578ace00e9  standard-linux-vm  Standard Linux VM  true
 ----
 +
 Confirm the catalog item shows *true* in the *published* column.
@@ -325,7 +334,7 @@ Everything is in place: storage, disk image, instance type, catalog item, and te
 +
 [source,role=execute]
 ----
-CATALOG_ID=$(osac get computeinstancecatalogitem standard-linux-vm -o json | jq -r .id')
+CATALOG_ID=$(osac get computeinstancecatalogitem standard-linux-vm -o json | jq -r '.id')
 echo "CATALOG_ID=${CATALOG_ID}"
 ----
 
@@ -355,19 +364,7 @@ ssh_pwauth: true'
 Created compute instance '01a0d377-5991-7e0e-8b3a-5135683208ec'.
 ----
 
-. The VM will initially fail to import the disk image because CDI tries to pull from quay.io inside the pod network, which does not have external access on this cluster. This is a known issue. You need to switch to a *platform administrator* session briefly to fix the DataVolume import method.
-+
-Log in as the platform administrator:
-+
-[source,role=execute,subs=attributes]
-----
-osac login --insecure \
-  --issuer="{osac_keycloak_url}/realms/osac" \
-  --flow=password \
-  --user={osac_admin_user} \
-  --password={osac_admin_password} \
-  {osac_fulfillment_internal_api_url}
-----
+. The VM will initially fail to import the disk image because CDI tries to pull from quay.io inside the pod network, which does not have external access on this cluster. This is a known issue. You need to fix this using the *OpenShift Cluster Administrator* to fix the DataVolume import method.
 
 . Identify the VM and DataVolume names. The platform generates internal names that differ from the name you specified:
 +
@@ -434,16 +431,6 @@ oc patch vm "${VM_NAME}" -n "${VM_NS}" --type=merge \
   -p '{"spec":{"runStrategy":"Always"}}'
 ----
 
-. Switch back to Alice's session (password: `{osac_user_password}`) and wait for the VM to reach `RUNNING`:
-+
-[source,role=execute,subs=attributes]
-----
-osac logout
-osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
-----
-+
-Complete the device flow login as Alice in a *fresh incognito* window.
-
 . Check the VM status:
 +
 [source,role=execute]
@@ -458,6 +445,15 @@ sai-corp  portal-vm  RUNNING  10.200.0.x   ...
 ----
 +
 Repeat the command until the state shows `RUNNING` and an IP address appears in the tenant subnet range (e.g., `10.200.x.x`).
++
+If after a few seconds the VM still shows `STOPPED` start the VM manually:
++
+[source,role=execute]
+----
+virtctl start ${VM_NAME} -n ${VM_NS}
+----
++
+Then check again until the VM shows `RUNNING` and an IP address appears in the tenant subnet range.
 
 . Verify the underlying KubeVirt resources on the OpenShift cluster:
 +
