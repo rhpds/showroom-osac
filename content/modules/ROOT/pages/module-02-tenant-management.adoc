@@ -223,22 +223,22 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   }' -w "Create bob: HTTP %\{http_code}\n" -o /dev/null
 ----
 
-. Set the OIDC endpoint variables and save them for later exercises:
-+
-[source,role=execute,subs=attributes]
-----
-cat << EOF >>${HOME}/.bashrc
-export OIDC_CLIENT_ID='osac-federation'
-export OIDC_CLIENT_SECRET='osac-demo-secret'
-export OIDC_ISSUER='{osac_keycloak_url}/realms/sai-corp-idp'
-export OIDC_TOKEN_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token'
-export OIDC_AUTHORIZATION_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth'
-EOF
+// . Set the OIDC endpoint variables and save them for later exercises:
+// +
+// [source,role=execute,subs=attributes]
+// ----
+// cat << EOF >>${HOME}/.bashrc
+// export OIDC_CLIENT_ID='osac-federation'
+// export OIDC_CLIENT_SECRET='osac-demo-secret'
+// export OIDC_ISSUER='{osac_keycloak_url}/realms/sai-corp-idp'
+// export OIDC_TOKEN_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token'
+// export OIDC_AUTHORIZATION_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth'
+// EOF
 
-source ${HOME}/.bashrc
+// source ${HOME}/.bashrc
 
-echo "OIDC environment saved to $\{HOME}/.bashrc"
-----
+// echo "OIDC environment saved to $\{HOME}/.bashrc"
+// ----
 
 === Register the new Identity Provider with Red Hat cloud extensions
 
@@ -275,7 +275,7 @@ Create a secret named `sai-corp-oidc-secret` in the `sai-corp` tenant namespace 
 +
 [source,role=execute,subs=attributes]
 ----
-echo -n "${OIDC_CLIENT_SECRET}" | osac \
+echo -n osac-demo-secret | osac \
   create secret --name idp-client-secret \
   --type value --from-file=value=-
 ----
@@ -517,7 +517,54 @@ Alice needs tenant-admin authority to manage SAI Corp's projects and team access
 
 ==== Assign Alice as tenant admin
 
-. Log in as the platform administrator:
+// . Log in as the platform administrator:
+// +
+// [source,role="execute",subs="attributes"]
+// ----
+// osac login --insecure \
+//   --issuer="{osac_keycloak_url}/realms/osac" \
+//   --flow=password \
+//   --user={osac_admin_user} \
+//   --password={osac_admin_password} \
+//   {osac_fulfillment_internal_api_url}
+// ----
+
+// . List the OSAC users and find Alice's UUID:
+// +
+// [source,role="execute"]
+// ----
+// osac get users
+// ----
+// +
+// .Sample output
+// [source]
+// ----
+// ID                                    DELETING  NAME                       USERNAME                   EMAIL                            ENABLED  TENANT
+// 01a08652-5c6d-7b47-bf5f-09e9bd83d5e1  -         sai-corp-osac-break-glass  sai-corp-osac-break-glass  break-glass@sai-corp.osac.local  true     sai-corp
+// 01a086a9-f7fe-7079-9a83-028d202cedb2  -         alice                      alice                      -                                true     sai-corp
+// 01a086ab-68a0-7bc3-b9fe-1991cef6ae11  -         bob                        bob                        -                                true     sai-corp
+// ----
+
+// . Extract Alice's user ID:
+// +
+// [source,role="execute"]
+// ----
+// ALICE_ID=$(osac get user alice -o json | jq -r .id)
+
+// echo "ALICE_ID=${ALICE_ID}"
+// ----
+// +
+// Confirm this is a UUID (36-character hex string with dashes). If it is empty, Alice has not logged in yet — return to Exercise 3.
+
+. Select the *Red Hat cloud extensions* tab on the right. You should still be logged in as the glass break user.
+. Navigate to *Role Bindings* and click *Create Role Binding*.
+. Create the role binding with the following properties:
+* *Name*: `sai-corp-tenant-admin-binding`
+* *Users*: Select `alice`
+* *Role*: `Tenant Administrator`
+. Click *Create*. The RoleBinding should reach `Ready` status within a few seconds.
+
+. In the *Terminal*, log in as the platform administrator:
 +
 [source,role="execute",subs="attributes"]
 ----
@@ -529,42 +576,7 @@ osac login --insecure \
   {osac_fulfillment_internal_api_url}
 ----
 
-. List the OSAC users and find Alice's UUID:
-+
-[source,role="execute"]
-----
-osac get users
-----
-+
-.Sample output
-[source]
-----
-ID                                    DELETING  NAME                       USERNAME                   EMAIL                            ENABLED  TENANT
-01a08652-5c6d-7b47-bf5f-09e9bd83d5e1  -         sai-corp-osac-break-glass  sai-corp-osac-break-glass  break-glass@sai-corp.osac.local  true     sai-corp
-01a086a9-f7fe-7079-9a83-028d202cedb2  -         alice                      alice                      -                                true     sai-corp
-01a086ab-68a0-7bc3-b9fe-1991cef6ae11  -         bob                        bob                        -                                true     sai-corp
-----
-
-. Extract Alice's user ID:
-+
-[source,role="execute"]
-----
-ALICE_ID=$(osac get user alice -o json | jq -r .id)
-
-echo "ALICE_ID=${ALICE_ID}"
-----
-+
-Confirm this is a UUID (36-character hex string with dashes). If it is empty, Alice has not logged in yet — return to Exercise 3.
-
-. Select the *Red Hat cloud extensions* tab on the right. You should still be logged in as the glass break user.
-. Navigate to *Role Bindings* and click *Create Role Binding*.
-. Create the role binding with the following properties:
-* *Name*: `tenant-admin-binding`
-* *Users*: Select `alice`
-* *Role*: `Tenant Administrator`
-. Click *Create*. The RoleBinding should reach `Ready` status within a few seconds.
-
-. In the *Terminal*, verify the RoleBinding is ready:
+. Verify the RoleBinding is ready:
 +
 [source,role="execute"]
 ----
@@ -574,7 +586,7 @@ osac get rolebinding -o yaml | grep -E 'name:|role:|state:|message:'
 .Sample output
 [source]
 ----
-  name: tenant-admin-binding
+  name: sai-corp-tenant-admin-binding
   role:
     name: tenant-admin
       name: alice
@@ -627,12 +639,13 @@ You should see both `alice` and `bob` in the user list.
 [source,role="execute"]
 ----
 cat > ${HOME}/yaml/sai-project.yaml <<'EOF'
-"@type": type.googleapis.com/osac.public.v1.Project
+'@type': type.googleapis.com/osac.public.v1.Project
 metadata:
-  name: default
+  name: sai-corp-default-project
   tenant: sai-corp
+  version: 2
 spec:
-  title: Default Project
+  title: SAI Corp Default Project
   description: Primary project for SAI Corp
 EOF
 
@@ -641,7 +654,7 @@ osac create -f ${HOME}/yaml/sai-project.yaml
 +
 .Sample output
 ----
-Created project with name 'default' and identifier '01a086c1-51b3-7953-a149-334a7d0acf19'.
+Created project with name 'sai-corp-default-project' and identifier '01a086c1-51b3-7953-a149-334a7d0acf19'.
 ----
 
 . List projects to confirm creation:
@@ -654,23 +667,23 @@ osac get projects
 .Sample output
 [source]
 ----
-TENANT    DELETING  PROJECT  NAME     TITLE            STATE
-shared    -         -        -        -                ACTIVE
-sai-corp  -         -        -        -                ACTIVE
-sai-corp  -         -        default  Default Project  ACTIVE
+TENANT    DELETING  PROJECT  NAME                       TITLE                     STATE
+shared    -         -        -                          -                         ACTIVE
+sai-corp  -         -        -                          -                         ACTIVE
+sai-corp  -         -        sai-corp-default-project   SAI Corp Default Project  ACTIVE
 ----
 +
-You should see the `default` project in `ACTIVE` state. You may also see a row with  no name — this is the tenant root project, created automatically with the tenant. This is normal. And the `shared` project is a system project that is always present.
+You should see the `sai-corp-default-project` project in `ACTIVE` state. You may also see a row with  no name — this is the tenant root project, created automatically with the tenant. This is normal. And the `shared` project is a system project that is always present.
 
-. Save the project ID for later use:
-+
-[source,role="execute"]
-----
-export PROJ_ID=$(osac get project default -o json | jq -r .id)
+// . Save the project ID for later use:
+// +
+// [source,role="execute"]
+// ----
+// export PROJ_ID=$(osac get project sai-corp-default-project -o json | jq -r .id)
 
-echo "PROJ_ID=${PROJ_ID}"
-echo "PROJ_ID=${PROJ_ID}" >> $HOME/.bashrc
-----
+// echo "PROJ_ID=${PROJ_ID}"
+// echo "PROJ_ID=${PROJ_ID}" >> $HOME/.bashrc
+// ----
 
 . Grant Bob `viewer` access to the project using a `ProjectMembership`:
 +
@@ -681,7 +694,7 @@ cat > ${HOME}/yaml/bob-membership.yaml <<EOF
 metadata:
   name: bob-viewer
   tenant: sai-corp
-  project: default
+  project: sai-corp-default-project
 spec:
   role: PROJECT_MEMBERSHIP_ROLE_VIEWER
   users:
@@ -753,10 +766,10 @@ osac get projects
 +
 .Example output
 ----
-TENANT    DELETING  PROJECT  NAME     TITLE            STATE
-shared    -         -        -        -                ACTIVE
-sai-corp  -         -        -        -                ACTIVE
-sai-corp  -         -        default  Default Project  ACTIVE
+TENANT    DELETING  PROJECT  NAME                       TITLE                     STATE
+shared    -         -        -                          -                         ACTIVE
+sai-corp  -         -        -                          -                         ACTIVE
+sai-corp  -         -        sai-corp-default-project   SAI Corp Default Project  ACTIVE
 ----
 +
 You should see the `default` project in the list.
@@ -765,7 +778,7 @@ You should see the `default` project in the list.
 +
 [source,role="execute"]
 ----
-osac delete project default
+osac delete project sai-corp-default-project
 ----
 +
 Expected output:

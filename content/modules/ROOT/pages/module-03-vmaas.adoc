@@ -70,6 +70,11 @@ osac create storagetier \
   --backend-id "${BACKEND_ID}" \
   --protocol BLOCK
 ----
++
+.Sample output
+----
+Created storage tier 'local'.
+----
 
 . Label the LVM storage class for the `sai-corp` tenant so the platform maps the `local` tier to the correct Kubernetes storage class:
 +
@@ -79,6 +84,11 @@ oc label sc lvms-vg1 \
   osac.openshift.io/tenant="sai-corp" \
   osac.openshift.io/storage-tier=local \
   --overwrite
+----
++
+.Sample output
+----
+storageclass.storage.k8s.io/lvms-vg1 labeled
 ----
 
 . Verify the tenant shows `Ready` with the `local` storage tier:
@@ -96,12 +106,12 @@ Ready [{"name":"lvms-vg1","tier":"local"}]
 +
 [WARNING]
 ====
-The tenant must show `Ready` and list a class with `"tier":"local"` before proceeding.
+The tenant must show `Ready` and list a class with `"tier":"local"` before proceeding. If it doesn't, wait a few seconds and try the command again.
 ====
 +
 [HINT]
 ====
-You can also verify that storage is setup in the Red Hat cloud extensions UI. As a platform administrator, navigate to *Infrastructure → Storage Tiers* and confirm that the `local` backend and tier is listed with a green status of `Active`.
+You can also verify that storage is setup in the Red Hat cloud extensions UI. As a *platform administrator*, navigate to *Infrastructure → Storage Tiers* and confirm that the `local` backend and tier is listed with a green status of `Active`.
 ====
 
 == Exercise 2: Publish VM building blocks to the catalog
@@ -212,16 +222,6 @@ shared  -         -        01a10b45-4a45-7590-8fec-06578ace00e9  standard-linux-
 +
 Confirm the catalog item shows *true* in the *published* column.
 
-. Save the catalog item UUID for use in later exercises. Tenant users reference catalog items by UUID because name lookup is tenant-scoped:
-+
-[source,role=execute]
-----
-CATALOG_ID=$(osac get computeinstancecatalogitem standard-linux-vm -o json | jq -r '.id')
-
-echo "CATALOG_ID=${CATALOG_ID}"
-echo "export CATALOG_ID=${CATALOG_ID}" >> ${HOME}/.bashrc
-----
-
 == Exercise 3: Verify tenant networking
 
 When a tenant is created, Red Hat cloud extensions automatically provisions a default virtual network, subnet, and security group. These resources provide the network foundation for virtual machines. In this exercise, Alice logs in and verifies that the networking resources are ready before deploying a VM.
@@ -249,7 +249,6 @@ Complete the login in a *fresh incognito* window:
 .. Paste the URL and press Enter
 .. Enter the code that the `osac login` command printed
 .. On the login page, enter `alice`, then click *Sign In*
-.. Click *SAI Corp Corporate SSO* at the bottom
 .. Enter username `alice` and password `{osac_user_password}`, then click *Sign In*
 .. Return to the terminal — you should see `Authentication succeeded`
 +
@@ -378,6 +377,11 @@ echo "VM_NS=${VM_NS}"
 echo "VM_NAME=${VM_NAME}"
 echo "DV_NAME=${DV_NAME}"
 ----
++
+[WARNING]
+====
+If the values are empty, the VM has not finished provisioning. Wait a few seconds and try the command again.
+====
 
 . Halt the VM, delete the stuck DataVolume, and recreate it with `pullMethod: node` so the image is pulled through the node's network instead:
 +
@@ -385,6 +389,7 @@ echo "DV_NAME=${DV_NAME}"
 ----
 oc patch vm "${VM_NAME}" -n "${VM_NS}" --type=merge \
   -p '{"spec":{"runStrategy":"Halted"}}'
+
 sleep 5
 
 oc delete dv "${DV_NAME}" -n "${VM_NS}" --wait=true --timeout=180s
@@ -445,15 +450,6 @@ sai-corp  portal-vm  RUNNING  10.200.0.x   ...
 ----
 +
 Repeat the command until the state shows `RUNNING` and an IP address appears in the tenant subnet range (e.g., `10.200.x.x`).
-+
-If after a few seconds the VM still shows `STOPPED` start the VM manually:
-+
-[source,role=execute]
-----
-virtctl start ${VM_NAME} -n ${VM_NS}
-----
-+
-Then check again until the VM shows `RUNNING` and an IP address appears in the tenant subnet range.
 
 . Verify the underlying KubeVirt resources on the OpenShift cluster:
 +
@@ -514,7 +510,7 @@ osac logout
 osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
 ----
 +
-Complete the login in a *fresh incognito* window. Click *SAI Corp Corporate SSO* and enter `bob` / `{osac_user_password}`.
+Complete the login in a *fresh incognito* window. Enter `bob` / `{osac_user_password}`.
 +
 IMPORTANT: Always use a fresh incognito window. A cached browser session may use the wrong identity.
 
@@ -565,8 +561,6 @@ The `PermissionDenied` error confirms that RBAC is enforced: a viewer can list w
 +
 [source,role=execute]
 ----
-source ${HOME}/.bashrc
-
 osac create computeinstance \
   --name vm-not-allowed \
   --catalog-item "${CATALOG_ID}" \

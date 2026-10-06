@@ -6,3 +6,4 @@
 * xref:module-01-platform-overview.adoc[Exploring the Red Hat cloud extensions Platform]
 * xref:module-02-tenant-management.adoc[Managing Tenants]
 * xref:module-03-vmaas.adoc[Virtual Machine as a Service (VMaaS)]
+* xref:module-04-caas.adoc[Cluster as a Service (CAAS)]

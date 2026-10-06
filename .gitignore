@@ -37,5 +37,7 @@ package-lock.json
 # Ignore yarn.lock for Yarn
 yarn.lock
 
+.claude
 .headroom*
 .serena
+.tox
