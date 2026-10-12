@@ -844,6 +844,13 @@ student-cluster-worker-0              Ready    worker   5m    v1.29.x
 +
 A single worker node at `Ready` confirms the hosted cluster is operational.
 
+++++
+<div class="solve-button-placeholder" data-module="module-04"></div>
+++++
+++++
+<div class="validate-button-placeholder" data-module="module-04"></div>
+++++
+
 == Learning outcomes checkpoint
 
 Review what you completed in this module:

@@ -1,10 +1,516 @@
 ---
-# Module 3: Catalog Items and Workloads — solve tasks
-# Generate with: /ftl:rhdp-lab-validator
-- name: Module 03 - Solve placeholder
+# Module 3: Virtual Machine as a Service — solve playbook
+# Automates all exercises: storage config, catalog publishing, networking
+# verification, VM deployment with DataVolume fix, and RBAC verification.
+- name: Module 03 - Virtual Machine as a Service Solve
   hosts: localhost
+  connection: local
   gather_facts: false
+  vars:
+    osac_namespace: osac
+    tenant_name: sai-corp
+    keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
+    fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
+    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+    storage_class_name: lvms-vg1
+    disk_image_name: fedora
+    instance_type_name: small-1-2
+    catalog_item_name: standard-linux-vm
+    fedora_registry_url: docker://quay.io/containerdisks/fedora:latest
+
   tasks:
-    - name: Placeholder
+
+    # =========================================================================
+    # Exercise 1: Configure storage for tenant workloads
+    # =========================================================================
+
+    - name: Login as platform admin
+      ansible.builtin.shell: >-
+        osac login --insecure
+        --issuer="{{ keycloak_url }}/realms/osac"
+        --flow=password
+        --user={{ osac_admin_user }}
+        --password={{ osac_admin_password }}
+        {{ fulfillment_api_url }}
+      changed_when: false
+
+    - name: Create or get storage backend (lvms)
+      ansible.builtin.shell: |
+        OUTPUT=$(osac create storagebackend \
+          --name local \
+          --provider lvms \
+          --endpoint n/a \
+          --username n/a \
+          --password n/a 2>&1)
+        if echo "${OUTPUT}" | grep -q "Created storage backend"; then
+          echo "${OUTPUT}" | grep -o "'[^']*'" | tr -d "'"
+        elif echo "${OUTPUT}" | grep -qi "already exists"; then
+          osac get storagebackend local -o json | jq -r '.id'
+        else
+          echo "${OUTPUT}" >&2
+          exit 1
+        fi
+      register: r_backend_id
+      changed_when: false
+      failed_when: r_backend_id.stdout | trim | length < 10
+
+    - name: Set backend ID fact
+      ansible.builtin.set_fact:
+        backend_id: "{{ r_backend_id.stdout | trim }}"
+
+    - name: Create storage tier for sai-corp tenant
+      ansible.builtin.shell: >-
+        osac create storagetier
+        --name sai-corp
+        --backend-id "{{ backend_id }}"
+        --protocol BLOCK
+      register: r_storagetier
+      changed_when: "'Created storage tier' in r_storagetier.stdout"
+      failed_when:
+        - r_storagetier.rc != 0
+        - "'already exists' not in r_storagetier.stderr"
+
+    - name: Label lvms-vg1 storage class for sai-corp tenant
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        validate_certs: false
+        state: patched
+        api_version: storage.k8s.io/v1
+        kind: StorageClass
+        name: "{{ storage_class_name }}"
+        definition:
+          metadata:
+            labels:
+              osac.openshift.io/tenant: sai-corp
+              osac.openshift.io/storage-tier: local
+
+    - name: Wait for tenant sai-corp to show Ready with local storage tier
+      ansible.builtin.shell: |
+        oc get tenant sai-corp -n {{ osac_namespace }} \
+          -o jsonpath='{.status.phase} {.status.storageClasses}{"\n"}'
+      environment:
+        KUBECONFIG: "{{ k8s_kubeconfig }}"
+      register: r_tenant_status
+      retries: 20
+      delay: 5
+      until: >-
+        'Ready' in r_tenant_status.stdout and
+        'local' in r_tenant_status.stdout
+      changed_when: false
+
+    # =========================================================================
+    # Exercise 2: Publish VM building blocks to the catalog
+    # =========================================================================
+
+    - name: Login as platform admin (idempotent refresh)
+      ansible.builtin.shell: >-
+        osac login --insecure
+        --issuer="{{ keycloak_url }}/realms/osac"
+        --flow=password
+        --user={{ osac_admin_user }}
+        --password={{ osac_admin_password }}
+        {{ fulfillment_api_url }}
+      changed_when: false
+
+    - name: Create Fedora disk image
+      ansible.builtin.shell: >-
+        osac create diskimage
+        --name {{ disk_image_name }}
+        --source-ref quay.io/containerdisks/fedora:latest
+        --architecture amd64
+      register: r_diskimage
+      changed_when: "'Created diskimage' in r_diskimage.stdout"
+      failed_when:
+        - r_diskimage.rc != 0
+        - "'already exists' not in r_diskimage.stderr"
+
+    - name: Wait for disk image to reach AVAILABLE
+      ansible.builtin.shell: >-
+        osac get diskimage {{ disk_image_name }} -o json | jq -r '.lifecycle'
+      register: r_diskimage_status
+      retries: 30
+      delay: 10
+      until: r_diskimage_status.stdout | trim == 'AVAILABLE'
+      changed_when: false
+
+    - name: Create instance type small-1-2 (1 vCPU, 2 GiB RAM)
+      ansible.builtin.shell: >-
+        osac create instancetype
+        --name {{ instance_type_name }}
+        --vcpus 1
+        --memory-gib 2
+        --description 'Small - 1 vCPU, 2 GiB RAM'
+      register: r_instancetype
+      changed_when: "'Created instancetype' in r_instancetype.stdout"
+      failed_when:
+        - r_instancetype.rc != 0
+        - "'already exists' not in r_instancetype.stderr"
+
+    - name: Verify instance type is ACTIVE
+      ansible.builtin.shell: >-
+        osac get instancetype {{ instance_type_name }} -o json | jq -r '.state'
+      register: r_instancetype_status
+      retries: 10
+      delay: 3
+      until: r_instancetype_status.stdout | trim == 'ACTIVE'
+      changed_when: false
+
+    - name: Write catalog item YAML to ~/yaml/standard-linux-vm.yaml
+      ansible.builtin.shell: |
+        mkdir -p ${HOME}/yaml
+        cat > ${HOME}/yaml/standard-linux-vm.yaml <<'EOF'
+        "@type": type.googleapis.com/osac.public.v1.ComputeInstanceCatalogItem
+        metadata:
+          name: standard-linux-vm
+        title: Standard Linux VM
+        description: Standard Linux virtual machine for tenant workloads
+        template:
+          id: osac.templates.ocp_virt_vm
+        published: true
+        EOF
+      changed_when: true
+
+    - name: Create catalog item from YAML file
+      ansible.builtin.shell: >-
+        osac create -f ${HOME}/yaml/standard-linux-vm.yaml
+      register: r_catalog_create
+      changed_when: "'Created computeinstancecatalogitem' in r_catalog_create.stdout"
+      failed_when:
+        - r_catalog_create.rc != 0
+        - "'already exists' not in r_catalog_create.stderr"
+
+    - name: Verify catalog item is published
+      ansible.builtin.shell: >-
+        osac get computeinstancecatalogitem {{ catalog_item_name }} -o json | jq -r '.published'
+      register: r_catalog_published
+      retries: 10
+      delay: 3
+      until: r_catalog_published.stdout | trim == 'true'
+      changed_when: false
+
+    # =========================================================================
+    # Exercise 3: Verify tenant networking as Alice
+    # =========================================================================
+
+    - name: Logout admin session before Alice login
+      ansible.builtin.shell: osac logout
+      changed_when: true
+      ignore_errors: true
+
+    - name: Login as Alice via device flow
+      ansible.builtin.shell: >-
+        {{ device_login_script }}
+        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
+        "alice" "{{ osac_user_password }}"
+      changed_when: false
+
+    - name: Verify Alice identity and tenant-admin role
+      ansible.builtin.shell: osac whoami
+      register: r_alice_whoami
+      changed_when: false
+      failed_when: "'tenant-admin' not in r_alice_whoami.stdout"
+
+    - name: Wait for virtual network to be READY
+      ansible.builtin.shell: osac get virtualnetwork
+      register: r_vnet
+      retries: 20
+      delay: 5
+      until: "'READY' in r_vnet.stdout"
+      changed_when: false
+      ignore_errors: true
+
+    - name: Wait for subnet default-ipv4 to be READY
+      ansible.builtin.shell: >-
+        osac get subnet default-ipv4 -o json | jq -r '.state'
+      register: r_subnet_state
+      retries: 20
+      delay: 5
+      until: "'READY' in r_subnet_state.stdout"
+      changed_when: false
+      ignore_errors: true
+
+    - name: Wait for security group default to be READY
+      ansible.builtin.shell: >-
+        osac get securitygroup default -o json | jq -r '.state'
+      register: r_sg_state
+      retries: 20
+      delay: 5
+      until: "'READY' in r_sg_state.stdout"
+      changed_when: false
+      ignore_errors: true
+
+    - name: Capture subnet ID
+      ansible.builtin.shell: >-
+        osac get subnet default-ipv4 -o json | jq -r '.id'
+      register: r_subnet_id
+      changed_when: false
+      failed_when: r_subnet_id.stdout | trim | length < 10
+
+    - name: Capture security group ID
+      ansible.builtin.shell: >-
+        osac get securitygroup default -o json | jq -r '.id'
+      register: r_sg_id
+      changed_when: false
+      failed_when: r_sg_id.stdout | trim | length < 10
+
+    - name: Set networking ID facts
+      ansible.builtin.set_fact:
+        subnet_id: "{{ r_subnet_id.stdout | trim }}"
+        sg_id: "{{ r_sg_id.stdout | trim }}"
+
+    # =========================================================================
+    # Exercise 4: Deploy a virtual machine
+    # =========================================================================
+
+    - name: Capture catalog item ID
+      ansible.builtin.shell: >-
+        osac get computeinstancecatalogitem {{ catalog_item_name }} -o json | jq -r '.id'
+      register: r_catalog_id
+      changed_when: false
+      failed_when: r_catalog_id.stdout | trim | length < 10
+
+    - name: Set catalog ID fact
+      ansible.builtin.set_fact:
+        catalog_id: "{{ r_catalog_id.stdout | trim }}"
+
+    - name: Create portal-vm compute instance
+      ansible.builtin.shell: |
+        osac create computeinstance \
+          --name portal-vm \
+          --catalog-item "{{ catalog_id }}" \
+          --instance-type {{ instance_type_name }} \
+          --disk-image {{ disk_image_name }} \
+          --boot-disk-size 10 \
+          --boot-disk-storage-tier local \
+          --run-strategy Always \
+          --network-attachment "subnet={{ subnet_id }},security-groups={{ sg_id }}" \
+          --user-data '#cloud-config
+        user: fedora-admin
+        password: {{ osac_user_password }}
+        chpasswd:
+          expire: false
+        ssh_pwauth: true'
+      register: r_vm_create
+      changed_when: "'Created compute instance' in r_vm_create.stdout"
+      failed_when:
+        - r_vm_create.rc != 0
+        - "'already exists' not in r_vm_create.stderr"
+
+    - name: Discover VM namespace and name (retry until provisioned)
+      ansible.builtin.shell: |
+        VM_NS=$(oc get vm -A --no-headers 2>/dev/null | grep -v NAME | head -1 | awk '{print $1}')
+        VM_NAME=$(oc get vm -A --no-headers 2>/dev/null | grep -v NAME | head -1 | awk '{print $2}')
+        if [ -z "${VM_NS}" ] || [ -z "${VM_NAME}" ]; then
+          echo "VM not yet provisioned" >&2
+          exit 1
+        fi
+        echo "VM_NS=${VM_NS}"
+        echo "VM_NAME=${VM_NAME}"
+      environment:
+        KUBECONFIG: "{{ k8s_kubeconfig }}"
+      register: r_vm_discovery
+      retries: 12
+      delay: 10
+      until: r_vm_discovery.rc == 0
+      changed_when: false
+
+    - name: Set VM namespace and name facts
+      ansible.builtin.set_fact:
+        vm_ns: "{{ r_vm_discovery.stdout | regex_search('VM_NS=(.+)', '\\1') | first }}"
+        vm_name: "{{ r_vm_discovery.stdout | regex_search('VM_NAME=(.+)', '\\1') | first }}"
+
+    - name: Discover DataVolume name
+      ansible.builtin.shell: >-
+        oc get dv -n "{{ vm_ns }}" --no-headers 2>/dev/null | awk '{print $1}' | head -1
+      environment:
+        KUBECONFIG: "{{ k8s_kubeconfig }}"
+      register: r_dv_name
+      retries: 10
+      delay: 5
+      until: r_dv_name.stdout | trim | length > 0
+      changed_when: false
+
+    - name: Set DataVolume name fact
+      ansible.builtin.set_fact:
+        dv_name: "{{ r_dv_name.stdout | trim }}"
+
+    # DataVolume fix: CDI cannot pull from quay.io inside pod network.
+    # ALWAYS run this sequence — do not make it conditional.
+    - name: DataVolume fix — halt VM
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        validate_certs: false
+        state: patched
+        api_version: kubevirt.io/v1
+        kind: VirtualMachine
+        name: "{{ vm_name }}"
+        namespace: "{{ vm_ns }}"
+        definition:
+          spec:
+            runStrategy: Halted
+
+    - name: DataVolume fix — brief pause for VMI teardown
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: DataVolume fix — delete stuck DataVolume
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        validate_certs: false
+        state: absent
+        api_version: cdi.kubevirt.io/v1beta1
+        kind: DataVolume
+        name: "{{ dv_name }}"
+        namespace: "{{ vm_ns }}"
+        wait: true
+        wait_timeout: 180
+
+    - name: DataVolume fix — delete prime-* PVCs
+      ansible.builtin.shell: |
+        oc get pvc -n "{{ vm_ns }}" --no-headers 2>/dev/null \
+          | awk '/prime-/{print $1}' \
+          | xargs -r -n1 oc delete pvc -n "{{ vm_ns }}" --wait=false
+      environment:
+        KUBECONFIG: "{{ k8s_kubeconfig }}"
+      changed_when: true
+      ignore_errors: true
+
+    - name: DataVolume fix — create new DataVolume with pullMethod node
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: cdi.kubevirt.io/v1beta1
+          kind: DataVolume
+          metadata:
+            name: "{{ dv_name }}"
+            namespace: "{{ vm_ns }}"
+            annotations:
+              cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+          spec:
+            source:
+              registry:
+                url: "{{ fedora_registry_url }}"
+                pullMethod: node
+            pvc:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 10Gi
+              storageClassName: "{{ storage_class_name }}"
+
+    - name: Wait for DataVolume to reach Succeeded (up to 15 min)
+      ansible.builtin.shell: >-
+        oc get dv "{{ dv_name }}" -n "{{ vm_ns }}"
+        -o jsonpath='{.status.phase}'
+      environment:
+        KUBECONFIG: "{{ k8s_kubeconfig }}"
+      register: r_dv_phase
+      retries: 30
+      delay: 30
+      until: r_dv_phase.stdout | trim == 'Succeeded'
+      changed_when: false
+      ignore_errors: true
+
+    - name: Patch VM back to runStrategy Always
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        validate_certs: false
+        state: patched
+        api_version: kubevirt.io/v1
+        kind: VirtualMachine
+        name: "{{ vm_name }}"
+        namespace: "{{ vm_ns }}"
+        definition:
+          spec:
+            runStrategy: Always
+
+    - name: Wait for portal-vm to reach RUNNING state (up to 15 min)
+      ansible.builtin.shell: >-
+        osac get computeinstance portal-vm -o json | jq -r '.state'
+      register: r_vm_state
+      retries: 30
+      delay: 30
+      until: r_vm_state.stdout | trim == 'RUNNING'
+      changed_when: false
+      ignore_errors: true
+
+    # =========================================================================
+    # Exercise 5: Verify RBAC enforcement as Bob
+    # =========================================================================
+
+    - name: Logout Alice session
+      ansible.builtin.shell: osac logout
+      changed_when: true
+      ignore_errors: true
+
+    - name: Login as Bob via device flow
+      ansible.builtin.shell: >-
+        {{ device_login_script }}
+        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
+        "bob" "{{ osac_user_password }}"
+      changed_when: false
+
+    - name: Verify Bob identity (no tenant-admin)
+      ansible.builtin.shell: osac whoami
+      register: r_bob_whoami
+      changed_when: false
+      failed_when: "'bob' not in r_bob_whoami.stdout"
+
+    - name: Bob can list compute instances (viewer access)
+      ansible.builtin.shell: osac get computeinstance
+      register: r_bob_list
+      changed_when: false
+      failed_when: r_bob_list.rc != 0
+
+    - name: Bob cannot delete portal-vm (RBAC enforcement check)
+      ansible.builtin.shell: osac delete computeinstance portal-vm
+      register: r_bob_delete
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Bob cannot create a compute instance (RBAC enforcement check)
+      ansible.builtin.shell: |
+        osac create computeinstance \
+          --name vm-not-allowed \
+          --catalog-item "{{ catalog_id }}" \
+          --instance-type {{ instance_type_name }} \
+          --disk-image {{ disk_image_name }} \
+          --boot-disk-size 10 \
+          --boot-disk-storage-tier local \
+          --run-strategy Always \
+          --network-attachment "subnet={{ subnet_id }},security-groups={{ sg_id }}" \
+          --user-data '#cloud-config
+        user: fedora-admin
+        password: {{ osac_user_password }}
+        chpasswd:
+          expire: false
+        ssh_pwauth: true'
+      register: r_bob_create
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    # =========================================================================
+    # Final status report
+    # =========================================================================
+
+    - name: Report solve status
       ansible.builtin.debug:
-        msg: "Solve tasks not yet generated. Run /ftl:rhdp-lab-validator to create."
+        msg: |
+          === Module 03 Solve Results ===
+          Storage backend created:        {{ 'ok' if backend_id | default('') | length > 10 else 'NOT ok' }}
+          Tenant sai-corp storage ready:  {{ 'ok' if 'Ready' in r_tenant_status.stdout and 'local' in r_tenant_status.stdout else 'NOT ok' }}
+          Disk image AVAILABLE:           {{ 'ok' if r_diskimage_status.stdout | trim == 'AVAILABLE' else 'NOT ok' }}
+          Instance type ACTIVE:           {{ 'ok' if r_instancetype_status.stdout | trim == 'ACTIVE' else 'NOT ok' }}
+          Catalog item published:         {{ 'ok' if r_catalog_published.stdout | trim == 'true' else 'NOT ok' }}
+          Subnet READY:                   {{ 'ok' if 'READY' in r_subnet_state.stdout else 'NOT ok' }}
+          Security group READY:           {{ 'ok' if 'READY' in r_sg_state.stdout else 'NOT ok' }}
+          DataVolume phase:               {{ r_dv_phase.stdout | trim | default('unknown') }}
+          VM state:                       {{ r_vm_state.stdout | trim | default('unknown') }}
+          portal-vm RUNNING:              {{ 'ok' if r_vm_state.stdout | trim == 'RUNNING' else 'NOT ok — VM still starting; click Validate again in a few minutes' }}
+          Bob delete blocked:             {{ 'ok' if 'PermissionDenied' in (r_bob_delete.stderr | default('')) else 'NOT ok' }}
+          Bob create blocked:             {{ 'ok' if 'PermissionDenied' in (r_bob_create.stderr | default('')) else 'NOT ok' }}

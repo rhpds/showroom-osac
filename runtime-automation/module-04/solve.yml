@@ -1,0 +1,1024 @@
+---
+# Module 04: Cluster as a Service (CaaS) — Solve Playbook
+# Exercises: platform networking, agent VM provisioning, catalog objects, tenant cluster order.
+- name: Module 04 - Cluster as a Service Solve
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    osac_ns: osac
+    hw_ns: hardware-inventory
+    my_name: student
+    cluster_name: student-cluster
+    vm_name: "agent-{{ my_name }}-01"
+    bmit_name: c1-metal-amd64
+    disk_image: rhcos-4-22
+    ocp_version: 4.22.0-rhcos
+    catalog_item: hosted-ci-small
+    cluster_template: ocp-ci-small
+    storage_class: ocs-external-storagecluster-ceph-rbd-virtualization
+    ocp_release_image: quay.io/openshift-release-dev/ocp-release:4.22.0-multi
+    disk_image_source_ref: oci://quay.io/rh_ee_rpiccoli/rhcos-bmi:4.22.0
+    config_admin: "{{ lookup('env', 'HOME') }}/.config/osac-admin"
+    config_tenant: "{{ lookup('env', 'HOME') }}/.config/osac-tenant"
+    pull_secret_path: "{{ lookup('env', 'HOME') }}/pull-secret-cluster.json"
+    # OSAC namespace patterns for hosted cluster components
+    hc_components_ns: "osac-{{ cluster_name }}-{{ cluster_name }}"
+    tenant_cluster_ns: "osac-{{ cluster_name }}"
+    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+
+  tasks:
+
+    # =========================================================================
+    # Setup — discover cluster topology via k8s_info
+    # =========================================================================
+
+    - name: Get hub base domain from cluster DNS config
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: config.openshift.io/v1
+        kind: DNS
+        name: cluster
+      register: r_dns
+      ignore_errors: true
+
+    - name: Get ingress domain from cluster ingress config
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: config.openshift.io/v1
+        kind: Ingress
+        name: cluster
+      register: r_ingress
+      ignore_errors: true
+
+    - name: Get router-internal-default service ClusterIP
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Service
+        namespace: openshift-ingress
+        name: router-internal-default
+      register: r_router_svc
+      ignore_errors: true
+
+    - name: Get worker nodes
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Node
+        label_selectors:
+          - "node-role.kubernetes.io/worker"
+      register: r_workers
+      ignore_errors: true
+
+    - name: Set derived topology facts
+      when:
+        - r_dns.resources | length > 0
+        - r_ingress.resources | length > 0
+        - r_router_svc.resources | length > 0
+      ansible.builtin.set_fact:
+        hub_base: "{{ r_dns.resources[0].spec.baseDomain }}"
+        hosted_base: "hosted.{{ r_dns.resources[0].spec.baseDomain }}"
+        hc_domain: "{{ cluster_name }}.hosted.{{ r_dns.resources[0].spec.baseDomain }}"
+        ingress_domain: "{{ r_ingress.resources[0].spec.domain }}"
+        api_int: "https://fulfillment-internal-api-{{ osac_ns }}.{{ r_ingress.resources[0].spec.domain }}"
+        keycloak_url: "https://keycloak-keycloak.{{ r_ingress.resources[0].spec.domain }}"
+        router_ip: "{{ r_router_svc.resources[0].spec.clusterIP }}"
+
+    - name: Set agent_worker from first worker node
+      when: r_workers.resources | length > 0
+      ansible.builtin.set_fact:
+        agent_worker: "{{ r_workers.resources | map(attribute='metadata.name') | list | first }}"
+
+    # =========================================================================
+    # Setup — pull secret and SSH keypair
+    # =========================================================================
+
+    - name: Get pull secret from openshift-config
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Secret
+        namespace: openshift-config
+        name: pull-secret
+      register: r_pull_secret
+      ignore_errors: true
+
+    - name: Write pull secret to file
+      when: r_pull_secret.resources | length > 0
+      ansible.builtin.copy:
+        content: "{{ r_pull_secret.resources[0].data['.dockerconfigjson'] | b64decode }}"
+        dest: "{{ pull_secret_path }}"
+        mode: "0600"
+      ignore_errors: true
+
+    - name: Generate SSH keypair if not present
+      community.crypto.openssh_keypair:
+        path: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519"
+        type: ed25519
+        state: present
+      register: r_ssh_key
+      ignore_errors: true
+
+    - name: Read SSH public key
+      ansible.builtin.slurp:
+        src: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519.pub"
+      register: r_ssh_pub
+      ignore_errors: true
+
+    - name: Set SSH public key fact
+      when: r_ssh_pub.content is defined
+      ansible.builtin.set_fact:
+        ssh_pub_key: "{{ r_ssh_pub.content | b64decode | trim }}"
+
+    - name: Login as OSAC admin (private API, SA token)
+      ansible.builtin.shell: >-
+        osac --config "{{ config_admin }}" login --insecure --private
+        --address "{{ api_int }}"
+        --token-script "oc --kubeconfig={{ k8s_kubeconfig }} create token -n {{ osac_ns }} admin"
+      changed_when: false
+      ignore_errors: true
+
+    # =========================================================================
+    # Exercise 2 — Platform networking
+    # =========================================================================
+
+    - name: Assert hosted_base is set before proceeding
+      ansible.builtin.assert:
+        that: hosted_base is defined and hosted_base | length > 0
+        fail_msg: "hosted_base not derived — check DNS and Ingress config objects"
+        success_msg: "hosted_base = {{ hosted_base | default('unknown') }}"
+
+    - name: Patch cluster-fulfillment-ig ConfigMap with hosted cluster base domain
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: patched
+        api_version: v1
+        kind: ConfigMap
+        name: cluster-fulfillment-ig
+        namespace: "{{ osac_ns }}"
+        definition:
+          data:
+            DNS_CLASS: dns.noop.dns
+            HOSTED_CLUSTER_BASE_DOMAIN: "{{ hosted_base }}"
+      ignore_errors: true
+
+    - name: Apply MachineConfig 99-osac-caas-br-untagged
+      # NetworkManager keyfile (URL-encoded) configures br-untagged bridge at 10.10.10.50/24
+      # [connection] id=br-untagged type=bridge interface-name=br-untagged
+      # [bridge] stp=false
+      # [ipv4] method=manual addresses=10.10.10.50/24
+      # [ipv6] method=disabled
+      ansible.builtin.shell: |
+        oc --kubeconfig={{ k8s_kubeconfig }} apply -f - <<'MANIFEST'
+        apiVersion: machineconfiguration.openshift.io/v1
+        kind: MachineConfig
+        metadata:
+          labels:
+            machineconfiguration.openshift.io/role: worker
+          name: 99-osac-caas-br-untagged
+        spec:
+          config:
+            ignition:
+              version: 3.2.0
+            storage:
+              files:
+                - path: /etc/NetworkManager/system-connections/br-untagged.nmconnection
+                  mode: 0600
+                  overwrite: true
+                  contents:
+                    source: >-
+                      data:text/plain;charset=utf-8,%5Bconnection%5D%0Aid%3Dbr-untagged%0Atype%3Dbridge%0Ainterface-name%3Dbr-untagged%0A%0A%5Bbridge%5D%0Astp%3Dfalse%0A%0A%5Bipv4%5D%0Amethod%3Dmanual%0Aaddresses%3D10.10.10.50%2F24%0A%0A%5Bipv6%5D%0Amethod%3Ddisabled%0A
+        MANIFEST
+      register: r_mc_apply
+      changed_when: "'configured' in r_mc_apply.stdout or 'created' in r_mc_apply.stdout"
+      ignore_errors: true
+
+    - name: Wait for worker MachineConfigPool Updated=True (up to 30 min)
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: machineconfiguration.openshift.io/v1
+        kind: MachineConfigPool
+        name: worker
+      register: r_mcp_done
+      retries: 30
+      delay: 60
+      until: >-
+        r_mcp_done.resources | length > 0 and
+        (r_mcp_done.resources[0].status.conditions
+          | selectattr('type', 'equalto', 'Updated')
+          | selectattr('status', 'equalto', 'True')
+          | list | length > 0) and
+        (r_mcp_done.resources[0].status.conditions
+          | selectattr('type', 'equalto', 'Updating')
+          | selectattr('status', 'equalto', 'False')
+          | list | length > 0)
+      ignore_errors: true
+
+    - name: Verify br-untagged bridge exists on worker node
+      when: agent_worker is defined and agent_worker | length > 0
+      ansible.builtin.shell: >-
+        oc --kubeconfig={{ k8s_kubeconfig }}
+        debug node/{{ agent_worker }} --
+        chroot /host ip link show br-untagged
+      register: r_bridge_check
+      changed_when: false
+      ignore_errors: true
+
+    # =========================================================================
+    # Exercise 3 — Provision Agent VM
+    # =========================================================================
+
+    - name: Ensure hardware-inventory namespace exists
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ hw_ns }}"
+      ignore_errors: true
+
+    - name: Copy pull secret to hardware-inventory namespace
+      when: r_pull_secret.resources | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: pull-secret
+            namespace: "{{ hw_ns }}"
+          type: kubernetes.io/dockerconfigjson
+          data:
+            .dockerconfigjson: "{{ r_pull_secret.resources[0].data['.dockerconfigjson'] }}"
+      ignore_errors: true
+
+    - name: Apply InfraEnv hardware-inventory with full-iso
+      when: ssh_pub_key is defined
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: agent-install.openshift.io/v1beta1
+          kind: InfraEnv
+          metadata:
+            name: hardware-inventory
+            namespace: "{{ hw_ns }}"
+          spec:
+            pullSecretRef:
+              name: pull-secret
+            sshAuthorizedKey: "{{ ssh_pub_key }}"
+            imageType: full-iso
+      ignore_errors: true
+
+    - name: Wait for InfraEnv to publish ISO download URL
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: agent-install.openshift.io/v1beta1
+        kind: InfraEnv
+        namespace: "{{ hw_ns }}"
+        name: hardware-inventory
+      register: r_infraenv
+      retries: 20
+      delay: 15
+      until: >-
+        r_infraenv.resources | length > 0 and
+        r_infraenv.resources[0].status.isoDownloadURL is defined and
+        'full.iso' in (r_infraenv.resources[0].status.isoDownloadURL | default(''))
+      ignore_errors: true
+
+    - name: Set ISO download URL fact
+      when:
+        - r_infraenv.resources | length > 0
+        - r_infraenv.resources[0].status.isoDownloadURL is defined
+      ansible.builtin.set_fact:
+        iso_download_url: "{{ r_infraenv.resources[0].status.isoDownloadURL }}"
+
+    - name: Build ignitionConfigOverride hosts entries for router IP
+      when:
+        - router_ip is defined and router_ip | length > 0
+        - ingress_domain is defined and ingress_domain | length > 0
+      ansible.builtin.set_fact:
+        ignition_config_override: "{{ ignition_dict | to_json }}"
+      vars:
+        # /etc/hosts routes hub ingress wildcard through internal router IP
+        hosts_src: >-
+          data:,127.0.0.1%20localhost%0A{{ router_ip }}%20api.{{ ingress_domain }}%0A{{ router_ip }}%20oauth-openshift.apps.{{ ingress_domain }}%0A{{ router_ip }}%20*.apps.{{ ingress_domain }}%0A
+        ignition_dict:
+          ignition:
+            version: "3.2.0"
+          storage:
+            files:
+              - path: /etc/hosts
+                mode: 420
+                overwrite: true
+                contents:
+                  source: "{{ hosts_src }}"
+
+    - name: Patch InfraEnv ignitionConfigOverride with router /etc/hosts entries
+      # spec.ignitionConfigOverride is a JSON-encoded STRING (double-encoded) — to_json applied above
+      when: ignition_config_override is defined
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: patched
+        api_version: agent-install.openshift.io/v1beta1
+        kind: InfraEnv
+        namespace: "{{ hw_ns }}"
+        name: hardware-inventory
+        definition:
+          spec:
+            ignitionConfigOverride: "{{ ignition_config_override }}"
+      ignore_errors: true
+
+    - name: Wait for updated InfraEnv ISO URL after ignition patch
+      when: ignition_config_override is defined
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: agent-install.openshift.io/v1beta1
+        kind: InfraEnv
+        namespace: "{{ hw_ns }}"
+        name: hardware-inventory
+      register: r_infraenv2
+      retries: 10
+      delay: 15
+      until: >-
+        r_infraenv2.resources | length > 0 and
+        'full.iso' in (r_infraenv2.resources[0].status.isoDownloadURL | default(''))
+      ignore_errors: true
+
+    - name: Refresh ISO download URL fact after ignition patch
+      when:
+        - ignition_config_override is defined
+        - r_infraenv2.resources | default([]) | length > 0
+        - r_infraenv2.resources[0].status.isoDownloadURL is defined
+      ansible.builtin.set_fact:
+        iso_download_url: "{{ r_infraenv2.resources[0].status.isoDownloadURL }}"
+
+    - name: Apply NetworkAttachmentDefinition untagged-net-student
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: k8s.cni.cncf.io/v1
+          kind: NetworkAttachmentDefinition
+          metadata:
+            name: "untagged-net-{{ my_name }}"
+            namespace: "{{ hw_ns }}"
+          spec:
+            # spec.config is a JSON string per CNI spec
+            config: >-
+              {"cniVersion":"0.3.1","name":"untagged-net-{{ my_name }}","type":"bridge","bridge":"br-untagged","ipam":{}}
+      ignore_errors: true
+
+    - name: Apply blank root DataVolume 120Gi for agent VM
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: cdi.kubevirt.io/v1beta1
+          kind: DataVolume
+          metadata:
+            name: "{{ vm_name }}-rootdisk"
+            namespace: "{{ hw_ns }}"
+          spec:
+            source:
+              blank: {}
+            storage:
+              accessModes:
+                - ReadWriteMany
+              resources:
+                requests:
+                  storage: 120Gi
+              storageClassName: "{{ storage_class }}"
+      ignore_errors: true
+
+    - name: Wait for rootdisk DataVolume phase Succeeded
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: cdi.kubevirt.io/v1beta1
+        kind: DataVolume
+        namespace: "{{ hw_ns }}"
+        name: "{{ vm_name }}-rootdisk"
+      register: r_dv_root
+      retries: 30
+      delay: 20
+      until: >-
+        r_dv_root.resources | length > 0 and
+        r_dv_root.resources[0].status.phase == 'Succeeded'
+      ignore_errors: true
+
+    - name: Delete stale iso-download pod if present
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: absent
+        api_version: v1
+        kind: Pod
+        name: iso-download
+        namespace: "{{ hw_ns }}"
+      ignore_errors: true
+
+    - name: Create ISO download pod
+      when: iso_download_url is defined
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: iso-download
+            namespace: "{{ hw_ns }}"
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: downloader
+                image: registry.access.redhat.com/ubi9/ubi:latest
+                command:
+                  - sh
+                  - -c
+                  - >-
+                    curl -sk -o /data/agent-discovery.iso "{{ iso_download_url }}" &&
+                    echo ISO_DOWNLOADED && sleep 3600
+                volumeMounts:
+                  - name: data
+                    mountPath: /data
+            volumes:
+              - name: data
+                emptyDir: {}
+      ignore_errors: true
+
+    - name: Wait for ISO download pod to reach Running phase
+      when: iso_download_url is defined
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ hw_ns }}"
+        name: iso-download
+      register: r_iso_pod
+      retries: 90
+      delay: 5
+      until: >-
+        r_iso_pod.resources | length > 0 and
+        r_iso_pod.resources[0].status.phase == 'Running'
+      ignore_errors: true
+
+    - name: Wait for ISO file to appear inside download pod
+      when:
+        - iso_download_url is defined
+        - r_iso_pod.resources | default([]) | length > 0
+        - r_iso_pod.resources[0].status.phase == 'Running'
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        namespace: "{{ hw_ns }}"
+        pod: iso-download
+        command: "sh -c 'until [ -f /data/agent-discovery.iso ]; do sleep 5; done && ls -lh /data/agent-discovery.iso'"
+      register: r_iso_ready
+      retries: 60
+      delay: 10
+      until: r_iso_ready.rc is defined and r_iso_ready.rc == 0
+      ignore_errors: true
+
+    - name: Copy ISO from pod to /tmp/agent-discovery.iso on automation host
+      when: iso_download_url is defined
+      ansible.builtin.shell: >-
+        oc --kubeconfig={{ k8s_kubeconfig }}
+        cp {{ hw_ns }}/iso-download:/data/agent-discovery.iso /tmp/agent-discovery.iso
+      register: r_iso_cp
+      changed_when: r_iso_cp.rc == 0
+      ignore_errors: true
+
+    - name: Cleanup iso-download pod
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: absent
+        api_version: v1
+        kind: Pod
+        name: iso-download
+        namespace: "{{ hw_ns }}"
+      ignore_errors: true
+
+    - name: Upload ISO to DataVolume via virtctl image-upload
+      ansible.builtin.shell: >-
+        virtctl --kubeconfig={{ k8s_kubeconfig }}
+        image-upload dv {{ vm_name }}-iso
+        --namespace {{ hw_ns }}
+        --size=4Gi
+        --image-path=/tmp/agent-discovery.iso
+        --storage-class={{ storage_class }}
+        --access-mode=ReadWriteMany
+        --insecure
+      register: r_virtctl_upload
+      changed_when: r_virtctl_upload.rc == 0
+      ignore_errors: true
+
+    - name: Wait for ISO DataVolume phase Succeeded
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: cdi.kubevirt.io/v1beta1
+        kind: DataVolume
+        namespace: "{{ hw_ns }}"
+        name: "{{ vm_name }}-iso"
+      register: r_dv_iso
+      retries: 30
+      delay: 20
+      until: >-
+        r_dv_iso.resources | length > 0 and
+        r_dv_iso.resources[0].status.phase == 'Succeeded'
+      ignore_errors: true
+
+    - name: Apply VirtualMachine agent-student-01 pinned to agent_worker
+      when: agent_worker is defined and agent_worker | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachine
+          metadata:
+            name: "{{ vm_name }}"
+            namespace: "{{ hw_ns }}"
+            labels:
+              app: "{{ vm_name }}"
+          spec:
+            running: true
+            template:
+              metadata:
+                labels:
+                  kubevirt.io/vm: "{{ vm_name }}"
+              spec:
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                        - matchExpressions:
+                            - key: kubernetes.io/hostname
+                              operator: In
+                              values:
+                                - "{{ agent_worker }}"
+                networks:
+                  - name: default
+                    pod: {}
+                  - name: untagged-net
+                    multus:
+                      networkName: "{{ hw_ns }}/untagged-net-{{ my_name }}"
+                domain:
+                  cpu:
+                    cores: 4
+                  memory:
+                    guest: 8Gi
+                  devices:
+                    disks:
+                      - name: rootdisk
+                        disk:
+                          bus: virtio
+                        bootOrder: 2
+                      - name: iso
+                        cdrom:
+                          bus: sata
+                        bootOrder: 1
+                    interfaces:
+                      - name: default
+                        masquerade: {}
+                      - name: untagged-net
+                        bridge: {}
+                volumes:
+                  - name: rootdisk
+                    dataVolume:
+                      name: "{{ vm_name }}-rootdisk"
+                  - name: iso
+                    dataVolume:
+                      name: "{{ vm_name }}-iso"
+      ignore_errors: true
+
+    - name: Wait for VirtualMachineInstance to reach Running phase
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        namespace: "{{ hw_ns }}"
+        name: "{{ vm_name }}"
+      register: r_vmi
+      retries: 24
+      delay: 15
+      until: >-
+        r_vmi.resources | length > 0 and
+        r_vmi.resources[0].status.phase == 'Running'
+      ignore_errors: true
+
+    - name: Wait for Agent to appear in hardware-inventory (up to 8 min)
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: agent-install.openshift.io/v1beta1
+        kind: Agent
+        namespace: "{{ hw_ns }}"
+      register: r_agents
+      retries: 48
+      delay: 10
+      until: r_agents.resources | length > 0
+      ignore_errors: true
+
+    - name: Set agent name fact
+      when: r_agents.resources | length > 0
+      ansible.builtin.set_fact:
+        agent_name: "{{ r_agents.resources[0].metadata.name }}"
+
+    - name: Label and approve Agent (resource_class, host-type, approved)
+      when: agent_name is defined
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        state: patched
+        api_version: agent-install.openshift.io/v1beta1
+        kind: Agent
+        namespace: "{{ hw_ns }}"
+        name: "{{ agent_name }}"
+        definition:
+          metadata:
+            labels:
+              osac.openshift.io/resource_class: ci-worker
+              osac.openshift.io/host-type: default
+          spec:
+            approved: true
+      ignore_errors: true
+
+    # =========================================================================
+    # Exercise 4 — Catalog objects (admin context)
+    # =========================================================================
+
+    - name: Check if bmaas is enabled in helm release values
+      ansible.builtin.shell: >-
+        helm --kubeconfig {{ k8s_kubeconfig }} get values osac -n {{ osac_ns }} -o yaml
+        | grep -A3 'bmaas:' | grep 'enabled:' || echo not-found
+      register: r_bmaas_check
+      changed_when: false
+      ignore_errors: true
+
+    - name: Enable bmaas via helm upgrade with --reuse-values
+      # Assumes the osac helm chart repo is configured as 'osac'.
+      # If this fails: helm repo list | grep osac, then adjust the chart ref.
+      when: "'enabled: true' not in r_bmaas_check.stdout"
+      ansible.builtin.shell: >-
+        helm --kubeconfig {{ k8s_kubeconfig }} upgrade osac osac/osac
+        -n {{ osac_ns }} --reuse-values
+        --set global.services.bmaas.enabled=true
+      register: r_helm_upgrade
+      changed_when: r_helm_upgrade.rc == 0
+      ignore_errors: true
+
+    - name: Wait for fulfillment-grpc-server rollout after helm upgrade
+      when: "'enabled: true' not in r_bmaas_check.stdout"
+      ansible.builtin.shell: >-
+        oc --kubeconfig={{ k8s_kubeconfig }}
+        rollout status deployment/fulfillment-grpc-server
+        -n {{ osac_ns }} --timeout=120s
+      register: r_grpc_rollout
+      changed_when: false
+      ignore_errors: true
+
+    - name: Create BareMetalInstanceType c1-metal-amd64
+      ansible.builtin.shell: >-
+        osac --config "{{ config_admin }}"
+        create baremetalinstancetype
+        --name {{ bmit_name }}
+        --cpu-cores 8
+        --cpu-architecture x86_64
+        --memory-total-gb 16
+        --network-port enp2s0:fabric:Ethernet:10Gbps
+        --network-port enp1s0:management:Ethernet:10Gbps
+        --host-label osac.openshift.io/host-type=default
+      register: r_bmit
+      changed_when: "'Created' in r_bmit.stdout"
+      failed_when:
+        - r_bmit.rc != 0
+        - "'already exists' not in r_bmit.stderr"
+      ignore_errors: true
+
+    - name: Create DiskImage rhcos-4-22 from registry source
+      ansible.builtin.shell: >-
+        osac --config "{{ config_admin }}"
+        create diskimage
+        --name {{ disk_image }}
+        --source-type registry
+        --source-ref {{ disk_image_source_ref }}
+        --architecture amd64
+      register: r_diskimage
+      changed_when: "'Created' in r_diskimage.stdout"
+      failed_when:
+        - r_diskimage.rc != 0
+        - "'already exists' not in r_diskimage.stderr"
+      ignore_errors: true
+
+    - name: Create ClusterVersion 4.22.0-rhcos
+      ansible.builtin.shell: >-
+        osac --config "{{ config_admin }}"
+        create clusterversion
+        --version {{ ocp_version }}
+        --image {{ ocp_release_image }}
+        --disk-image {{ disk_image }}
+      register: r_clusterversion
+      changed_when: "'Created' in r_clusterversion.stdout"
+      failed_when:
+        - r_clusterversion.rc != 0
+        - "'already exists' not in r_clusterversion.stderr"
+      ignore_errors: true
+
+    - name: Create ClusterCatalogItem hosted-ci-small (published)
+      ansible.builtin.shell: >-
+        osac --config "{{ config_admin }}"
+        create clustercatalogitem
+        --name {{ catalog_item }}
+        --title "Hosted CI small"
+        --template {{ cluster_template }}
+        --published
+      register: r_catalogitem
+      changed_when: "'Created' in r_catalogitem.stdout"
+      failed_when:
+        - r_catalogitem.rc != 0
+        - "'already exists' not in r_catalogitem.stderr"
+      ignore_errors: true
+
+    # =========================================================================
+    # Exercise 5 — Tenant cluster order (Alice via device flow)
+    # =========================================================================
+
+    - name: Alice login via inline device flow (writes to tenant config path)
+      # Inlined because device-login.sh does not support --config.
+      # osac --config is passed so alice's token is saved to config_tenant.
+      ansible.builtin.shell: |
+        set -euo pipefail
+        COOKIE_JAR=$(mktemp); RESP_FILE=$(mktemp); HDR_FILE=$(mktemp); LOGIN_LOG=$(mktemp)
+        trap "rm -f ${COOKIE_JAR} ${RESP_FILE} ${HDR_FILE} ${LOGIN_LOG}" EXIT
+
+        py_extract() {
+          python3 -c "
+        import re, html, sys
+        content = sys.stdin.read()
+        m = re.search(sys.argv[1], content, re.DOTALL)
+        if m: print(html.unescape(m.group(1)))" "$1"
+        }
+        get_redirect() {
+          grep -i '^location:' "${HDR_FILE}" | tail -1 | tr -d '\r' | sed 's/^[Ll]ocation: //'
+        }
+        fixurl() {
+          local u="$1"
+          [[ "${u}" == /* ]] && echo "{{ keycloak_url }}${u}" || echo "${u}"
+        }
+
+        mkdir -p "{{ config_tenant }}"
+        osac --config "{{ config_tenant }}" logout 2>/dev/null || true
+        osac --config "{{ config_tenant }}" login --insecure \
+          --address "{{ api_int }}" --flow device > "${LOGIN_LOG}" 2>&1 &
+        OSAC_PID=$!
+
+        for i in $(seq 1 30); do
+          grep -q "[A-Z]\{4\}-[A-Z]\{4\}" "${LOGIN_LOG}" 2>/dev/null && break
+          sleep 0.5
+        done
+
+        USER_CODE=$(grep -oE '[A-Z]{4}-[A-Z]{4}' "${LOGIN_LOG}" | head -1)
+        [ -z "${USER_CODE}" ] && { echo "ERROR: no user code"; kill ${OSAC_PID} 2>/dev/null; exit 1; }
+
+        curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" -L \
+          "{{ keycloak_url }}/realms/osac/device?user_code=${USER_CODE}" -o "${RESP_FILE}"
+        LOGIN_ACTION=$(cat "${RESP_FILE}" | py_extract 'action="([^"]+)"')
+
+        curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+          -D "${HDR_FILE}" -o "${RESP_FILE}" \
+          -X POST "${LOGIN_ACTION}" -d "username=alice"
+        HTTP_CODE=$(grep "^HTTP" "${HDR_FILE}" | tail -1 | awk '{print $2}')
+
+        if [ "${HTTP_CODE}" = "303" ] || [ "${HTTP_CODE}" = "302" ]; then
+          REDIRECT=$(fixurl "$(get_redirect)")
+          curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" -D "${HDR_FILE}" -o /dev/null "${REDIRECT}"
+          REDIRECT=$(fixurl "$(get_redirect)")
+        else
+          BROKER_LINK=$(cat "${RESP_FILE}" | py_extract 'href="([^"]*broker/[^"]+/login[^"]*)"')
+          REDIRECT=$(fixurl "${BROKER_LINK}")
+        fi
+
+        curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" -L -o "${RESP_FILE}" "${REDIRECT}"
+        IDP_ACTION=$(cat "${RESP_FILE}" | py_extract 'action="([^"]+)"')
+
+        curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+          -D "${HDR_FILE}" -o /dev/null \
+          -X POST "${IDP_ACTION}" \
+          -d "username=alice&password={{ osac_user_password }}&credentialId="
+
+        REDIRECT=$(fixurl "$(get_redirect)")
+        curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" -D "${HDR_FILE}" -o /dev/null "${REDIRECT}"
+        REDIRECT=$(fixurl "$(get_redirect)")
+        curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" -L -o "${RESP_FILE}" "${REDIRECT}"
+
+        CONSENT_ACTION=$(cat "${RESP_FILE}" | py_extract 'action="([^"]*consent[^"]*)"')
+        HIDDEN_CODE=$(cat "${RESP_FILE}" | py_extract 'name="code"\s+value="([^"]+)"')
+        CONSENT_ACTION=$(fixurl "${CONSENT_ACTION}")
+        curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+          -X POST "${CONSENT_ACTION}" -d "code=${HIDDEN_CODE}&accept=Yes" -o /dev/null
+
+        wait ${OSAC_PID} && echo LOGIN_OK || { cat "${LOGIN_LOG}" >&2; exit 1; }
+      register: r_alice_login
+      changed_when: "'LOGIN_OK' in r_alice_login.stdout"
+      ignore_errors: true
+
+    - name: Create cluster pull-secret for Alice's tenant
+      ansible.builtin.shell: >-
+        osac --config "{{ config_tenant }}"
+        create secret --name cluster-pull-secret
+        --type=pull-secret
+        --from-file=.dockerconfigjson={{ pull_secret_path }}
+      register: r_ps_secret
+      changed_when: "'Created' in r_ps_secret.stdout"
+      failed_when:
+        - r_ps_secret.rc != 0
+        - "'already exists' not in r_ps_secret.stderr"
+      ignore_errors: true
+
+    - name: Order tenant cluster student-cluster via osac CLI
+      ansible.builtin.shell: >-
+        osac --config "{{ config_tenant }}"
+        create cluster
+        --name {{ cluster_name }}
+        --catalog-item {{ catalog_item }}
+        --version {{ ocp_version }}
+        --node-set "name=workers,size=1,baremetal-instance-type={{ bmit_name }}"
+        --pull-secret cluster-pull-secret
+        --ssh-public-key-file {{ lookup('env', 'HOME') }}/.ssh/id_ed25519.pub
+      register: r_cluster_order
+      changed_when: "'Created' in r_cluster_order.stdout"
+      failed_when:
+        - r_cluster_order.rc != 0
+        - "'already exists' not in r_cluster_order.stderr"
+      ignore_errors: true
+
+    - name: Wait for HostedCluster to appear in tenant namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: hypershift.openshift.io/v1beta1
+        kind: HostedCluster
+        namespace: "{{ tenant_cluster_ns }}"
+      register: r_hc
+      retries: 20
+      delay: 15
+      until: r_hc.resources | length > 0
+      ignore_errors: true
+
+    - name: Label Agent with cluster order and set NodePool replicas=1
+      when: r_hc.resources | length > 0
+      block:
+        - name: Get NodePool for student-cluster
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+            api_version: hypershift.openshift.io/v1beta1
+            kind: NodePool
+            namespace: "{{ tenant_cluster_ns }}"
+          register: r_nodepool
+          ignore_errors: true
+
+        - name: Label Agent with clusterorder
+          when: agent_name is defined
+          kubernetes.core.k8s:
+            kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+            state: patched
+            api_version: agent-install.openshift.io/v1beta1
+            kind: Agent
+            namespace: "{{ hw_ns }}"
+            name: "{{ agent_name }}"
+            definition:
+              metadata:
+                labels:
+                  clusterorder: "{{ cluster_name }}"
+          ignore_errors: true
+
+        - name: Set NodePool replicas to 1
+          when: r_nodepool.resources | length > 0
+          kubernetes.core.k8s:
+            kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+            state: patched
+            api_version: hypershift.openshift.io/v1beta1
+            kind: NodePool
+            namespace: "{{ tenant_cluster_ns }}"
+            name: "{{ r_nodepool.resources[0].metadata.name }}"
+            definition:
+              spec:
+                replicas: 1
+          ignore_errors: true
+
+    - name: Wait for kube-apiserver Service LoadBalancer IP in HC components namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Service
+        namespace: "{{ hc_components_ns }}"
+        name: kube-apiserver
+      register: r_kube_api_svc
+      retries: 30
+      delay: 20
+      until: >-
+        r_kube_api_svc.resources | length > 0 and
+        r_kube_api_svc.resources[0].status.loadBalancer.ingress | default([]) | length > 0
+      ignore_errors: true
+
+    - name: Set kube-apiserver LoadBalancer IP fact
+      when:
+        - r_kube_api_svc.resources | length > 0
+        - r_kube_api_svc.resources[0].status.loadBalancer.ingress | default([]) | length > 0
+      ansible.builtin.set_fact:
+        kube_api_lb_ip: >-
+          {{ r_kube_api_svc.resources[0].status.loadBalancer.ingress[0].ip
+             | default(r_kube_api_svc.resources[0].status.loadBalancer.ingress[0].hostname)
+             | default('') }}
+
+    - name: Add hosted cluster API and console to /etc/hosts
+      when:
+        - kube_api_lb_ip is defined and kube_api_lb_ip | length > 0
+        - hc_domain is defined and hc_domain | length > 0
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: >-
+          {{ kube_api_lb_ip }} api.{{ hc_domain }}
+          console-openshift-console.apps.{{ hc_domain }}
+          oauth-openshift.apps.{{ hc_domain }}
+        state: present
+      become: true
+      ignore_errors: true
+
+    - name: Wait for admin kubeconfig secret in tenant cluster namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Secret
+        namespace: "{{ tenant_cluster_ns }}"
+        name: "{{ vm_name }}-admin-kubeconfig"
+      register: r_hc_kubeconfig
+      retries: 30
+      delay: 20
+      until: r_hc_kubeconfig.resources | length > 0
+      ignore_errors: true
+
+    - name: Write hosted cluster kubeconfig to /tmp
+      when: r_hc_kubeconfig.resources | length > 0
+      ansible.builtin.copy:
+        content: "{{ r_hc_kubeconfig.resources[0].data.kubeconfig | b64decode }}"
+        dest: /tmp/student-cluster-kubeconfig
+        mode: "0600"
+      ignore_errors: true
+
+    - name: Verify hosted cluster has one Ready worker node
+      ansible.builtin.shell: >-
+        oc --kubeconfig=/tmp/student-cluster-kubeconfig
+        --insecure-skip-tls-verify get nodes
+      register: r_hc_nodes
+      changed_when: false
+      ignore_errors: true
+
+    # =========================================================================
+    # Final report
+    # =========================================================================
+
+    - name: Report solve status
+      ansible.builtin.debug:
+        msg: |
+          === Module 04 CaaS Solve Report ===
+          hub_base:         {{ hub_base | default('NOT SET') }}
+          hosted_base:      {{ hosted_base | default('NOT SET') }}
+          hc_domain:        {{ hc_domain | default('NOT SET') }}
+          agent_worker:     {{ agent_worker | default('NOT SET') }}
+          router_ip:        {{ router_ip | default('NOT SET') }}
+
+          [Ex2] ConfigMap patched:         {{ 'ok' if not (r_mc_apply.failed | default(true)) else 'NOT ok' }}
+          [Ex2] MachineConfig applied:     {{ 'ok' if r_mc_apply.rc | default(1) == 0 else 'NOT ok' }}
+          [Ex2] MCP worker Updated:        {{ 'ok' if (r_mcp_done.resources | default([]) | length > 0 and
+            r_mcp_done.resources[0].status.conditions |
+            selectattr('type','equalto','Updated') |
+            selectattr('status','equalto','True') | list | length > 0)
+            else 'PENDING — MCP may still be rebooting workers (up to 30 min)' }}
+          [Ex2] br-untagged on worker:     {{ 'ok' if r_bridge_check.rc | default(1) == 0 else 'NOT ok' }}
+
+          [Ex3] InfraEnv ISO URL:          {{ 'ok' if iso_download_url is defined else 'NOT ok' }}
+          [Ex3] ISO copied to /tmp:        {{ 'ok' if r_iso_cp.rc | default(1) == 0 else 'NOT ok' }}
+          [Ex3] Rootdisk DV Succeeded:     {{ 'ok' if r_dv_root.resources | default([]) | length > 0 and
+            r_dv_root.resources[0].status.phase == 'Succeeded' else 'NOT ok' }}
+          [Ex3] ISO DV Succeeded:          {{ 'ok' if r_dv_iso.resources | default([]) | length > 0 and
+            r_dv_iso.resources[0].status.phase == 'Succeeded' else 'NOT ok' }}
+          [Ex3] VMI Running:               {{ 'ok' if r_vmi.resources | default([]) | length > 0 and
+            r_vmi.resources[0].status.phase == 'Running' else 'NOT ok' }}
+          [Ex3] Agent discovered:          {{ 'ok' if r_agents.resources | default([]) | length > 0 else 'NOT ok (may still be booting)' }}
+          [Ex3] Agent approved:            {{ 'ok' if agent_name is defined else 'NOT ok' }}
+
+          [Ex4] BMIT created:              {{ 'ok' if r_bmit.rc | default(1) == 0 else 'NOT ok' }}
+          [Ex4] DiskImage created:         {{ 'ok' if r_diskimage.rc | default(1) == 0 else 'NOT ok' }}
+          [Ex4] ClusterVersion created:    {{ 'ok' if r_clusterversion.rc | default(1) == 0 else 'NOT ok' }}
+          [Ex4] CatalogItem created:       {{ 'ok' if r_catalogitem.rc | default(1) == 0 else 'NOT ok' }}
+
+          [Ex5] Alice login:               {{ 'ok' if r_alice_login.rc | default(1) == 0 else 'NOT ok' }}
+          [Ex5] Cluster ordered:           {{ 'ok' if r_cluster_order.rc | default(1) == 0 else 'NOT ok' }}
+          [Ex5] HostedCluster appeared:    {{ 'ok' if r_hc.resources | default([]) | length > 0 else 'NOT ok' }}
+          [Ex5] HC admin kubeconfig:       {{ 'ok' if r_hc_kubeconfig.resources | default([]) | length > 0 else 'NOT ok' }}
+          [Ex5] HC worker node visible:    {{ 'ok' if r_hc_nodes.rc | default(1) == 0 else 'NOT ok' }}
+
+          NOTE: MachineConfig rollout (Ex2), Agent discovery (Ex3), and cluster provisioning (Ex5)
+          are long-running async operations. If checks show NOT ok, wait several minutes and
+          re-run the validate playbook — do not re-run solve unnecessarily.

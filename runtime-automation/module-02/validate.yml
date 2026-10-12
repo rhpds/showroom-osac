@@ -1,10 +1,335 @@
 ---
-# Module 2: Managing Tenants — validate tasks
-# Generate with: /ftl:rhdp-lab-validator
-- name: Module 02 - Validate placeholder
+# Module 2: Managing Tenants — validate playbook
+- name: Module 02 - Tenant Onboarding and Identity Management Validation
   hosts: localhost
+  connection: local
   gather_facts: false
+  vars:
+    student_user: "{{ user | default('') }}"
+    osac_namespace: osac
+    tenant_name: sai-corp
+    tenant_admin: alice
+    tenant_user: bob
+    idp_realm: sai-corp-idp
+    idp_client_id: osac-federation
+    keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
+    fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
+    break_glass_user: "{{ tenant_name }}-osac-break-glass"
+    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+
   tasks:
-    - name: Placeholder
-      ansible.builtin.debug:
-        msg: "Validate tasks not yet generated. Run /ftl:rhdp-lab-validator to create."
+
+    # -------------------------------------------------------
+    # Pre-flight — Keycloak admin token for all KC API checks
+    # -------------------------------------------------------
+    - name: Get Keycloak admin token
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          client_id: admin-cli
+          username: "{{ osac_keycloak_admin_user }}"
+          password: "{{ osac_keycloak_admin_password }}"
+        validate_certs: false
+        timeout: 10
+      register: r_kc_token
+      ignore_errors: true
+
+    - name: Set KC token fact
+      ansible.builtin.set_fact:
+        kc_token: "{{ r_kc_token.json.access_token | default('') }}"
+
+    # -------------------------------------------------------
+    # Check 1 — sai-corp namespace exists and is Active
+    # -------------------------------------------------------
+    - name: Check sai-corp namespace is Active
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Namespace
+        name: "{{ tenant_name }}"
+      register: r_ns
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 2 — Keycloak realm sai-corp-idp exists and is enabled
+    # -------------------------------------------------------
+    - name: Check KC realm sai-corp-idp exists and is enabled
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        validate_certs: false
+        timeout: 10
+      register: r_realm
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 3 — KC OIDC client osac-federation exists in sai-corp-idp
+    # -------------------------------------------------------
+    - name: Check KC client osac-federation in sai-corp-idp
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/clients?clientId={{ idp_client_id }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        validate_certs: false
+        timeout: 10
+      register: r_client
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 4 — KC users alice and bob exist in sai-corp-idp and are enabled
+    # -------------------------------------------------------
+    - name: Check KC user alice in sai-corp-idp
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/users?username={{ tenant_admin }}&exact=true"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        validate_certs: false
+        timeout: 10
+      register: r_alice_kc
+      ignore_errors: true
+
+    - name: Check KC user bob in sai-corp-idp
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/users?username={{ tenant_user }}&exact=true"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        validate_certs: false
+        timeout: 10
+      register: r_bob_kc
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 5 — Keycloak organization sai-corp exists in osac realm and is enabled
+    # -------------------------------------------------------
+    - name: Check KC org sai-corp in osac realm
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/osac/organizations?search={{ tenant_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        validate_certs: false
+        timeout: 10
+      register: r_org
+      ignore_errors: true
+
+    - name: Set KC org ID fact
+      ansible.builtin.set_fact:
+        kc_org_id: "{{ (r_org.json | default([{}]) | first).id | default('') }}"
+
+    # -------------------------------------------------------
+    # Check 6 — KC org sai-corp members include alice, bob, and break-glass
+    # -------------------------------------------------------
+    - name: Check KC org sai-corp members
+      when: kc_org_id | length > 0
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/osac/organizations/{{ kc_org_id }}/members"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        validate_certs: false
+        timeout: 10
+      register: r_members
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Pre-flight — OSAC platform admin login
+    # -------------------------------------------------------
+    - name: Login as OSAC platform admin
+      ansible.builtin.shell: >-
+        osac login --insecure
+        --issuer="{{ keycloak_url }}/realms/osac"
+        --flow=password
+        --user={{ osac_admin_user }}
+        --password={{ osac_admin_password }}
+        {{ fulfillment_api_url }}
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 7 — OSAC identity provider sai-corp is in phase READY
+    # -------------------------------------------------------
+    - name: Check OSAC identity provider sai-corp phase
+      ansible.builtin.shell: >-
+        osac get identityprovider {{ tenant_name }} --tenant {{ tenant_name }} -o json
+      register: r_idp_status
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 9 — OSAC RoleBinding tenant-admin for alice is in state READY
+    # -------------------------------------------------------
+    - name: Check OSAC RoleBinding tenant-admin for alice
+      ansible.builtin.shell: >-
+        osac get rolebinding --tenant {{ tenant_name }} -o json
+      register: r_rb_status
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Pre-flight — Login as break-glass to check tenant secret
+    # -------------------------------------------------------
+    - name: Login as break-glass user
+      ansible.builtin.shell: >-
+        osac login --insecure
+        --issuer="{{ keycloak_url }}/realms/osac"
+        --flow=password
+        --user={{ break_glass_user }}
+        --password={{ osac_user_password }}
+        {{ fulfillment_api_url }}
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 8 — OSAC secret idp-client-secret exists in sai-corp
+    # -------------------------------------------------------
+    - name: Check OSAC secret idp-client-secret exists
+      ansible.builtin.shell: >-
+        osac get secret idp-client-secret -o json
+      register: r_secret_check
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Pre-flight — Login as alice (tenant-admin) for project checks
+    # -------------------------------------------------------
+    - name: Login as alice via device flow
+      ansible.builtin.shell: >-
+        {{ device_login_script }}
+        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
+        "{{ tenant_admin }}" "{{ osac_user_password }}"
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 10 — OSAC project default exists with STATE ACTIVE in sai-corp
+    # -------------------------------------------------------
+    - name: Check OSAC project default is ACTIVE
+      ansible.builtin.shell: >-
+        osac get project default -o json
+      register: r_proj_status
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 11 — OSAC ProjectMembership bob-viewer exists with VIEWER role
+    # -------------------------------------------------------
+    - name: Check OSAC ProjectMembership bob-viewer
+      ansible.builtin.shell: >-
+        osac get projectmembership bob-viewer -o json
+      register: r_pm_status
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Pre-flight — Login as bob for RBAC enforcement check
+    # -------------------------------------------------------
+    - name: Login as bob via device flow
+      ansible.builtin.shell: >-
+        {{ device_login_script }}
+        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
+        "{{ tenant_user }}" "{{ osac_user_password }}"
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 12 — Bob cannot delete project (PermissionDenied enforced)
+    # -------------------------------------------------------
+    - name: Check RBAC enforcement — bob delete project must fail
+      ansible.builtin.shell: >-
+        osac delete project default
+      register: r_bob_rbac
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Build results
+    # -------------------------------------------------------
+    - name: Build task results
+      ansible.builtin.set_fact:
+        _task1_ok: >-
+          {{ r_ns.resources | default([]) |
+             selectattr('status.phase', 'equalto', 'Active') | list | length > 0 }}
+        _task2_ok: >-
+          {{ not (r_realm.failed | default(true)) and
+             (r_realm.json.enabled | default(false)) | bool }}
+        _task3_ok: >-
+          {{ not (r_client.failed | default(true)) and
+             (r_client.json | default([]) |
+              selectattr('clientId', 'equalto', idp_client_id) | list | length > 0) }}
+        _task4_ok: >-
+          {{ not (r_alice_kc.failed | default(true)) and
+             not (r_bob_kc.failed | default(true)) and
+             (r_alice_kc.json | default([]) |
+              selectattr('enabled', 'equalto', true) | list | length > 0) and
+             (r_bob_kc.json | default([]) |
+              selectattr('enabled', 'equalto', true) | list | length > 0) }}
+        _task5_ok: >-
+          {{ r_org.json | default([]) |
+             selectattr('name', 'equalto', tenant_name) |
+             selectattr('enabled', 'equalto', true) | list | length > 0 }}
+        _task6_ok: >-
+          {{ (r_members is defined and
+              not (r_members.failed | default(true)) and
+              r_members is not skipped) and
+             (r_members.json | default([]) | map(attribute='username') | list |
+              intersect([tenant_admin, tenant_user, break_glass_user]) | length >= 3) }}
+        _task7_ok: >-
+          {{ not (r_idp_status.failed | default(true)) and
+             'IDENTITY_PROVIDER_PHASE_READY' in (r_idp_status.stdout | default('')) }}
+        _task8_ok: >-
+          {{ not (r_secret_check.failed | default(true)) and
+             r_secret_check.rc | default(1) == 0 }}
+        _task9_ok: >-
+          {{ not (r_rb_status.failed | default(true)) and
+             'ROLE_BINDING_STATE_READY' in (r_rb_status.stdout | default('')) and
+             'tenant-admin' in (r_rb_status.stdout | default('')) }}
+        _task10_ok: >-
+          {{ not (r_proj_status.failed | default(true)) and
+             'ACTIVE' in (r_proj_status.stdout | default('')) }}
+        _task11_ok: >-
+          {{ not (r_pm_status.failed | default(true)) and
+             r_pm_status.rc | default(1) == 0 and
+             'PROJECT_MEMBERSHIP_ROLE_VIEWER' in (r_pm_status.stdout | default('')) }}
+        _task12_ok: >-
+          {{ 'PermissionDenied' in (r_bob_rbac.stderr | default('')) }}
+
+    - name: Validate all tasks
+      rhpds.ftl.validation_check:
+        check: >-
+          {{ _task1_ok and _task2_ok and _task3_ok and _task4_ok and
+             _task5_ok and _task6_ok and _task7_ok and _task8_ok and
+             _task9_ok and _task10_ok and _task11_ok and _task12_ok }}
+        pass_msg: |
+          ✅ Task 1: Namespace sai-corp is Active on the cluster
+          ✅ Task 2: Keycloak realm sai-corp-idp exists and is enabled
+          ✅ Task 3: OIDC client osac-federation exists in sai-corp-idp
+          ✅ Task 4: Users alice and bob exist in sai-corp-idp and are enabled
+          ✅ Task 5: Keycloak organization sai-corp exists in the osac realm and is enabled
+          ✅ Task 6: Organization sai-corp members include alice, bob, and sai-corp-osac-break-glass
+          ✅ Task 7: OSAC identity provider sai-corp is in phase READY
+          ✅ Task 8: OSAC secret idp-client-secret exists in sai-corp tenant
+          ✅ Task 9: RoleBinding tenant-admin for alice is in state READY
+          ✅ Task 10: Project default is ACTIVE in sai-corp tenant
+          ✅ Task 11: ProjectMembership bob-viewer exists with VIEWER role for bob
+          ✅ Task 12: RBAC enforcement confirmed — bob cannot delete projects
+        error_msg: |
+          {{ '✅' if _task1_ok else '❌' }} Task 1: Namespace sai-corp Active — {{ 'ok' if _task1_ok else 'FAILED — complete Exercise 1 to create the sai-corp tenant' }}
+          {{ '✅' if _task2_ok else '❌' }} Task 2: KC realm sai-corp-idp — {{ 'ok' if _task2_ok else 'FAILED — create and enable the sai-corp-idp realm (Exercise 2)' }}
+          {{ '✅' if _task3_ok else '❌' }} Task 3: KC client osac-federation — {{ 'ok' if _task3_ok else 'FAILED — create the osac-federation OIDC client in sai-corp-idp (Exercise 2)' }}
+          {{ '✅' if _task4_ok else '❌' }} Task 4: KC users alice and bob — {{ 'ok' if _task4_ok else 'FAILED — create enabled users alice and bob in sai-corp-idp (Exercise 2)' }}
+          {{ '✅' if _task5_ok else '❌' }} Task 5: KC org sai-corp in osac realm — {{ 'ok' if _task5_ok else 'FAILED — sai-corp organization missing or disabled; ensure the tenant was created (Exercise 1)' }}
+          {{ '✅' if _task6_ok else '❌' }} Task 6: Org members alice, bob, break-glass — {{ 'ok' if _task6_ok else 'FAILED — log in as alice and bob at least once to trigger JIT provisioning (Exercise 3)' }}
+          {{ '✅' if _task7_ok else '❌' }} Task 7: OSAC IDP sai-corp READY — {{ 'ok' if _task7_ok else 'FAILED — create the identity provider in Exercise 2 and wait for READY phase' }}
+          {{ '✅' if _task8_ok else '❌' }} Task 8: OSAC secret idp-client-secret — {{ 'ok' if _task8_ok else 'FAILED — create idp-client-secret as the break-glass user before creating the IDP (Exercise 2)' }}
+          {{ '✅' if _task9_ok else '❌' }} Task 9: RoleBinding tenant-admin for alice — {{ 'ok' if _task9_ok else 'FAILED — assign the tenant-admin RoleBinding to alice (Exercise 4)' }}
+          {{ '✅' if _task10_ok else '❌' }} Task 10: Project default ACTIVE — {{ 'ok' if _task10_ok else 'FAILED — create the default project in sai-corp as alice (Exercise 4)' }}
+          {{ '✅' if _task11_ok else '❌' }} Task 11: ProjectMembership bob-viewer — {{ 'ok' if _task11_ok else 'FAILED — create the bob-viewer ProjectMembership with VIEWER role as alice (Exercise 4)' }}
+          {{ '✅' if _task12_ok else '❌' }} Task 12: RBAC enforcement for bob — {{ 'ok' if _task12_ok else 'FAILED — bob should receive PermissionDenied; verify bob-viewer membership role is VIEWER not ADMIN' }}

@@ -245,6 +245,10 @@ oc get kafka -n osac-kafka -o jsonpath='{.items[0].status.conditions}' | jq
 +
 All conditions should show `"type": "Ready"` with `"status": "True"`.
 
+++++
+<div class="validate-button-placeholder" data-module="module-01"></div>
+++++
+
 == Learning outcomes checkpoint
 
 Before moving to Module 2, confirm you can answer these questions:

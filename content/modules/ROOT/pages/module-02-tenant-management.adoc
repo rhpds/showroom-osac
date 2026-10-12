@@ -789,6 +789,13 @@ Failed to delete project '01a0ce71-71b1-742d-add3-3f2364b7430c': rpc error: code
 +
 This `PermissionDenied` error confirms that RBAC is working: a viewer can read but not modify resources.
 
+++++
+<div class="solve-button-placeholder" data-module="module-02"></div>
+++++
+++++
+<div class="validate-button-placeholder" data-module="module-02"></div>
+++++
+
 == Learning outcomes checkpoint
 
 Review what you completed in this module:

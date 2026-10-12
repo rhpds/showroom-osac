@@ -94,6 +94,9 @@
         validate_certs: false
       register: r_kc_org
       changed_when: false
+      retries: 20
+      delay: 6
+      until: r_kc_org.json | length > 0
       failed_when: r_kc_org.json | length == 0
 
     - name: Verify tenant namespace exists
@@ -102,6 +105,9 @@
         kind: Namespace
         name: "{{ tenant_name }}"
       register: r_ns
+      retries: 20
+      delay: 6
+      until: r_ns.resources | length > 0
       failed_when: r_ns.resources | length == 0
 
     # =========================================================================
@@ -121,7 +127,8 @@
           displayName: SAI Corp Corporate SSO
         validate_certs: false
         status_code: [201, 409]
-      changed_when: true
+      register: r_realm_create
+      changed_when: r_realm_create.status == 201
 
     - name: Create OIDC federation client
       ansible.builtin.uri:
@@ -141,7 +148,8 @@
           standardFlowEnabled: true
         validate_certs: false
         status_code: [201, 409]
-      changed_when: true
+      register: r_client_create
+      changed_when: r_client_create.status == 201
 
     - name: Create IdP users
       ansible.builtin.uri:
@@ -166,7 +174,8 @@
       loop:
         - { username: alice, first: Alice }
         - { username: bob, first: Bob }
-      changed_when: true
+      register: r_user_create
+      changed_when: r_user_create.status == 201
 
     - name: Save OIDC env vars
       ansible.builtin.shell: |
@@ -261,6 +270,32 @@
       delay: 3
       until: r_idp_ready.rc == 0
       changed_when: false
+
+    - name: Get realm-level KC IdP for sai-corp
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/osac/identity-provider/instances/{{ tenant_name }}-{{ tenant_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        validate_certs: false
+      register: r_kc_idp_instance
+      changed_when: false
+      ignore_errors: true
+
+    - name: Enable Keycloak IdP for sai-corp
+      when:
+        - not (r_kc_idp_instance.failed | default(true))
+        - not (r_kc_idp_instance.json.enabled | default(false))
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/osac/identity-provider/instances/{{ tenant_name }}-{{ tenant_name }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        body_format: json
+        body: "{{ r_kc_idp_instance.json | combine({'enabled': true}) }}"
+        validate_certs: false
+        status_code: 204
+      changed_when: true
 
     # =========================================================================
     # Exercise 3: Onboard tenant users via SSO (programmatic device flow)
