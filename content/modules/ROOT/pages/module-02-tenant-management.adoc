@@ -25,23 +25,7 @@ When a platform administrator creates a tenant in Red Hat cloud extensions, the 
 
 === Steps
 
-// . Set up shell variables for this module and save them in `.bashrc`. These values are used throughout all exercises:
-// +
-// [source,role=execute]
-// ----
-// cat << EOF >>${HOME}/.bashrc
-// export TENANT=sai-corp
-// export TENANT_ADMIN=alice
-// export TENANT_USER=bob
-// export REALM=osac
-// EOF
-
-// source ${HOME}/.bashrc
-
-// mkdir -p ${HOME}/osac-demo
-// ----
-
-. Create a directory to collect various YAML files used in this module:
+. Create a directory to collect various YAML files used in this workshop:
 +
 [source,role=execute]
 ----
@@ -52,19 +36,28 @@ mkdir -p ${HOME}/yaml
 +
 [source,role=execute,subs=attributes]
 ----
-osac login --insecure \
+osac --config $HOME/admin \
+  login --insecure \
   --issuer="{osac_keycloak_url}/realms/osac" \
   --flow=password \
   --user={osac_admin_user} \
   --password={osac_admin_password} \
   {osac_fulfillment_internal_api_url}
 ----
++
+[TIP]
+====
+`--config $HOME/admin` tells the `osac` CLI to store the platform administrator's credentials in a separate configuration file. This allows you to log in as other users later without overwriting the admin credentials. And later you can switch between users by specifying `--config $HOME/admin` or `--config $HOME/user` on the command line.
+====
 
 . Switch to the *Red Hat cloud extensions* tab on the right.
 . Navigate to *Administration* -> *Tenants*.
 . Create a new tenant named `sai-corp`. There are no other parameters except for the name.
 +
-IMPORTANT: Copy and save the break-glass password now. It is displayed only during tenant creation and cannot be retrieved later.
+[IMPORTANT]
+====
+Copy and save the break-glass password now. It is displayed only during tenant creation and cannot be retrieved later.
+====
 
 . The Tenant should show `Synced` within a few seconds of creation.
 
@@ -73,7 +66,7 @@ IMPORTANT: Copy and save the break-glass password now. It is displayed only duri
 +
 [source,role=execute]
 ----
-osac get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
+osac --config $HOME/admin get tenant sai-corp -o json | jq '.spec.break_glass_credentials_secret'
 ----
 +
 .Sample output
@@ -223,23 +216,6 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   }' -w "Create bob: HTTP %\{http_code}\n" -o /dev/null
 ----
 
-// . Set the OIDC endpoint variables and save them for later exercises:
-// +
-// [source,role=execute,subs=attributes]
-// ----
-// cat << EOF >>${HOME}/.bashrc
-// export OIDC_CLIENT_ID='osac-federation'
-// export OIDC_CLIENT_SECRET='osac-demo-secret'
-// export OIDC_ISSUER='{osac_keycloak_url}/realms/sai-corp-idp'
-// export OIDC_TOKEN_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/token'
-// export OIDC_AUTHORIZATION_URL='{osac_keycloak_url}/realms/sai-corp-idp/protocol/openid-connect/auth'
-// EOF
-
-// source ${HOME}/.bashrc
-
-// echo "OIDC environment saved to $\{HOME}/.bashrc"
-// ----
-
 === Register the new Identity Provider with Red Hat cloud extensions
 
 . Switch back to the *Red Hat cloud extensions* tab on the right.
@@ -261,7 +237,8 @@ Switch to the *Terminal* tab and log in as the `sai-corp-osac-break-glass` user:
 +
 [source,role=execute,subs=attributes]
 ----
-osac login --insecure \
+osac --config $HOME/breakglass \
+  login --insecure \
   --issuer="https://keycloak-keycloak.{openshift_cluster_ingress_domain}/realms/osac" \
   --flow=password \
   --user=sai-corp-osac-break-glass \
@@ -275,7 +252,7 @@ Create a secret named `sai-corp-oidc-secret` in the `sai-corp` tenant namespace 
 +
 [source,role=execute,subs=attributes]
 ----
-echo -n osac-demo-secret | osac \
+echo -n osac-demo-secret | osac --config $HOME/breakglass \
   create secret --name idp-client-secret \
   --type value --from-file=value=-
 ----
@@ -289,7 +266,7 @@ Created secret 'idp-client-secret' (ID: 01a0ce65-e2dc-7860-97e2-c1192478de8d).
 +
 [source,role=execute,subs=attributes]
 ----
-osac get secret idp-client-secret -o yaml
+osac --config $HOME/breakglass get secret idp-client-secret -o yaml
 ----
 +
 .Sample output
@@ -322,7 +299,7 @@ type: SECRET_TYPE_VALUE
 +
 [source,role=execute]
 ----
-osac get identityprovider sai-corp --output yaml | grep -E 'phase:|message:|client_id:'
+osac --config $HOME/breakglass get identityprovider sai-corp --output yaml | grep -E 'phase:|message:|client_id:'
 ----
 +
 .Sample output
@@ -350,6 +327,7 @@ When the instructions below ask for a new *incognito/private* browser window, th
 
 ==== Onboard Alice
 
+////
 . Switch to the *Terminal* tab and log out any existing session.
 . Log out any existing session:
 +
@@ -357,12 +335,12 @@ When the instructions below ask for a new *incognito/private* browser window, th
 ----
 osac logout
 ----
-
+////
 . Start the device flow login for *Alice*:
 +
 [source,role=execute,subs=attributes]
 ----
-osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
+osac --config $HOME/alice login --insecure --address {osac_fulfillment_internal_api_url} --flow device
 ----
 +
 The CLI displays a URL and a one-time code. Complete the login in your browser (not the Showroom interface):
@@ -383,7 +361,7 @@ IMPORTANT: Always use a fresh incognito window for each device flow login. A cac
 +
 [source,role=execute]
 ----
-osac whoami
+osac --config $HOME/alice whoami
 ----
 +
 .Sample output
@@ -397,7 +375,7 @@ Roles: offline_access, uma_authorization, default-roles-my realm
 +
 [source,role=execute]
 ----
-osac get projects
+osac --config $HOME/alice get projects
 ----
 +
 .Sample output
@@ -413,7 +391,7 @@ This creates Alice's OSAC user record on the server. Without this call, Alice wo
 +
 [source,role=execute]
 ----
-osac get users
+osac --config $HOME/alice get users
 ----
 +
 .Sample output
@@ -422,12 +400,14 @@ osac get users
 Error: rpc error: code = PermissionDenied desc = permission denied
 ----
 
+////
 . Log out Alice:
 +
 [source,role=execute,subs=attributes]
 ----
 osac logout
 ----
+////
 
 ==== Onboard Bob
 
@@ -435,7 +415,7 @@ osac logout
 +
 [source,role=execute,subs=attributes]
 ----
-osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
+osac --config $HOME/bob login --insecure --address {osac_fulfillment_internal_api_url} --flow device
 ----
 +
 Complete the login in a *fresh incognito* window:
@@ -456,7 +436,7 @@ IMPORTANT: Always use a fresh incognito window for each device flow login. A cac
 +
 [source,role=execute]
 ----
-osac whoami
+osac --config $HOME/bob whoami
 ----
 +
 .Sample output
@@ -470,7 +450,7 @@ Roles: offline_access, uma_authorization, default-roles-my realm
 +
 [source,role=execute]
 ----
-osac get projects
+osac --config $HOME/bob get projects
 ----
 +
 .Sample output
@@ -556,7 +536,7 @@ Alice needs tenant-admin authority to manage SAI Corp's projects and team access
 // +
 // Confirm this is a UUID (36-character hex string with dashes). If it is empty, Alice has not logged in yet — return to Exercise 3.
 
-. Select the *Red Hat cloud extensions* tab on the right. You should still be logged in as the glass break user.
+. Select the *Red Hat cloud extensions* tab on the right. You should still be logged in as the break-glass user.
 . Navigate to *Role Bindings* and click *Create Role Binding*.
 . Create the role binding with the following properties:
 * *Name*: `sai-corp-tenant-admin-binding`
@@ -564,6 +544,7 @@ Alice needs tenant-admin authority to manage SAI Corp's projects and team access
 * *Role*: `Tenant Administrator`
 . Click *Create*. The RoleBinding should reach `Ready` status within a few seconds.
 
+////
 . In the *Terminal*, log in as the platform administrator:
 +
 [source,role="execute",subs="attributes"]
@@ -575,12 +556,12 @@ osac login --insecure \
   --password={osac_admin_password} \
   {osac_fulfillment_internal_api_url}
 ----
-
-. Verify the RoleBinding is ready:
+////
+. As platform administrator, verify the RoleBinding is ready:
 +
 [source,role="execute"]
 ----
-osac get rolebinding -o yaml | grep -E 'name:|role:|state:|message:'
+osac --config $HOME/admin get rolebinding -o yaml | grep -E 'name:|role:|state:|message:'
 ----
 +
 .Sample output
@@ -598,6 +579,7 @@ Expected: state `ROLE_BINDING_STATE_READY`, role `tenant-admin`.
 
 ==== Verify Alice's tenant-admin access
 
+////
 . Log in as Alice via the device flow to prove the `tenant-admin` role is in her token:
 +
 [source,role="execute",subs="attributes"]
@@ -607,12 +589,12 @@ osac login --insecure --address {osac_fulfillment_internal_api_url} --flow devic
 ----
 +
 Complete the login in a *fresh incognito* window. Log in with `alice` / `{osac_user_password}`.
-
+////
 . Confirm Alice now has the `tenant-admin` role:
 +
 [source,role="execute"]
 ----
-osac whoami
+osac --config $HOME/alice whoami
 ----
 +
 Expected output includes `tenant-admin` in the Roles list:
@@ -627,7 +609,7 @@ Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
 +
 [source,role="execute"]
 ----
-osac get users
+osac --config $HOME/alice get users
 ----
 +
 You should see both `alice` and `bob` in the user list.
@@ -649,7 +631,7 @@ spec:
   description: Primary project for SAI Corp
 EOF
 
-osac create -f ${HOME}/yaml/sai-project.yaml
+osac --config $HOME/alice create -f ${HOME}/yaml/sai-project.yaml
 ----
 +
 .Sample output
@@ -661,7 +643,7 @@ Created project with name 'sai-corp-default-project' and identifier '01a086c1-51
 +
 [source,role="execute"]
 ----
-osac get projects
+osac --config $HOME/alice get projects
 ----
 +
 .Sample output
@@ -674,16 +656,6 @@ sai-corp  -         -        sai-corp-default-project   SAI Corp Default Project
 ----
 +
 You should see the `sai-corp-default-project` project in `ACTIVE` state. You may also see a row with  no name — this is the tenant root project, created automatically with the tenant. This is normal. And the `shared` project is a system project that is always present.
-
-// . Save the project ID for later use:
-// +
-// [source,role="execute"]
-// ----
-// export PROJ_ID=$(osac get project sai-corp-default-project -o json | jq -r .id)
-
-// echo "PROJ_ID=${PROJ_ID}"
-// echo "PROJ_ID=${PROJ_ID}" >> $HOME/.bashrc
-// ----
 
 . Grant Bob `viewer` access to the project using a `ProjectMembership`:
 +
@@ -701,7 +673,7 @@ spec:
   - name: bob
 EOF
 
-osac create -f ${HOME}/yaml/bob-membership.yaml
+osac --config $HOME/alice create -f ${HOME}/yaml/bob-membership.yaml
 ----
 +
 .Sample output
@@ -732,6 +704,7 @@ The real proof of multi-tenancy is enforcement. In this exercise, you log in as 
 
 ==== Verify Bob's viewer restrictions
 
+////
 . Log in as *Bob* via the device flow:
 +
 [source,role="execute",subs="attributes"]
@@ -741,12 +714,12 @@ osac login --insecure --address {osac_fulfillment_internal_api_url} --flow devic
 ----
 +
 Complete the login in a *fresh incognito* window. Click *sai-corp-oidc* and enter `bob` / `{osac_user_password}`.
-
+////
 . Confirm Bob's identity — note that `tenant-admin` does not appear in the roles:
 +
 [source,role="execute"]
 ----
-osac whoami
+osac --config $HOME/bob whoami
 ----
 +
 Expected output:
@@ -761,7 +734,7 @@ Roles: offline_access, uma_authorization, default-roles-my realm
 +
 [source,role="execute"]
 ----
-osac get projects
+osac --config $HOME/bob get projects
 ----
 +
 .Example output
@@ -778,7 +751,7 @@ You should see the `default` project in the list.
 +
 [source,role="execute"]
 ----
-osac delete project sai-corp-default-project
+osac --config $HOME/bob delete project sai-corp-default-project
 ----
 +
 Expected output:
@@ -788,13 +761,6 @@ Failed to delete project '01a0ce71-71b1-742d-add3-3f2364b7430c': rpc error: code
 ----
 +
 This `PermissionDenied` error confirms that RBAC is working: a viewer can read but not modify resources.
-
-++++
-<div class="solve-button-placeholder" data-module="module-02"></div>
-++++
-++++
-<div class="validate-button-placeholder" data-module="module-02"></div>
-++++
 
 == Learning outcomes checkpoint
 
@@ -808,6 +774,20 @@ Review what you completed in this module:
 * [x] Assigned Alice as tenant-admin using a RoleBinding
 * [x] Created a project and granted Bob viewer access via ProjectMembership
 * [x] Confirmed RBAC enforcement: Bob can list but cannot delete resources
+
+== Solve the module
+
+If you want to skip the exercises and see the final state of the tenant, click the *Solve* button below. This will create the `sai-corp` tenant, configure the identity provider, and assign roles and memberships for Alice and Bob.
+
+++++
+<div class="solve-button-placeholder" data-module="module-02"></div>
+++++
+
+== Validate your work
+
+++++
+<div class="validate-button-placeholder" data-module="module-02"></div>
+++++
 
 == Module summary
 

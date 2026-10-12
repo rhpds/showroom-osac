@@ -109,7 +109,8 @@ python3 -c "import json,pathlib; print('Registries:', sorted(json.loads(pathlib.
 +
 [source,role=execute]
 ----
-osac --config "${CONFIG_ADMIN}" login --insecure --private \
+osac --config $HOME/admin \
+  login --insecure --private \
   --address "${API_INT}" \
   --token-script "oc create token -n ${OSAC_NS} admin"
 ----
@@ -124,7 +125,7 @@ Successfully logged in to https://fulfillment-internal-api-osac.apps.cluster-987
 The `--private` flag connects to the internal fulfillment API, which exposes cloud-admin–only resources such as `BareMetalInstanceType` and `ClusterVersion`. The tenant public API does not expose these endpoints.
 ====
 
-. Confirm the current service state. CaaS should already be enabled and BMaaS may still be off:
+. Confirm the current service state. CaaS and BMaaS should be enabled:
 +
 [source,role=execute]
 ----
@@ -134,7 +135,7 @@ helm get values osac -n osac 2>/dev/null | grep -A2 'bmaas:\|caas:\|vmaas:'
 .Sample output
 ----
 bmaas:
-  enabled: false
+  enabled: true
 caas:
   enabled: true
 vmaas:
@@ -193,6 +194,7 @@ HOSTED=hosted.cluster-9872p.dyn.redhatworkshops.io
 [source,role=execute]
 ----
 cat <<'EOF' | oc apply -f -
+---
 apiVersion: machineconfiguration.openshift.io/v1
 kind: MachineConfig
 metadata:
@@ -296,6 +298,7 @@ oc get secret pull-secret -n openshift-config -o json \
 ----
 SSH_PUB=$(cat ~/.ssh/id_ed25519.pub)
 cat <<EOF | oc apply -f -
+---
 apiVersion: agent-install.openshift.io/v1beta1
 kind: InfraEnv
 metadata:
@@ -349,6 +352,7 @@ The URL must contain `full.iso`. If it shows `minimal-iso`, recreate the InfraEn
 [source,role=execute]
 ----
 cat <<EOF | oc apply -f -
+---
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -377,6 +381,7 @@ oc get net-attach-def untagged-net-${MY_NAME} -n ${HW_NS}
 [source,role=execute]
 ----
 cat <<EOF | oc apply -f -
+---
 apiVersion: cdi.kubevirt.io/v1beta1
 kind: DataVolume
 metadata:
@@ -392,6 +397,7 @@ spec:
         storage: 120Gi
     storageClassName: ${STORAGE_CLASS}
 EOF
+
 oc wait dv ${VM_NAME}-rootdisk -n ${HW_NS} --for=condition=Ready --timeout=600s
 ----
 
@@ -404,6 +410,7 @@ echo "$ISO_URL" | grep -q full.iso || echo "WARN: not full.iso — check step 4"
 
 oc delete pod iso-download -n ${HW_NS} --ignore-not-found --wait=true
 cat <<PODEOF | oc apply -f -
+---
 apiVersion: v1
 kind: Pod
 metadata:
@@ -423,6 +430,7 @@ spec:
       sizeLimit: 4Gi
   restartPolicy: Never
 PODEOF
+
 oc wait pod/iso-download -n ${HW_NS} --for=condition=Ready --timeout=180s
 ----
 
@@ -455,6 +463,7 @@ virtctl image-upload dv ${VM_NAME}-iso \
   --image-path=/tmp/agent-discovery.iso \
   --storage-class=${STORAGE_CLASS} \
   --access-mode=ReadWriteMany --insecure
+
 oc wait dv ${VM_NAME}-iso -n ${HW_NS} --for=condition=Ready --timeout=600s
 ----
 +
@@ -468,6 +477,7 @@ Do not start the agent VM until this DataVolume shows `Succeeded`. Starting the 
 [source,role=execute]
 ----
 cat <<EOF | oc apply -f -
+---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
@@ -524,6 +534,7 @@ spec:
         persistentVolumeClaim:
           claimName: ${VM_NAME}-iso
 EOF
+
 oc wait vmi ${VM_NAME} -n ${HW_NS} --for=jsonpath='{.status.phase}'=Running --timeout=600s
 ----
 
@@ -531,7 +542,7 @@ oc wait vmi ${VM_NAME} -n ${HW_NS} --for=jsonpath='{.status.phase}'=Running --ti
 +
 [source,role=execute]
 ----
-watch "oc get agents -n ${HW_NS}"
+watch oc get agents -n ${HW_NS}
 ----
 +
 Press `Ctrl+C` once an agent appears.
@@ -558,11 +569,14 @@ sudo systemctl restart agent"
 [source,role=execute]
 ----
 AGENT_ID=$(oc get agents -n ${HW_NS} -o jsonpath='{.items[0].metadata.name}')
+
 oc label agent "$AGENT_ID" -n ${HW_NS} \
   osac.openshift.io/resource_class=ci-worker \
   osac.openshift.io/host-type=default \
   --overwrite
+
 oc patch agent "$AGENT_ID" -n ${HW_NS} --type merge -p '{"spec":{"approved":true}}'
+
 oc get agents -n ${HW_NS} \
   -o custom-columns=NAME:.metadata.name,STATE:.status.debugInfo.state,APPROVED:.spec.approved,HOST:.status.inventory.hostname
 ----
@@ -583,44 +597,11 @@ The BareMetalInstanceType and ClusterVersion require the BMaaS service to be ena
 
 === Steps
 
-. Check whether BMaaS is currently enabled:
-+
-[source,role=execute]
-----
-helm get values osac -n osac | grep -A2 'bmaas:'
-----
-+
-If `enabled: false`, continue to the next step to enable it. If already `true`, skip to step 3.
-
-. Enable BMaaS by upgrading the Helm release with `--reuse-values` to preserve all other settings:
-+
-[source,role=execute]
-----
-helm upgrade osac $(helm get metadata osac -n osac -o json | python3 -c "import json,sys; m=json.load(sys.stdin); print(m.get('chart',''))") \
-  -n osac \
-  --reuse-values \
-  --set global.services.bmaas.enabled=true
-
-oc rollout status deploy/fulfillment-grpc-server -n osac --timeout=180s
-helm get values osac -n osac | grep -A2 'bmaas:'
-----
-+
-.Sample output
-----
-bmaas:
-  enabled: true
-----
-+
-[WARNING]
-====
-Do not run `helm upgrade` without `--reuse-values`. A plain upgrade with no values file resets the RHDP-specific Keycloak, AAP, and storage settings.
-====
-
 . Create the `BareMetalInstanceType` that describes the agent VM's hardware profile. The NIC names (`enp1s0`, `enp2s0`) match the KubeVirt guest interfaces, not physical `ens4`/`ens5`:
 +
 [source,role=execute]
 ----
-osac --config "${CONFIG_ADMIN}" create baremetalinstancetype \
+osac --config $HOME/admin create baremetalinstancetype \
   --name "${BMIT_NAME}" \
   --description "RHDP CNV agent VM — 8 vCPU 16 GiB" \
   --cpu-cores 8 \
@@ -631,7 +612,7 @@ osac --config "${CONFIG_ADMIN}" create baremetalinstancetype \
   --network-port enp1s0:management:Ethernet:10Gbps \
   --host-label osac.openshift.io/host-type=default
 
-osac --config "${CONFIG_ADMIN}" get baremetalinstancetype
+osac --config $HOME/admin get baremetalinstancetype
 ----
 +
 .Sample output
@@ -649,13 +630,14 @@ The `--cpu-architecture` value must be the string `x86_64`, not the enum `ARCHIT
 +
 [source,role=execute]
 ----
-osac --config "${CONFIG_ADMIN}" create diskimage \
+osac --config $HOME/admin \
+  create diskimage \
   --name "${DISK_IMAGE}" \
   --source-type registry \
   --source-ref oci://quay.io/rh_ee_rpiccoli/rhcos-bmi:4.22.0 \
   --architecture amd64
 
-osac --config "${CONFIG_ADMIN}" get diskimage
+osac --config $HOME/admin get diskimage
 ----
 +
 .Sample output
@@ -668,12 +650,13 @@ rhcos-4-22   -         REGISTRY     AMD64         AVAILABLE   shared
 +
 [source,role=execute]
 ----
-osac --config "${CONFIG_ADMIN}" create clusterversion \
+osac --config $HOME/admin create \
+  clusterversion \
   --version "${OCP_VERSION}" \
   --image quay.io/openshift-release-dev/ocp-release:4.22.0-multi \
   --disk-image "${DISK_IMAGE}"
 
-osac --config "${CONFIG_ADMIN}" get clusterversion
+osac --config $HOME/admin get clusterversion
 ----
 +
 .Sample output
@@ -686,14 +669,15 @@ rhcos-4-22      4.22.0-rhcos    quay.io/openshift-release-dev/ocp-release:4.22.0
 +
 [source,role=execute]
 ----
-osac --config "${CONFIG_ADMIN}" create clustercatalogitem \
+osac --config $HOME/admin \
+  create clustercatalogitem \
   --name "${CATALOG_ITEM}" \
   --title "Hosted CI small" \
   --description "Single-replica hosted OCP cluster on CNV agent VM" \
   --template "${TEMPLATE}" \
   --published
 
-osac --config "${CONFIG_ADMIN}" get clustercatalogitem
+osac --config $HOME/admin get clustercatalogitem
 ----
 +
 .Sample output
@@ -710,11 +694,12 @@ With the catalog objects published, Alice can now self-service a hosted OpenShif
 
 === Steps
 
+////
 . Log in to the public OSAC API as Alice using the device flow:
 +
 [source,role=execute,subs=attributes]
 ----
-osac --config "${CONFIG_TENANT}" login --insecure \
+osac --config $HOME/alice login --insecure \
   --address "${API_PUB}" \
   --flow device
 ----
@@ -722,13 +707,13 @@ osac --config "${CONFIG_TENANT}" login --insecure \
 Open the URL displayed in the terminal in a fresh incognito browser window, enter the code, and log in as `alice` / `{osac_user_password}`.
 +
 IMPORTANT: Always use a fresh incognito window for each device flow login. A cached session may authenticate as the wrong user.
-
+////
 . Confirm Alice's identity and verify that the cluster catalog item is visible:
 +
 [source,role=execute]
 ----
-osac --config "${CONFIG_TENANT}" whoami
-osac --config "${CONFIG_TENANT}" get clustercatalogitems
+osac --config $HOME/alice whoami
+osac --config $HOME/alice get clustercatalogitems
 ----
 +
 .Sample output
@@ -743,7 +728,8 @@ The `hosted-ci-small` catalog item must appear in the list before proceeding.
 +
 [source,role=execute]
 ----
-osac --config "${CONFIG_TENANT}" create secret \
+osac --config $HOME/alice \
+  create secret \
   --name cluster-pull-secret \
   --type=pull-secret \
   --from-file=.dockerconfigjson="${PULL_SECRET}"
@@ -753,7 +739,8 @@ osac --config "${CONFIG_TENANT}" create secret \
 +
 [source,role=execute]
 ----
-osac --config "${CONFIG_TENANT}" create cluster \
+osac --config $HOME/alice \
+  create cluster \
   --name "${CLUSTER_NAME}" \
   --catalog-item "${CATALOG_ITEM}" \
   --version "${OCP_VERSION}" \
@@ -761,7 +748,7 @@ osac --config "${CONFIG_TENANT}" create cluster \
   --pull-secret cluster-pull-secret \
   --ssh-public-key-file "${HOME}/.ssh/id_ed25519.pub"
 
-osac --config "${CONFIG_TENANT}" get cluster
+osac --config $HOME/alice get cluster
 oc get clusterorder -n ${OSAC_NS}
 ----
 +
@@ -795,11 +782,13 @@ osac-student-cluster       student-cluster   4.22.0    student-cluster-admin... 
 ----
 NP_NS=$(oc get nodepool -A -o jsonpath='{.items[0].metadata.namespace}')
 NP_NAME=$(oc get nodepool -n "$NP_NS" -o jsonpath='{.items[0].metadata.name}')
+
 oc label agent "$AGENT_ID" -n ${HW_NS} \
   osac.openshift.io/clusterorder=${CLUSTER_NAME} \
   osac.openshift.io/resource_class=ci-worker \
   osac.openshift.io/host-type=default \
   --overwrite
+
 oc patch nodepool "$NP_NAME" -n "$NP_NS" --type merge -p '{"spec":{"replicas":1}}'
 ----
 
@@ -844,13 +833,6 @@ student-cluster-worker-0              Ready    worker   5m    v1.29.x
 +
 A single worker node at `Ready` confirms the hosted cluster is operational.
 
-++++
-<div class="solve-button-placeholder" data-module="module-04"></div>
-++++
-++++
-<div class="validate-button-placeholder" data-module="module-04"></div>
-++++
-
 == Learning outcomes checkpoint
 
 Review what you completed in this module:
@@ -865,6 +847,20 @@ Review what you completed in this module:
 * [x] Enabled BMaaS on the Helm release and created `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem`
 * [x] Ordered a hosted OpenShift cluster as tenant Alice using the OSAC CLI and `--catalog-item`
 * [x] Bound the agent to the NodePool and verified the cluster reached a `Ready` worker node
+
+== Solve the module
+
+If you want to skip the exercises and see the final state of the tenant, click the *Solve* button below. This will create the `sai-corp` tenant, configure the identity provider, and assign roles and memberships for Alice and Bob.
+
+++++
+<div class="solve-button-placeholder" data-module="module-04"></div>
+++++
+
+== Validate your work
+
+++++
+<div class="validate-button-placeholder" data-module="module-04"></div>
+++++
 
 == Module summary
 
