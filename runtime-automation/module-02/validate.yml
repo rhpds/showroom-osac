@@ -16,6 +16,10 @@
     fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
     break_glass_user: "{{ tenant_name }}-osac-break-glass"
     device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+    config_admin: "{{ ansible_env.HOME }}/admin"
+    config_breakglass: "{{ ansible_env.HOME }}/breakglass"
+    config_alice: "{{ ansible_env.HOME }}/alice"
+    config_bob: "{{ ansible_env.HOME }}/bob"
 
   tasks:
 
@@ -144,7 +148,7 @@
     # -------------------------------------------------------
     - name: Login as OSAC platform admin
       ansible.builtin.shell: >-
-        osac login --insecure
+        osac --config "{{ config_admin }}" login --insecure
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ osac_admin_user }}
@@ -158,7 +162,7 @@
     # -------------------------------------------------------
     - name: Check OSAC identity provider sai-corp phase
       ansible.builtin.shell: >-
-        osac get identityprovider {{ tenant_name }} --tenant {{ tenant_name }} -o json
+        osac --config "{{ config_admin }}" get identityprovider {{ tenant_name }} --tenant {{ tenant_name }} -o json
       register: r_idp_status
       changed_when: false
       ignore_errors: true
@@ -168,7 +172,7 @@
     # -------------------------------------------------------
     - name: Check OSAC RoleBinding tenant-admin for alice
       ansible.builtin.shell: >-
-        osac get rolebinding --tenant {{ tenant_name }} -o json
+        osac --config "{{ config_admin }}" get rolebinding --tenant {{ tenant_name }} -o json
       register: r_rb_status
       changed_when: false
       ignore_errors: true
@@ -178,7 +182,7 @@
     # -------------------------------------------------------
     - name: Login as break-glass user
       ansible.builtin.shell: >-
-        osac login --insecure
+        osac --config "{{ config_breakglass }}" login --insecure
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ break_glass_user }}
@@ -192,7 +196,7 @@
     # -------------------------------------------------------
     - name: Check OSAC secret idp-client-secret exists
       ansible.builtin.shell: >-
-        osac get secret idp-client-secret -o json
+        osac --config "{{ config_breakglass }}" get secret idp-client-secret -o json
       register: r_secret_check
       changed_when: false
       ignore_errors: true
@@ -200,11 +204,12 @@
     # -------------------------------------------------------
     # Pre-flight — Login as alice (tenant-admin) for project checks
     # -------------------------------------------------------
-    - name: Login as alice via device flow
+    - name: Login as alice via device flow (if not already logged in)
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "{{ tenant_admin }}" "{{ osac_user_password }}"
+        "{{ config_alice }}"
       changed_when: false
       ignore_errors: true
 
@@ -213,7 +218,7 @@
     # -------------------------------------------------------
     - name: Check OSAC project default is ACTIVE
       ansible.builtin.shell: >-
-        osac get project default -o json
+        osac --config "{{ config_alice }}" get project default -o json
       register: r_proj_status
       changed_when: false
       ignore_errors: true
@@ -223,7 +228,7 @@
     # -------------------------------------------------------
     - name: Check OSAC ProjectMembership bob-viewer
       ansible.builtin.shell: >-
-        osac get projectmembership bob-viewer -o json
+        osac --config "{{ config_alice }}" get projectmembership bob-viewer -o json
       register: r_pm_status
       changed_when: false
       ignore_errors: true
@@ -231,11 +236,12 @@
     # -------------------------------------------------------
     # Pre-flight — Login as bob for RBAC enforcement check
     # -------------------------------------------------------
-    - name: Login as bob via device flow
+    - name: Login as bob via device flow (if not already logged in)
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "{{ tenant_user }}" "{{ osac_user_password }}"
+        "{{ config_bob }}"
       changed_when: false
       ignore_errors: true
 
@@ -244,7 +250,7 @@
     # -------------------------------------------------------
     - name: Check RBAC enforcement — bob delete project must fail
       ansible.builtin.shell: >-
-        osac delete project default
+        osac --config "{{ config_bob }}" delete project default
       register: r_bob_rbac
       changed_when: false
       ignore_errors: true
