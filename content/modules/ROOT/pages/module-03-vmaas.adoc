@@ -61,19 +61,19 @@ Created storage backend '01a0ced0-a5fe-793b-9f6e-061d5f7d16fd'.
 BACKEND_ID=01a0ced0-a5fe-793b-9f6e-061d5f7d16fd
 ----
 
-. Create the storage tier using the backend UUID:
+. Create the storage tier for the tenant `sai-corp` on the storage backendusing the backend UUID:
 +
 [source,role=execute]
 ----
 osac create storagetier \
-  --name local \
+  --name sai-corp \
   --backend-id "${BACKEND_ID}" \
   --protocol BLOCK
 ----
 +
 .Sample output
 ----
-Created storage tier 'local'.
+Created storage tier 'sai-corp'.
 ----
 
 . Label the LVM storage class for the `sai-corp` tenant so the platform maps the `local` tier to the correct Kubernetes storage class:

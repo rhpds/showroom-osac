@@ -1,8 +1,872 @@
-= Module 4: Cluster as a Service (CAAS)
+= Module 4: Cluster as a Service (CaaS)
 :source-highlighter: rouge
 :toc: macro
 :toclevels: 2
 
 toc::[]
 
-TBD
+SAI Corp's teams can now provision virtual machines on demand through the VMaaS catalog. But their platform engineers also need full OpenShift clusters — for CI/CD pipelines, containerized workloads, and isolated test environments — provisioned with the same self-service experience.
+
+In this module, you enable Cluster as a Service (CaaS) for the OSAC platform. As the Sovereign Cloud Corp platform administrator, you configure the network bridge that hosted-cluster traffic needs, provision a KubeVirt VM that acts as a simulated bare metal server, and publish the catalog objects that let tenants order clusters on demand. Then Alice, SAI Corp's tenant administrator, places a cluster order. The platform orchestrates a HyperShift Hosted Control Plane on the registered agent — no physical hardware required.
+
+== Learning objectives
+
+By the end of this module, you'll be able to:
+
+* Configure a Linux bridge on hub workers using a MachineConfig and a Multus NetworkAttachmentDefinition
+* Provision a KubeVirt VM as a simulated bare metal agent using the Assisted Installer
+* Register and approve the agent in the hardware inventory
+* Publish platform catalog objects: `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem`
+* Order a hosted OpenShift cluster as a tenant using the OSAC CLI
+
+== Exercise 1: Set up the lab environment
+
+Before running any CaaS workflow, you need a set of shell variables that the subsequent exercises depend on. Many values — the hub base domain, the worker node hosting the agent VM, the cluster ingress IP — are derived dynamically from the running cluster.
+
+=== Steps
+
+. Export the fixed variables. Adjust `MY_NAME`, `CLUSTER_NAME`, and `CATALOG_ITEM` to match your environment:
++
+[source,role=execute]
+----
+export KUBECONFIG=~/.kube/config
+export OSAC_NS=osac
+export HW_NS=hardware-inventory
+export MY_NAME=student
+export CLUSTER_NAME=student-cluster
+export VM_NAME=agent-${MY_NAME}-01
+export VIP=10.10.10.240
+export BRIDGE_IP=10.10.10.50
+export BMIT_NAME=c1-metal-amd64
+export DISK_IMAGE=rhcos-4-22
+export OCP_VERSION=4.22.0-rhcos
+export TEMPLATE=ocp-ci-small
+export CATALOG_ITEM=hosted-ci-small
+export STORAGE_CLASS=ocs-external-storagecluster-ceph-rbd-virtualization
+----
+
+. Derive the cluster-specific variables from the live OpenShift API:
++
+[source,role=execute]
+----
+export HUB_BASE=$(oc get dnses.config/cluster -o jsonpath='{.spec.baseDomain}')
+export HUB_CLUSTER=${HUB_BASE%%.*}
+export HOSTED_BASE=hosted.${HUB_BASE}
+export HC_DOMAIN=${CLUSTER_NAME}.${HOSTED_BASE}
+export AGENT_WORKER=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}')
+export ROUTER_IP=$(oc get svc router-internal-default -n openshift-ingress -o jsonpath='{.spec.clusterIP}')
+DOMAIN=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
+export API_INT=https://fulfillment-internal-api-${OSAC_NS}.${DOMAIN}
+export API_PUB=https://fulfillment-api-${OSAC_NS}.${DOMAIN}
+export CONFIG_ADMIN=${HOME}/.config/osac-admin
+export CONFIG_TENANT=${HOME}/.config/osac-tenant
+
+echo "HUB=${HUB_CLUSTER}"
+echo "WORKER=${AGENT_WORKER}"
+echo "ROUTER_IP=${ROUTER_IP}"
+echo "HOSTED_BASE=${HOSTED_BASE}"
+----
++
+.Sample output
+----
+HUB=cluster-9872p
+WORKER=worker-0.cluster-9872p.dyn.redhatworkshops.io
+ROUTER_IP=172.30.56.12
+HOSTED_BASE=hosted.cluster-9872p.dyn.redhatworkshops.io
+----
+
+. Verify the required tools are available on the bastion:
++
+[source,role=execute]
+----
+oc whoami
+oc get nodes -o wide
+which oc virtctl osac
+----
++
+All three commands must succeed. If `osac` is missing, refer to the credentials page for the installation instructions.
+
+. Generate an SSH key pair if one does not already exist:
++
+[source,role=execute]
+----
+test -f ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+cat ~/.ssh/id_ed25519.pub
+----
+
+. Extract the cluster pull secret from `openshift-config` and verify it is valid JSON:
++
+[source,role=execute]
+----
+oc get secret pull-secret -n openshift-config \
+  -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "${HOME}/pull-secret-cluster.json"
+export PULL_SECRET="${HOME}/pull-secret-cluster.json"
+test -s "$PULL_SECRET" && echo "Pull secret OK"
+python3 -c "import json,pathlib; print('Registries:', sorted(json.loads(pathlib.Path('${PULL_SECRET}').read_text()).get('auths',{})))"
+----
+
+. Log in to the OSAC private API as the cloud administrator using a short-lived service account token:
++
+[source,role=execute]
+----
+osac --config "${CONFIG_ADMIN}" login --insecure --private \
+  --address "${API_INT}" \
+  --token-script "oc create token -n ${OSAC_NS} admin"
+----
++
+.Sample output
+----
+Successfully logged in to https://fulfillment-internal-api-osac.apps.cluster-9872p.dyn.redhatworkshops.io
+----
++
+[NOTE]
+====
+The `--private` flag connects to the internal fulfillment API, which exposes cloud-admin–only resources such as `BareMetalInstanceType` and `ClusterVersion`. The tenant public API does not expose these endpoints.
+====
+
+. Confirm the current service state. CaaS should already be enabled and BMaaS may still be off:
++
+[source,role=execute]
+----
+helm get values osac -n osac 2>/dev/null | grep -A2 'bmaas:\|caas:\|vmaas:'
+----
++
+.Sample output
+----
+bmaas:
+  enabled: false
+caas:
+  enabled: true
+vmaas:
+  enabled: true
+----
+
+== Exercise 2: Configure platform networking
+
+CaaS provisions HyperShift Hosted Control Planes whose worker nodes run as KubeVirt VMs. Those VMs need a second network interface on a flat L2 network so MetalLB can assign VIPs to the hosted cluster API and ingress. On physical hardware that second NIC already exists; in this RHDP lab you create it using a Linux bridge.
+
+You also patch the fulfillment service DNS configuration to use the `noop` DNS driver, which is required in RHDP environments that have no external Route53 access.
+
+=== Steps
+
+. Verify that `HOSTED_BASE` is set before patching DNS:
++
+[source,role=execute]
+----
+[ -n "$HOSTED_BASE" ] && [ "$HOSTED_BASE" != "hosted." ] \
+  && echo "HOSTED_BASE=${HOSTED_BASE}" \
+  || { echo "ERROR: HOSTED_BASE empty — re-run Exercise 1 step 2"; exit 1; }
+----
+
+. Patch the fulfillment ConfigMap to use the `noop` DNS driver:
++
+[source,role=execute]
+----
+oc -n ${OSAC_NS} patch cm cluster-fulfillment-ig --type merge -p "{
+  \"data\": {
+    \"NETWORK_STEPS_COLLECTION\": \"ci.steps\",
+    \"DNS_CLASS\": \"dns.noop.dns\",
+    \"EXTERNAL_ACCESS_BASE_DOMAIN\": \"${HOSTED_BASE}\",
+    \"HOSTED_CLUSTER_BASE_DOMAIN\": \"${HOSTED_BASE}\",
+    \"HOSTED_CLUSTER_CONTROLLER_AVAILABILITY_POLICY\": \"SingleReplica\",
+    \"HOSTED_CLUSTER_INFRASTRUCTURE_AVAILABILITY_POLICY\": \"SingleReplica\"
+  }
+}"
+----
+
+. Verify the patch was applied:
++
+[source,role=execute]
+----
+oc get cm cluster-fulfillment-ig -n ${OSAC_NS} \
+  -o jsonpath='DNS_CLASS={.data.DNS_CLASS}{"\n"}HOSTED={.data.HOSTED_CLUSTER_BASE_DOMAIN}{"\n"}'
+----
++
+.Sample output
+----
+DNS_CLASS=dns.noop.dns
+HOSTED=hosted.cluster-9872p.dyn.redhatworkshops.io
+----
+
+. Apply the MachineConfig that creates the `br-untagged` Linux bridge on every worker node. This is idempotent — `oc apply` is safe if the MachineConfig already exists:
++
+[source,role=execute]
+----
+cat <<'EOF' | oc apply -f -
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    machineconfiguration.openshift.io/role: worker
+  name: 99-osac-caas-br-untagged
+spec:
+  config:
+    ignition:
+      version: 3.4.0
+    storage:
+      files:
+        - path: /usr/local/bin/osac-setup-br-untagged.sh
+          mode: 0755
+          overwrite: true
+          contents:
+            inline: |
+              #!/bin/bash
+              set -euo pipefail
+              if ip link show br-untagged &>/dev/null; then exit 0; fi
+              for i in $(seq 1 60); do
+                ip link show br-ex &>/dev/null && break
+                sleep 2
+              done
+              ip link show br-ex &>/dev/null || { echo "br-ex not ready"; exit 1; }
+              ip link add mv-br-ex link br-ex type macvlan mode bridge
+              ip link set mv-br-ex up
+              ip link add br-untagged type bridge
+              ip link set br-untagged up
+              ip link set mv-br-ex master br-untagged
+              echo 0 > /sys/class/net/br-untagged/bridge/stp_state
+    systemd:
+      units:
+        - name: osac-br-untagged.service
+          enabled: true
+          contents: |
+            [Unit]
+            Description=OSAC CaaS br-untagged
+            After=network-online.target ovs-vswitchd.service
+            Wants=network-online.target
+            [Service]
+            Type=oneshot
+            RemainAfterExit=yes
+            ExecStart=/usr/local/bin/osac-setup-br-untagged.sh
+            [Install]
+            WantedBy=multi-user.target
+EOF
+----
+
+. Watch the MachineConfigPool until the workers finish rebooting. This takes 10–20 minutes on first apply:
++
+[source,role=execute]
+----
+watch 'oc get mcp worker -o jsonpath="{.status.conditions[?(@.type==\"Updated\")].status} {.status.conditions[?(@.type==\"Updating\")].status}{\"\\n\"}"'
+----
++
+Wait until you see `True False`, which means `Updated=True` and `Updating=False`. Press `Ctrl+C` to exit.
++
+[WARNING]
+====
+Do not proceed to the next step until the MachineConfigPool shows `Updated=True Updating=False`. Proceeding before workers have rebooted means the bridge will not exist when the Agent VM starts.
+====
+
+. Verify that `br-untagged` exists on each worker node:
++
+[source,role=execute]
+----
+for NODE in $(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[*].metadata.name}'); do
+  echo "=== ${NODE} ==="
+  oc debug node/${NODE} --quiet -- chroot /host ip link show br-untagged
+done
+----
++
+.Sample output
+----
+=== worker-0.cluster-9872p.dyn.redhatworkshops.io ===
+7: br-untagged: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+----
+
+== Exercise 3: Provision a simulated bare metal server
+
+CaaS needs at least one registered and approved Agent before a tenant can order a cluster. On physical bare metal that agent is a real server; in this RHDP lab you run it as a KubeVirt VM booting the Assisted Installer discovery ISO.
+
+This exercise walks through the full agent provisioning flow: InfraEnv → NAD → root disk → ISO download → VM creation → agent registration and approval.
+
+=== Steps
+
+. Create the `hardware-inventory` namespace and copy the cluster pull secret into it so the InfraEnv can pull the discovery image:
++
+[source,role=execute]
+----
+oc create namespace "${HW_NS}" --dry-run=client -o yaml | oc apply -f -
+oc get secret pull-secret -n openshift-config -o json \
+  | python3 -c "import json,sys; s=json.load(sys.stdin); s['metadata']={'name':'pull-secret','namespace':'${HW_NS}'}; json.dump(s,sys.stdout)" \
+  | oc apply -f -
+----
+
+. Create the `InfraEnv`. The image type must be `full-iso` (~1.3 GiB); a minimal ISO hangs during agent boot because it tries to fetch the rootfs over the cluster ingress:
++
+[source,role=execute]
+----
+SSH_PUB=$(cat ~/.ssh/id_ed25519.pub)
+cat <<EOF | oc apply -f -
+apiVersion: agent-install.openshift.io/v1beta1
+kind: InfraEnv
+metadata:
+  name: hardware-inventory
+  namespace: ${HW_NS}
+spec:
+  pullSecretRef:
+    name: pull-secret
+  sshAuthorizedKey: "${SSH_PUB}"
+  imageType: full-iso
+EOF
+----
+
+. Override the InfraEnv ignition so that the discovery agent resolves the assisted-service hostname through the router's ClusterIP rather than via DNS (which is unavailable inside the VM pod network):
++
+[source,role=execute]
+----
+IGNITION=$(ROUTER_IP="$ROUTER_IP" HUB_BASE="$HUB_BASE" python3 <<'PY'
+import json, os, urllib.parse
+w, hub = os.environ["ROUTER_IP"], os.environ["HUB_BASE"]
+hosts = (
+    "127.0.0.1 localhost\n"
+    f"{w} assisted-service-multicluster-engine.apps.{hub}\n"
+    f"{w} assisted-image-service-multicluster-engine.apps.{hub}\n"
+)
+src = "data:text/plain;charset=utf-8," + urllib.parse.quote(hosts)
+print(json.dumps({"ignition":{"version":"3.2.0"},"storage":{"files":[{"path":"/etc/hosts","mode":420,"overwrite":True,"contents":{"source":src}}]}}))
+PY
+)
+oc patch infraenv hardware-inventory -n ${HW_NS} --type merge \
+  --patch "{\"spec\":{\"ignitionConfigOverride\":$(echo "$IGNITION" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}}"
+----
+
+. Wait for the download URL to appear and confirm it points to a full ISO:
++
+[source,role=execute]
+----
+sleep 20
+oc get infraenv hardware-inventory -n ${HW_NS} -o jsonpath='{.status.isoDownloadURL}{"\n"}'
+----
++
+.Sample output
+----
+https://assisted-image-service-multicluster-engine.apps.cluster-9872p.dyn.redhatworkshops.io/images/...?type=full-iso&...
+----
++
+The URL must contain `full.iso`. If it shows `minimal-iso`, recreate the InfraEnv with `imageType: full-iso`.
+
+. Create the NetworkAttachmentDefinition (NAD) that connects the agent VM to the `br-untagged` bridge with a static IP of `10.10.10.50`:
++
+[source,role=execute]
+----
+cat <<EOF | oc apply -f -
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: untagged-net-${MY_NAME}
+  namespace: ${HW_NS}
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "name": "untagged-net-${MY_NAME}",
+      "type": "bridge",
+      "bridge": "br-untagged",
+      "ipam": {
+        "type": "whereabouts",
+        "range": "10.10.10.0/24",
+        "range_start": "${BRIDGE_IP}",
+        "range_end": "${BRIDGE_IP}"
+      }
+    }
+EOF
+oc get net-attach-def untagged-net-${MY_NAME} -n ${HW_NS}
+----
+
+. Create a blank 120 GiB DataVolume that will serve as the agent VM's root disk. HyperShift installs RHCOS onto this disk during cluster provisioning:
++
+[source,role=execute]
+----
+cat <<EOF | oc apply -f -
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: ${VM_NAME}-rootdisk
+  namespace: ${HW_NS}
+spec:
+  source:
+    blank: {}
+  storage:
+    accessModes: [ReadWriteMany]
+    resources:
+      requests:
+        storage: 120Gi
+    storageClassName: ${STORAGE_CLASS}
+EOF
+oc wait dv ${VM_NAME}-rootdisk -n ${HW_NS} --for=condition=Ready --timeout=600s
+----
+
+. Download the full discovery ISO from inside the cluster. The bastion cannot reach the `*.apps` ingress directly, so you run the download inside a throwaway pod that has in-cluster network access:
++
+[source,role=execute]
+----
+ISO_URL=$(oc get infraenv hardware-inventory -n ${HW_NS} -o jsonpath='{.status.isoDownloadURL}')
+echo "$ISO_URL" | grep -q full.iso || echo "WARN: not full.iso — check step 4"
+
+oc delete pod iso-download -n ${HW_NS} --ignore-not-found --wait=true
+cat <<PODEOF | oc apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: iso-download
+  namespace: ${HW_NS}
+spec:
+  containers:
+  - name: dl
+    image: registry.redhat.io/ubi9/ubi:latest
+    command: ["sh","-c","curl -sfL -o /data/agent-discovery.iso '${ISO_URL}' && ls -lh /data/agent-discovery.iso && sleep 3600"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    emptyDir:
+      sizeLimit: 4Gi
+  restartPolicy: Never
+PODEOF
+oc wait pod/iso-download -n ${HW_NS} --for=condition=Ready --timeout=180s
+----
+
+. Wait for the download to finish, then copy the ISO to the bastion and verify its size (must be greater than 400 MB):
++
+[source,role=execute]
+----
+for i in $(seq 1 90); do
+  oc logs iso-download -n ${HW_NS} 2>/dev/null | grep -q agent-discovery.iso && break
+  sleep 5
+done
+oc cp ${HW_NS}/iso-download:/data/agent-discovery.iso /tmp/agent-discovery.iso
+oc delete pod iso-download -n ${HW_NS} --wait=false
+ls -lh /tmp/agent-discovery.iso
+test "$(stat -c%s /tmp/agent-discovery.iso)" -gt 400000000 && echo "ISO size OK"
+----
++
+.Sample output
+----
+-rw-r--r--. 1 lab-user lab-user 1.3G Oct 12 11:30 /tmp/agent-discovery.iso
+ISO size OK
+----
+
+. Upload the ISO as a DataVolume using `virtctl image-upload`:
++
+[source,role=execute]
+----
+virtctl image-upload dv ${VM_NAME}-iso \
+  --namespace ${HW_NS} --size=4Gi \
+  --image-path=/tmp/agent-discovery.iso \
+  --storage-class=${STORAGE_CLASS} \
+  --access-mode=ReadWriteMany --insecure
+oc wait dv ${VM_NAME}-iso -n ${HW_NS} --for=condition=Ready --timeout=600s
+----
++
+[WARNING]
+====
+Do not start the agent VM until this DataVolume shows `Succeeded`. Starting the VM with a missing or incomplete ISO DV results in a `FailedPvcNotFound` error.
+====
+
+. Create the agent KubeVirt VM with two network interfaces: the default pod NIC and the Multus-attached bridge NIC. The VM is pinned to the worker node that has `br-untagged`:
++
+[source,role=execute]
+----
+cat <<EOF | oc apply -f -
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: ${VM_NAME}
+  namespace: ${HW_NS}
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: ${VM_NAME}
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - ${AGENT_WORKER}
+      domain:
+        cpu:
+          cores: 8
+        memory:
+          guest: 16Gi
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+            bootOrder: 2
+          - name: iso
+            cdrom:
+              bus: sata
+            bootOrder: 1
+          interfaces:
+          - name: default
+            masquerade: {}
+          - name: vlan
+            bridge: {}
+            model: virtio
+      networks:
+      - name: default
+        pod: {}
+      - name: vlan
+        multus:
+          networkName: ${HW_NS}/untagged-net-${MY_NAME}
+      volumes:
+      - name: rootdisk
+        dataVolume:
+          name: ${VM_NAME}-rootdisk
+      - name: iso
+        persistentVolumeClaim:
+          claimName: ${VM_NAME}-iso
+EOF
+oc wait vmi ${VM_NAME} -n ${HW_NS} --for=jsonpath='{.status.phase}'=Running --timeout=600s
+----
+
+. Watch for the Agent to register. This takes 3–8 minutes after the VM starts:
++
+[source,role=execute]
+----
+watch "oc get agents -n ${HW_NS}"
+----
++
+Press `Ctrl+C` once an agent appears.
++
+[HINT]
+====
+If no agent appears after 8 minutes, the guest may not be resolving the assisted-service hostname. Connect to the VM and fix its `/etc/hosts`:
+
+[source,role=execute]
+----
+virtctl ssh core@vmi/${VM_NAME} -n ${HW_NS} -i ~/.ssh/id_ed25519 \
+  --local-ssh-opts='-o StrictHostKeyChecking=no' \
+  --command "sudo tee /etc/hosts <<EOF
+127.0.0.1 localhost
+${ROUTER_IP} assisted-service-multicluster-engine.apps.${HUB_BASE}
+${ROUTER_IP} assisted-image-service-multicluster-engine.apps.${HUB_BASE}
+EOF
+sudo systemctl restart agent"
+----
+====
+
+. Label and approve the agent so OSAC can schedule cluster worker workloads onto it:
++
+[source,role=execute]
+----
+AGENT_ID=$(oc get agents -n ${HW_NS} -o jsonpath='{.items[0].metadata.name}')
+oc label agent "$AGENT_ID" -n ${HW_NS} \
+  osac.openshift.io/resource_class=ci-worker \
+  osac.openshift.io/host-type=default \
+  --overwrite
+oc patch agent "$AGENT_ID" -n ${HW_NS} --type merge -p '{"spec":{"approved":true}}'
+oc get agents -n ${HW_NS} \
+  -o custom-columns=NAME:.metadata.name,STATE:.status.debugInfo.state,APPROVED:.spec.approved,HOST:.status.inventory.hostname
+----
++
+.Sample output
+----
+NAME                                   STATE            APPROVED  HOST
+82da6e5a-...                           known-unbound    true      localhost.localdomain
+----
++
+The agent must show `known-unbound` and `true` before you proceed. `known-unbound` means the agent is ready and waiting for a cluster to claim it.
+
+== Exercise 4: Publish cluster catalog objects
+
+With a registered agent in the hardware inventory, you can publish the catalog objects that tenants need to order a cluster. This exercise covers four resources: the BareMetalInstanceType (compute profile), the DiskImage (RHCOS OS source), the ClusterVersion (OCP release), and the ClusterCatalogItem (self-service template).
+
+The BareMetalInstanceType and ClusterVersion require the BMaaS service to be enabled. If the Helm release has BMaaS disabled, you flip it first.
+
+=== Steps
+
+. Check whether BMaaS is currently enabled:
++
+[source,role=execute]
+----
+helm get values osac -n osac | grep -A2 'bmaas:'
+----
++
+If `enabled: false`, continue to the next step to enable it. If already `true`, skip to step 3.
+
+. Enable BMaaS by upgrading the Helm release with `--reuse-values` to preserve all other settings:
++
+[source,role=execute]
+----
+helm upgrade osac $(helm get metadata osac -n osac -o json | python3 -c "import json,sys; m=json.load(sys.stdin); print(m.get('chart',''))") \
+  -n osac \
+  --reuse-values \
+  --set global.services.bmaas.enabled=true
+
+oc rollout status deploy/fulfillment-grpc-server -n osac --timeout=180s
+helm get values osac -n osac | grep -A2 'bmaas:'
+----
++
+.Sample output
+----
+bmaas:
+  enabled: true
+----
++
+[WARNING]
+====
+Do not run `helm upgrade` without `--reuse-values`. A plain upgrade with no values file resets the RHDP-specific Keycloak, AAP, and storage settings.
+====
+
+. Create the `BareMetalInstanceType` that describes the agent VM's hardware profile. The NIC names (`enp1s0`, `enp2s0`) match the KubeVirt guest interfaces, not physical `ens4`/`ens5`:
++
+[source,role=execute]
+----
+osac --config "${CONFIG_ADMIN}" create baremetalinstancetype \
+  --name "${BMIT_NAME}" \
+  --description "RHDP CNV agent VM — 8 vCPU 16 GiB" \
+  --cpu-cores 8 \
+  --cpu-architecture x86_64 \
+  --cpu-threads-per-core 1 \
+  --memory-total-gb 16 \
+  --network-port enp2s0:fabric:Ethernet:10Gbps \
+  --network-port enp1s0:management:Ethernet:10Gbps \
+  --host-label osac.openshift.io/host-type=default
+
+osac --config "${CONFIG_ADMIN}" get baremetalinstancetype
+----
++
+.Sample output
+----
+NAME            CPU_CORES  CPU_ARCH  MEMORY_GB  STATE
+c1-metal-amd64  8          x86_64    16         ACTIVE
+----
++
+[NOTE]
+====
+The `--cpu-architecture` value must be the string `x86_64`, not the enum `ARCHITECTURE_AMD64`. The enum form is only valid for `create diskimage --architecture`.
+====
+
+. Create the RHCOS `DiskImage`. The `--source-type registry` pulls the image from an OCI registry:
++
+[source,role=execute]
+----
+osac --config "${CONFIG_ADMIN}" create diskimage \
+  --name "${DISK_IMAGE}" \
+  --source-type registry \
+  --source-ref oci://quay.io/rh_ee_rpiccoli/rhcos-bmi:4.22.0 \
+  --architecture amd64
+
+osac --config "${CONFIG_ADMIN}" get diskimage
+----
++
+.Sample output
+----
+NAME         DELETING  SOURCE_TYPE  ARCHITECTURE  LIFECYCLE   TENANT
+rhcos-4-22   -         REGISTRY     AMD64         AVAILABLE   shared
+----
+
+. Create the `ClusterVersion` that links an OCP release image to the disk image. Use a unique version string so it does not collide with an existing version:
++
+[source,role=execute]
+----
+osac --config "${CONFIG_ADMIN}" create clusterversion \
+  --version "${OCP_VERSION}" \
+  --image quay.io/openshift-release-dev/ocp-release:4.22.0-multi \
+  --disk-image "${DISK_IMAGE}"
+
+osac --config "${CONFIG_ADMIN}" get clusterversion
+----
++
+.Sample output
+----
+NAME            VERSION         IMAGE
+rhcos-4-22      4.22.0-rhcos    quay.io/openshift-release-dev/ocp-release:4.22.0-multi
+----
+
+. Create the `ClusterCatalogItem`. The `--template` flag here points at the `ClusterTemplate`, not the deprecated `--template` flag on `create cluster`:
++
+[source,role=execute]
+----
+osac --config "${CONFIG_ADMIN}" create clustercatalogitem \
+  --name "${CATALOG_ITEM}" \
+  --title "Hosted CI small" \
+  --description "Single-replica hosted OCP cluster on CNV agent VM" \
+  --template "${TEMPLATE}" \
+  --published
+
+osac --config "${CONFIG_ADMIN}" get clustercatalogitem
+----
++
+.Sample output
+----
+NAME              TITLE              PUBLISHED
+hosted-ci-small   Hosted CI small    true
+----
++
+Confirm the item shows `true` in the `PUBLISHED` column before continuing.
+
+== Exercise 5: Order a hosted cluster as a tenant
+
+With the catalog objects published, Alice can now self-service a hosted OpenShift cluster without involving the platform team. The platform handles the HyperShift hosted control plane; the agent VM becomes the worker node.
+
+=== Steps
+
+. Log in to the public OSAC API as Alice using the device flow:
++
+[source,role=execute,subs=attributes]
+----
+osac --config "${CONFIG_TENANT}" login --insecure \
+  --address "${API_PUB}" \
+  --flow device
+----
++
+Open the URL displayed in the terminal in a fresh incognito browser window, enter the code, and log in as `alice` / `{osac_user_password}`.
++
+IMPORTANT: Always use a fresh incognito window for each device flow login. A cached session may authenticate as the wrong user.
+
+. Confirm Alice's identity and verify that the cluster catalog item is visible:
++
+[source,role=execute]
+----
+osac --config "${CONFIG_TENANT}" whoami
+osac --config "${CONFIG_TENANT}" get clustercatalogitems
+----
++
+.Sample output
+----
+Logged in as: alice
+Tenant: sai-corp
+----
++
+The `hosted-ci-small` catalog item must appear in the list before proceeding.
+
+. Create a pull secret in Alice's tenant so the cluster can pull images:
++
+[source,role=execute]
+----
+osac --config "${CONFIG_TENANT}" create secret \
+  --name cluster-pull-secret \
+  --type=pull-secret \
+  --from-file=.dockerconfigjson="${PULL_SECRET}"
+----
+
+. Place the cluster order using the catalog item:
++
+[source,role=execute]
+----
+osac --config "${CONFIG_TENANT}" create cluster \
+  --name "${CLUSTER_NAME}" \
+  --catalog-item "${CATALOG_ITEM}" \
+  --version "${OCP_VERSION}" \
+  --node-set "name=workers,size=1,baremetal-instance-type=${BMIT_NAME}" \
+  --pull-secret cluster-pull-secret \
+  --ssh-public-key-file "${HOME}/.ssh/id_ed25519.pub"
+
+osac --config "${CONFIG_TENANT}" get cluster
+oc get clusterorder -n ${OSAC_NS}
+----
++
+.Sample output
+----
+NAME             STATE      ...
+student-cluster  Pending    ...
+----
++
+[NOTE]
+====
+Use `--catalog-item` and not `--template` for cluster creation. The `--template` flag is deprecated and the two flags are mutually exclusive. Do not pass both.
+====
+
+. Watch for the `HostedCluster` and `NodePool` to appear:
++
+[source,role=execute]
+----
+oc get hostedcluster -A
+----
++
+.Sample output
+----
+NAMESPACE                  NAME              VERSION   KUBECONFIG                 PROGRESS   AVAILABLE  ...
+osac-student-cluster       student-cluster   4.22.0    student-cluster-admin...   Partial    False
+----
+
+. Bind the agent to the `NodePool` and set the replica count to 1:
++
+[source,role=execute]
+----
+NP_NS=$(oc get nodepool -A -o jsonpath='{.items[0].metadata.namespace}')
+NP_NAME=$(oc get nodepool -n "$NP_NS" -o jsonpath='{.items[0].metadata.name}')
+oc label agent "$AGENT_ID" -n ${HW_NS} \
+  osac.openshift.io/clusterorder=${CLUSTER_NAME} \
+  osac.openshift.io/resource_class=ci-worker \
+  osac.openshift.io/host-type=default \
+  --overwrite
+oc patch nodepool "$NP_NAME" -n "$NP_NS" --type merge -p '{"spec":{"replicas":1}}'
+----
+
+. Once MetalLB assigns the API VIP, add the hosted cluster endpoints to the bastion `/etc/hosts`:
++
+[source,role=execute]
+----
+VIP=$(oc get svc kube-apiserver -n ${OSAC_NS}-${CLUSTER_NAME}-${CLUSTER_NAME} \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+VIP="${VIP:-10.10.10.240}"
+sudo tee -a /etc/hosts <<EOF
+${VIP}  api.${HC_DOMAIN}
+${VIP}  api-int.${HC_DOMAIN}
+${VIP}  console-openshift-console.apps.${HC_DOMAIN}
+EOF
+cat /etc/hosts | grep "${HC_DOMAIN}"
+----
++
+[NOTE]
+====
+These `/etc/hosts` entries point only at the hosted cluster API and console — not at the hub's assisted-service. Do not add the assisted-service entries from Exercise 3 here.
+====
+
+. Verify cluster provisioning and extract the admin kubeconfig:
++
+[source,role=execute]
+----
+oc get clusterorder -n ${OSAC_NS}
+oc get hostedcluster -A
+oc get agents -n ${HW_NS}
+oc get secret ${CLUSTER_NAME}-admin-kubeconfig \
+  -n ${OSAC_NS}-${CLUSTER_NAME} \
+  -o jsonpath='{.data.kubeconfig}' | base64 -d > /tmp/${CLUSTER_NAME}-kubeconfig
+oc --kubeconfig=/tmp/${CLUSTER_NAME}-kubeconfig --insecure-skip-tls-verify get nodes
+----
++
+.Sample output
+----
+NAME                                  STATUS   ROLES    AGE   VERSION
+student-cluster-worker-0              Ready    worker   5m    v1.29.x
+----
++
+A single worker node at `Ready` confirms the hosted cluster is operational.
+
+== Learning outcomes checkpoint
+
+Review what you completed in this module:
+
+* [x] Patched the fulfillment service DNS to use the `noop` driver for RHDP environments
+* [x] Created a `br-untagged` Linux bridge on hub workers via MachineConfig and waited for the node reboot cycle
+* [x] Provisioned the `hardware-inventory` namespace with a full-iso InfraEnv and ignition override
+* [x] Created a NetworkAttachmentDefinition (NAD) and a blank 120 GiB root disk DataVolume
+* [x] Downloaded the discovery ISO in-cluster and uploaded it via `virtctl image-upload`
+* [x] Created and started an agent KubeVirt VM with dual NICs on a specified worker node
+* [x] Registered, labeled, and approved the agent so OSAC can schedule work onto it
+* [x] Enabled BMaaS on the Helm release and created `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem`
+* [x] Ordered a hosted OpenShift cluster as tenant Alice using the OSAC CLI and `--catalog-item`
+* [x] Bound the agent to the NodePool and verified the cluster reached a `Ready` worker node
+
+== Module summary
+
+SAI Corp can now provision hosted OpenShift clusters through the OSAC self-service catalog. The platform administrator defined the hardware profile, OS image, release version, and catalog template once; Alice ordered a cluster without touching any infrastructure configuration.
+
+**Key takeaways for Sovereign Cloud Corp:**
+
+* *HyperShift separates control plane from workers*: The hosted control plane runs as pods on the hub cluster; the worker "nodes" are agents that can be physical servers or, as in this lab, KubeVirt VMs. This architecture dramatically reduces the footprint of multi-cluster environments.
+* *The MachineConfig + NAD pattern replaces physical NICs*: On bare metal, the second NIC is already there. In RHDP CNV labs, `MachineConfig` creates the Linux bridge on hub workers, and the Multus NAD gives the agent VM access to it. The product CLI and CaaS workflow are identical in both environments.
+* *BMaaS and CaaS are independently gated*: The Helm chart controls each service with a feature flag. CaaS can be enabled while BMaaS is off, but the `BareMetalInstanceType` and cluster node provisioning both require BMaaS to be on.
+* *Catalog items decouple ordering from implementation*: The tenant specifies a `--catalog-item` name; the platform controls which template, OCP version, and hardware profile backs it. This lets Sovereign Cloud Corp update hardware or OCP versions without changing what tenants see in the catalog.
+* *`--catalog-item` replaces `--template` on cluster create*: The `--template` flag is deprecated. Always use `--catalog-item` for cluster orders; the two flags are mutually exclusive and cannot be combined.
