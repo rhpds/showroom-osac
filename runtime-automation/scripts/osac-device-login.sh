@@ -3,13 +3,20 @@
 # Starts osac login --flow device in background, completes the browser
 # flow programmatically, and waits for the login to finish.
 #
-# Usage: osac-device-login.sh <keycloak_url> <api_url> <username> <password>
+# Usage: osac-device-login.sh <keycloak_url> <api_url> <username> <password> [<config_path>]
+#   config_path  optional path for osac --config (e.g. $HOME/alice)
 set -euo pipefail
 
-KC_URL="${1:?Usage: $0 <keycloak_url> <api_url> <username> <password>}"
+KC_URL="${1:?Usage: $0 <keycloak_url> <api_url> <username> <password> [<config_path>]}"
 API_URL="${2:?}"
 USERNAME="${3:?}"
 PASSWORD="${4:?}"
+CONFIG_PATH="${5:-}"
+
+CONFIG_OPT=""
+if [ -n "${CONFIG_PATH}" ]; then
+  CONFIG_OPT="--config ${CONFIG_PATH}"
+fi
 
 LOGIN_LOG=$(mktemp)
 COOKIE_JAR=$(mktemp)
@@ -36,8 +43,10 @@ fixurl() {
 }
 
 # Start osac login in background
-osac logout 2>/dev/null || true
-osac login --insecure --address "${API_URL}" --flow device > "${LOGIN_LOG}" 2>&1 &
+# shellcheck disable=SC2086
+osac ${CONFIG_OPT} logout 2>/dev/null || true
+# shellcheck disable=SC2086
+osac ${CONFIG_OPT} login --insecure --address "${API_URL}" --flow device > "${LOGIN_LOG}" 2>&1 &
 OSAC_PID=$!
 
 # Wait for user code to appear

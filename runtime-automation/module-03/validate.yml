@@ -23,7 +23,7 @@
     # -------------------------------------------------------
     - name: Login as platform admin
       ansible.builtin.shell: >-
-        osac login --insecure
+        osac --config "$HOME/admin" login --insecure
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ osac_admin_user }}
@@ -37,7 +37,7 @@
     # -------------------------------------------------------
     - name: Check storage backend local (provider=lvms)
       ansible.builtin.shell: >-
-        osac get storagebackend local -o json
+        osac --config "$HOME/admin" get storagebackend local -o json
       register: r_backend
       changed_when: false
       ignore_errors: true
@@ -47,7 +47,7 @@
     # -------------------------------------------------------
     - name: Check storage tier sai-corp (protocol=BLOCK)
       ansible.builtin.shell: >-
-        osac get storagetier sai-corp -o json
+        osac --config "$HOME/admin" get storagetier sai-corp -o json
       register: r_tier
       changed_when: false
       ignore_errors: true
@@ -90,7 +90,7 @@
     # -------------------------------------------------------
     - name: Check disk image fedora is AVAILABLE
       ansible.builtin.shell: >-
-        osac get diskimage {{ disk_image_name }} -o json
+        osac --config "$HOME/admin" get diskimage {{ disk_image_name }} -o json
       register: r_diskimage
       changed_when: false
       ignore_errors: true
@@ -100,7 +100,7 @@
     # -------------------------------------------------------
     - name: Check instance type small-1-2 is ACTIVE
       ansible.builtin.shell: >-
-        osac get instancetype {{ instance_type_name }} -o json
+        osac --config "$HOME/admin" get instancetype {{ instance_type_name }} -o json
       register: r_instancetype
       changed_when: false
       ignore_errors: true
@@ -110,25 +110,21 @@
     # -------------------------------------------------------
     - name: Check catalog item standard-linux-vm is published
       ansible.builtin.shell: |
-        osac get computeinstancecatalogitem {{ catalog_item_name }} -o json |
+        osac --config "$HOME/admin" get computeinstancecatalogitem {{ catalog_item_name }} -o json |
         python3 -c "import json,sys; d=json.load(sys.stdin); print('OK' if d.get('published') else 'FAIL')"
       register: r_catalog
       changed_when: false
       ignore_errors: true
 
     # -------------------------------------------------------
-    # Pre-flight — Login as Alice for networking and VM checks
+    # Pre-flight — Login as Alice for networking and VM checks (once)
     # -------------------------------------------------------
-    - name: Logout admin session
-      ansible.builtin.shell: osac logout
-      changed_when: true
-      ignore_errors: true
-
-    - name: Login as Alice via device flow
+    - name: Login as Alice via device flow (once, idempotent)
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "alice" "{{ osac_user_password }}"
+        "$HOME/alice"
       changed_when: false
       ignore_errors: true
 
@@ -136,21 +132,21 @@
     # Check 8 — Virtual network, subnet, and security group are READY
     # -------------------------------------------------------
     - name: Check virtual network READY state
-      ansible.builtin.shell: osac get virtualnetwork
+      ansible.builtin.shell: osac --config "$HOME/alice" get virtualnetwork
       register: r_vnet
       changed_when: false
       ignore_errors: true
 
     - name: Check subnet default-ipv4 READY state
       ansible.builtin.shell: >-
-        osac get subnet default-ipv4 -o json
+        osac --config "$HOME/alice" get subnet default-ipv4 -o json
       register: r_subnet
       changed_when: false
       ignore_errors: true
 
     - name: Check security group default READY state
       ansible.builtin.shell: >-
-        osac get securitygroup default -o json
+        osac --config "$HOME/alice" get securitygroup default -o json
       register: r_sg
       changed_when: false
       ignore_errors: true
@@ -160,7 +156,7 @@
     # -------------------------------------------------------
     - name: Check portal-vm compute instance state
       ansible.builtin.shell: >-
-        osac get computeinstance portal-vm -o json
+        osac --config "$HOME/alice" get computeinstance portal-vm -o json
       register: r_vm_osac
       changed_when: false
       ignore_errors: true
@@ -202,18 +198,14 @@
       ignore_errors: true
 
     # -------------------------------------------------------
-    # Pre-flight — Login as Bob for RBAC verification
+    # Pre-flight — Login as Bob for RBAC verification (once)
     # -------------------------------------------------------
-    - name: Logout Alice session
-      ansible.builtin.shell: osac logout
-      changed_when: true
-      ignore_errors: true
-
-    - name: Login as Bob via device flow
+    - name: Login as Bob via device flow (once, idempotent)
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "bob" "{{ osac_user_password }}"
+        "$HOME/bob"
       changed_when: false
       ignore_errors: true
 
@@ -221,7 +213,7 @@
     # Check 12 — Bob (viewer) can list compute instances and see portal-vm
     # -------------------------------------------------------
     - name: Check Bob can list compute instances
-      ansible.builtin.shell: osac get computeinstance
+      ansible.builtin.shell: osac --config "$HOME/bob" get computeinstance
       register: r_bob_list
       changed_when: false
       ignore_errors: true
@@ -230,7 +222,7 @@
     # Check 13 — Bob (viewer) cannot delete portal-vm (PermissionDenied)
     # -------------------------------------------------------
     - name: Check Bob cannot delete portal-vm
-      ansible.builtin.shell: osac delete computeinstance portal-vm
+      ansible.builtin.shell: osac --config "$HOME/bob" delete computeinstance portal-vm
       register: r_bob_delete
       changed_when: false
       failed_when: false
@@ -241,7 +233,7 @@
     # -------------------------------------------------------
     - name: Check Bob cannot create a compute instance
       ansible.builtin.shell: |
-        osac create computeinstance \
+        osac --config "$HOME/bob" create computeinstance \
           --name validate-rbac-check \
           --catalog-item {{ catalog_item_name }} \
           --instance-type {{ instance_type_name }} \
@@ -326,29 +318,29 @@
           ✅ Task 14: Bob (viewer) cannot create compute instances — PermissionDenied enforced
         error_msg: |
           {{ '✅' if _task1_ok else '❌' }} Task 1: Storage backend 'local' (lvms) — \
-          {{ 'ok' if _task1_ok else 'FAILED — create it: osac create storagebackend --name local --provider lvms --endpoint n/a --username n/a --password n/a' }}
+          {{ 'ok' if _task1_ok else 'FAILED — create it: osac --config $HOME/admin create storagebackend --name local --provider lvms --endpoint n/a --username n/a --password n/a' }}
           {{ '✅' if _task2_ok else '❌' }} Task 2: Storage tier 'sai-corp' (BLOCK) — \
-          {{ 'ok' if _task2_ok else 'FAILED — create it: osac create storagetier --name sai-corp --backend-id <id> --protocol BLOCK' }}
+          {{ 'ok' if _task2_ok else 'FAILED — create it: osac --config $HOME/admin create storagetier --name sai-corp --backend-id <id> --protocol BLOCK' }}
           {{ '✅' if _task3_ok else '❌' }} Task 3: StorageClass lvms-vg1 labels — \
           {{ 'ok' if _task3_ok else 'FAILED — label it: oc label storageclass lvms-vg1 osac.openshift.io/tenant=sai-corp osac.openshift.io/storage-tier=local' }}
           {{ '✅' if _task4_ok else '❌' }} Task 4: Tenant sai-corp Ready with local tier — \
           {{ 'ok' if _task4_ok else 'FAILED — check: oc get tenant sai-corp -n osac -o yaml; verify StorageClass labels are set (Task 3 must pass first)' }}
           {{ '✅' if _task5_ok else '❌' }} Task 5: Disk image 'fedora' AVAILABLE — \
-          {{ 'ok' if _task5_ok else 'FAILED — image still importing or not created; check: osac get diskimage fedora; or create it as admin' }}
+          {{ 'ok' if _task5_ok else 'FAILED — image still importing or not created; check: osac --config $HOME/admin get diskimage fedora' }}
           {{ '✅' if _task6_ok else '❌' }} Task 6: Instance type 'small-1-2' ACTIVE — \
-          {{ 'ok' if _task6_ok else 'FAILED — create it as admin: osac create instancetype --name small-1-2 --vcpus 1 --memory-gib 2' }}
+          {{ 'ok' if _task6_ok else 'FAILED — create it: osac --config $HOME/admin create instancetype --name small-1-2 --vcpus 1 --memory-gib 2' }}
           {{ '✅' if _task7_ok else '❌' }} Task 7: Catalog item 'standard-linux-vm' published — \
-          {{ 'ok' if _task7_ok else 'FAILED — create and publish as admin: osac create -f ~/yaml/standard-linux-vm.yaml' }}
+          {{ 'ok' if _task7_ok else 'FAILED — create and publish: osac --config $HOME/admin create -f ~/yaml/standard-linux-vm.yaml' }}
           {{ '✅' if _task8_ok else '❌' }} Task 8: Networking READY — \
-          {{ 'ok' if _task8_ok else 'FAILED — log in as Alice and check: osac get virtualnetwork; osac get subnet default-ipv4; osac get securitygroup default; wait for READY state' }}
+          {{ 'ok' if _task8_ok else 'FAILED — log in as Alice and check: osac --config $HOME/alice get virtualnetwork; osac --config $HOME/alice get subnet default-ipv4; wait for READY' }}
           {{ '✅' if _task9_ok else '❌' }} Task 9: portal-vm RUNNING — \
           {{ 'ok' if _task9_ok else 'FAILED — VM still starting; DataVolume import can take 5-10 minutes — click Validate again shortly, or run Solve to apply the DataVolume pullMethod fix' }}
           {{ '✅' if _task10_ok else '❌' }} Task 10: VirtualMachine Running on cluster — \
-          {{ 'ok' if _task10_ok else 'FAILED — check: oc get vm -A; if the VM is Stopped or Provisioning, run Solve to apply the DataVolume fix' }}
+          {{ 'ok' if _task10_ok else 'FAILED — check: oc get vm -A; if the VM is Stopped, run Solve to apply the DataVolume fix' }}
           {{ '✅' if _task11_ok else '❌' }} Task 11: DataVolume Succeeded — \
           {{ 'ok' if _task11_ok else 'FAILED — DataVolume still importing; wait 5-10 minutes and click Validate again; if stuck, run Solve to apply the pullMethod=node fix' }}
           {{ '✅' if _task12_ok else '❌' }} Task 12: Bob can list compute instances — \
-          {{ 'ok' if _task12_ok else 'FAILED — ensure Bob has a VIEWER ProjectMembership in sai-corp; check as Alice: osac get projectmembership' }}
+          {{ 'ok' if _task12_ok else 'FAILED — ensure Bob has a VIEWER ProjectMembership in sai-corp; check as Alice: osac --config $HOME/alice get projectmembership' }}
           {{ '✅' if _task13_ok else '❌' }} Task 13: Bob cannot delete portal-vm — \
           {{ 'ok' if _task13_ok else 'FAILED — Bob was able to delete the VM; verify bob-viewer ProjectMembership role is VIEWER not ADMIN' }}
           {{ '✅' if _task14_ok else '❌' }} Task 14: Bob cannot create compute instances — \

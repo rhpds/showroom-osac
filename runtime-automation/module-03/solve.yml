@@ -26,7 +26,7 @@
 
     - name: Login as platform admin
       ansible.builtin.shell: >-
-        osac login --insecure
+        osac --config "$HOME/admin" login --insecure
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ osac_admin_user }}
@@ -36,7 +36,7 @@
 
     - name: Create or get storage backend (lvms)
       ansible.builtin.shell: |
-        OUTPUT=$(osac create storagebackend \
+        OUTPUT=$(osac --config "$HOME/admin" create storagebackend \
           --name local \
           --provider lvms \
           --endpoint n/a \
@@ -45,7 +45,7 @@
         if echo "${OUTPUT}" | grep -q "Created storage backend"; then
           echo "${OUTPUT}" | grep -o "'[^']*'" | tr -d "'"
         elif echo "${OUTPUT}" | grep -qi "already exists"; then
-          osac get storagebackend local -o json | jq -r '.id'
+          osac --config "$HOME/admin" get storagebackend local -o json | jq -r '.id'
         else
           echo "${OUTPUT}" >&2
           exit 1
@@ -60,7 +60,7 @@
 
     - name: Create storage tier for sai-corp tenant
       ansible.builtin.shell: >-
-        osac create storagetier
+        osac --config "$HOME/admin" create storagetier
         --name sai-corp
         --backend-id "{{ backend_id }}"
         --protocol BLOCK
@@ -102,19 +102,9 @@
     # Exercise 2: Publish VM building blocks to the catalog
     # =========================================================================
 
-    - name: Login as platform admin (idempotent refresh)
-      ansible.builtin.shell: >-
-        osac login --insecure
-        --issuer="{{ keycloak_url }}/realms/osac"
-        --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
-        {{ fulfillment_api_url }}
-      changed_when: false
-
     - name: Create Fedora disk image
       ansible.builtin.shell: >-
-        osac create diskimage
+        osac --config "$HOME/admin" create diskimage
         --name {{ disk_image_name }}
         --source-ref quay.io/containerdisks/fedora:latest
         --architecture amd64
@@ -126,7 +116,7 @@
 
     - name: Wait for disk image to reach AVAILABLE
       ansible.builtin.shell: >-
-        osac get diskimage {{ disk_image_name }} -o json | jq -r '.lifecycle'
+        osac --config "$HOME/admin" get diskimage {{ disk_image_name }} -o json | jq -r '.lifecycle'
       register: r_diskimage_status
       retries: 30
       delay: 10
@@ -135,7 +125,7 @@
 
     - name: Create instance type small-1-2 (1 vCPU, 2 GiB RAM)
       ansible.builtin.shell: >-
-        osac create instancetype
+        osac --config "$HOME/admin" create instancetype
         --name {{ instance_type_name }}
         --vcpus 1
         --memory-gib 2
@@ -148,7 +138,7 @@
 
     - name: Verify instance type is ACTIVE
       ansible.builtin.shell: >-
-        osac get instancetype {{ instance_type_name }} -o json | jq -r '.state'
+        osac --config "$HOME/admin" get instancetype {{ instance_type_name }} -o json | jq -r '.state'
       register: r_instancetype_status
       retries: 10
       delay: 3
@@ -172,7 +162,7 @@
 
     - name: Create catalog item from YAML file
       ansible.builtin.shell: >-
-        osac create -f ${HOME}/yaml/standard-linux-vm.yaml
+        osac --config "$HOME/admin" create -f ${HOME}/yaml/standard-linux-vm.yaml
       register: r_catalog_create
       changed_when: "'Created computeinstancecatalogitem' in r_catalog_create.stdout"
       failed_when:
@@ -181,7 +171,7 @@
 
     - name: Verify catalog item is published
       ansible.builtin.shell: >-
-        osac get computeinstancecatalogitem {{ catalog_item_name }} -o json | jq -r '.published'
+        osac --config "$HOME/admin" get computeinstancecatalogitem {{ catalog_item_name }} -o json | jq -r '.published'
       register: r_catalog_published
       retries: 10
       delay: 3
@@ -192,26 +182,22 @@
     # Exercise 3: Verify tenant networking as Alice
     # =========================================================================
 
-    - name: Logout admin session before Alice login
-      ansible.builtin.shell: osac logout
-      changed_when: true
-      ignore_errors: true
-
-    - name: Login as Alice via device flow
+    - name: Login as Alice via device flow (once)
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "alice" "{{ osac_user_password }}"
+        "$HOME/alice"
       changed_when: false
 
     - name: Verify Alice identity and tenant-admin role
-      ansible.builtin.shell: osac whoami
+      ansible.builtin.shell: osac --config "$HOME/alice" whoami
       register: r_alice_whoami
       changed_when: false
       failed_when: "'tenant-admin' not in r_alice_whoami.stdout"
 
     - name: Wait for virtual network to be READY
-      ansible.builtin.shell: osac get virtualnetwork
+      ansible.builtin.shell: osac --config "$HOME/alice" get virtualnetwork
       register: r_vnet
       retries: 20
       delay: 5
@@ -221,7 +207,7 @@
 
     - name: Wait for subnet default-ipv4 to be READY
       ansible.builtin.shell: >-
-        osac get subnet default-ipv4 -o json | jq -r '.state'
+        osac --config "$HOME/alice" get subnet default-ipv4 -o json | jq -r '.state'
       register: r_subnet_state
       retries: 20
       delay: 5
@@ -231,7 +217,7 @@
 
     - name: Wait for security group default to be READY
       ansible.builtin.shell: >-
-        osac get securitygroup default -o json | jq -r '.state'
+        osac --config "$HOME/alice" get securitygroup default -o json | jq -r '.state'
       register: r_sg_state
       retries: 20
       delay: 5
@@ -241,14 +227,14 @@
 
     - name: Capture subnet ID
       ansible.builtin.shell: >-
-        osac get subnet default-ipv4 -o json | jq -r '.id'
+        osac --config "$HOME/alice" get subnet default-ipv4 -o json | jq -r '.id'
       register: r_subnet_id
       changed_when: false
       failed_when: r_subnet_id.stdout | trim | length < 10
 
     - name: Capture security group ID
       ansible.builtin.shell: >-
-        osac get securitygroup default -o json | jq -r '.id'
+        osac --config "$HOME/alice" get securitygroup default -o json | jq -r '.id'
       register: r_sg_id
       changed_when: false
       failed_when: r_sg_id.stdout | trim | length < 10
@@ -264,7 +250,7 @@
 
     - name: Capture catalog item ID
       ansible.builtin.shell: >-
-        osac get computeinstancecatalogitem {{ catalog_item_name }} -o json | jq -r '.id'
+        osac --config "$HOME/alice" get computeinstancecatalogitem {{ catalog_item_name }} -o json | jq -r '.id'
       register: r_catalog_id
       changed_when: false
       failed_when: r_catalog_id.stdout | trim | length < 10
@@ -275,7 +261,7 @@
 
     - name: Create portal-vm compute instance
       ansible.builtin.shell: |
-        osac create computeinstance \
+        osac --config "$HOME/alice" create computeinstance \
           --name portal-vm \
           --catalog-item "{{ catalog_id }}" \
           --instance-type {{ instance_type_name }} \
@@ -429,7 +415,7 @@
 
     - name: Wait for portal-vm to reach RUNNING state (up to 15 min)
       ansible.builtin.shell: >-
-        osac get computeinstance portal-vm -o json | jq -r '.state'
+        osac --config "$HOME/alice" get computeinstance portal-vm -o json | jq -r '.state'
       register: r_vm_state
       retries: 30
       delay: 30
@@ -441,32 +427,28 @@
     # Exercise 5: Verify RBAC enforcement as Bob
     # =========================================================================
 
-    - name: Logout Alice session
-      ansible.builtin.shell: osac logout
-      changed_when: true
-      ignore_errors: true
-
-    - name: Login as Bob via device flow
+    - name: Login as Bob via device flow (once)
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "bob" "{{ osac_user_password }}"
+        "$HOME/bob"
       changed_when: false
 
     - name: Verify Bob identity (no tenant-admin)
-      ansible.builtin.shell: osac whoami
+      ansible.builtin.shell: osac --config "$HOME/bob" whoami
       register: r_bob_whoami
       changed_when: false
       failed_when: "'bob' not in r_bob_whoami.stdout"
 
     - name: Bob can list compute instances (viewer access)
-      ansible.builtin.shell: osac get computeinstance
+      ansible.builtin.shell: osac --config "$HOME/bob" get computeinstance
       register: r_bob_list
       changed_when: false
       failed_when: r_bob_list.rc != 0
 
     - name: Bob cannot delete portal-vm (RBAC enforcement check)
-      ansible.builtin.shell: osac delete computeinstance portal-vm
+      ansible.builtin.shell: osac --config "$HOME/bob" delete computeinstance portal-vm
       register: r_bob_delete
       changed_when: false
       failed_when: false
@@ -474,7 +456,7 @@
 
     - name: Bob cannot create a compute instance (RBAC enforcement check)
       ansible.builtin.shell: |
-        osac create computeinstance \
+        osac --config "$HOME/bob" create computeinstance \
           --name vm-not-allowed \
           --catalog-item "{{ catalog_id }}" \
           --instance-type {{ instance_type_name }} \
