@@ -19,8 +19,6 @@
     storage_class: ocs-external-storagecluster-ceph-rbd-virtualization
     ocp_release_image: quay.io/openshift-release-dev/ocp-release:4.22.0-multi
     disk_image_source_ref: oci://quay.io/rh_ee_rpiccoli/rhcos-bmi:4.22.0
-    config_admin: "{{ lookup('env', 'HOME') }}/.config/osac-admin"
-    config_tenant: "{{ lookup('env', 'HOME') }}/.config/osac-tenant"
     pull_secret_path: "{{ lookup('env', 'HOME') }}/pull-secret-cluster.json"
     # OSAC namespace patterns for hosted cluster components
     hc_components_ns: "osac-{{ cluster_name }}-{{ cluster_name }}"
@@ -133,7 +131,7 @@
 
     - name: Login as OSAC admin (private API, SA token)
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}" login --insecure --private
+        osac --config "$HOME/admin" login --insecure --private
         --address "{{ api_int }}"
         --token-script "oc --kubeconfig={{ k8s_kubeconfig }} create token -n {{ osac_ns }} admin"
       changed_when: false
@@ -680,7 +678,7 @@
 
     - name: Create BareMetalInstanceType c1-metal-amd64
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}"
+        osac --config "$HOME/admin"
         create baremetalinstancetype
         --name {{ bmit_name }}
         --cpu-cores 8
@@ -698,7 +696,7 @@
 
     - name: Create DiskImage rhcos-4-22 from registry source
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}"
+        osac --config "$HOME/admin"
         create diskimage
         --name {{ disk_image }}
         --source-type registry
@@ -713,7 +711,7 @@
 
     - name: Create ClusterVersion 4.22.0-rhcos
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}"
+        osac --config "$HOME/admin"
         create clusterversion
         --version {{ ocp_version }}
         --image {{ ocp_release_image }}
@@ -727,7 +725,7 @@
 
     - name: Create ClusterCatalogItem hosted-ci-small (published)
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}"
+        osac --config "$HOME/admin"
         create clustercatalogitem
         --name {{ catalog_item }}
         --title "Hosted CI small"
@@ -744,9 +742,8 @@
     # Exercise 5 — Tenant cluster order (Alice via device flow)
     # =========================================================================
 
-    - name: Alice login via inline device flow (writes to tenant config path)
-      # Inlined because device-login.sh does not support --config.
-      # osac --config is passed so alice's token is saved to config_tenant.
+    - name: Alice login via inline device flow (writes to $HOME/alice config)
+      # osac --config "$HOME/alice" so alice's token is saved separately from admin.
       ansible.builtin.shell: |
         set -euo pipefail
         COOKIE_JAR=$(mktemp); RESP_FILE=$(mktemp); HDR_FILE=$(mktemp); LOGIN_LOG=$(mktemp)
@@ -767,9 +764,7 @@
           [[ "${u}" == /* ]] && echo "{{ keycloak_url }}${u}" || echo "${u}"
         }
 
-        mkdir -p "{{ config_tenant }}"
-        osac --config "{{ config_tenant }}" logout 2>/dev/null || true
-        osac --config "{{ config_tenant }}" login --insecure \
+        osac --config "$HOME/alice" login --insecure \
           --address "{{ api_int }}" --flow device > "${LOGIN_LOG}" 2>&1 &
         OSAC_PID=$!
 
@@ -825,7 +820,7 @@
 
     - name: Create cluster pull-secret for Alice's tenant
       ansible.builtin.shell: >-
-        osac --config "{{ config_tenant }}"
+        osac --config "$HOME/alice"
         create secret --name cluster-pull-secret
         --type=pull-secret
         --from-file=.dockerconfigjson={{ pull_secret_path }}
@@ -838,7 +833,7 @@
 
     - name: Order tenant cluster student-cluster via osac CLI
       ansible.builtin.shell: >-
-        osac --config "{{ config_tenant }}"
+        osac --config "$HOME/alice"
         create cluster
         --name {{ cluster_name }}
         --catalog-item {{ catalog_item }}

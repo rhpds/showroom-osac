@@ -14,7 +14,6 @@
     ocp_version: 4.22.0-rhcos
     catalog_item: hosted-ci-small
     tenant_cluster_ns: "osac-{{ cluster_name }}"
-    config_admin: "{{ lookup('env', 'HOME') }}/.config/osac-admin"
   tasks:
 
     # -------------------------------------------------------
@@ -41,7 +40,7 @@
     - name: Login as OSAC admin (private API, SA token)
       when: api_int is defined
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}" login --insecure --private
+        osac --config "$HOME/admin" login --insecure --private
         --address "{{ api_int }}"
         --token-script "oc --kubeconfig={{ k8s_kubeconfig }} create token -n {{ osac_ns }} admin"
       changed_when: false
@@ -179,7 +178,7 @@
     # -------------------------------------------------------
     - name: Get BareMetalInstanceType c1-metal-amd64 via osac CLI
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}"
+        osac --config "$HOME/admin"
         get baremetalinstancetype {{ bmit_name }}
       register: r_bmit
       changed_when: false
@@ -190,7 +189,7 @@
     # -------------------------------------------------------
     - name: Get DiskImage rhcos-4-22 via osac CLI
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}"
+        osac --config "$HOME/admin"
         get diskimage {{ disk_image }}
       register: r_diskimage
       changed_when: false
@@ -201,7 +200,7 @@
     # -------------------------------------------------------
     - name: Get ClusterVersion 4.22.0-rhcos via osac CLI
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}"
+        osac --config "$HOME/admin"
         get clusterversion {{ ocp_version }}
       register: r_clusterversion
       changed_when: false
@@ -212,7 +211,7 @@
     # -------------------------------------------------------
     - name: Get ClusterCatalogItem hosted-ci-small via osac CLI
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}"
+        osac --config "$HOME/admin"
         get clustercatalogitem {{ catalog_item }}
       register: r_catalogitem
       changed_when: false
