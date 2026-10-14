@@ -1,8 +1,20 @@
 ---
 # Module 2: Managing Tenants — validate playbook
-- name: Module 02 - Tenant Onboarding and Identity Management Validation
+- name: Register bastion in inventory
   hosts: localhost
-  connection: local
+  gather_facts: false
+  tasks:
+    - name: Add bastion host
+      ansible.builtin.add_host:
+        name: bastion
+        ansible_host: "{{ bastion_public_hostname }}"
+        ansible_port: "{{ bastion_ssh_port }}"
+        ansible_user: "{{ bastion_ssh_user_name }}"
+        ansible_password: "{{ bastion_ssh_password }}"
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+
+- name: Module 02 - Tenant Onboarding and Identity Management Validation
+  hosts: bastion
   gather_facts: false
   vars:
     student_user: "{{ user | default('') }}"
@@ -15,13 +27,21 @@
     keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
     fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
     break_glass_user: "{{ tenant_name }}-osac-break-glass"
-    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
-    config_admin: "{{ ansible_env.HOME }}/admin"
-    config_breakglass: "{{ ansible_env.HOME }}/breakglass"
-    config_alice: "{{ ansible_env.HOME }}/alice"
-    config_bob: "{{ ansible_env.HOME }}/bob"
+    device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+    device_login_script: "/home/{{ bastion_ssh_user_name }}/osac-device-login.sh"
+    config_admin: "/home/{{ bastion_ssh_user_name }}/admin"
+    config_breakglass: "/home/{{ bastion_ssh_user_name }}/breakglass"
+    config_alice: "/home/{{ bastion_ssh_user_name }}/alice"
+    config_bob: "/home/{{ bastion_ssh_user_name }}/bob"
 
   tasks:
+
+    - name: Copy device login script to bastion
+      ansible.builtin.copy:
+        src: "{{ device_login_script_src }}"
+        dest: "{{ device_login_script }}"
+        mode: '0755'
+      changed_when: false
 
     # -------------------------------------------------------
     # Pre-flight — Keycloak admin token for all KC API checks
@@ -49,12 +69,10 @@
     # Check 1 — sai-corp namespace exists and is Active
     # -------------------------------------------------------
     - name: Check sai-corp namespace is Active
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
-        api_version: v1
-        kind: Namespace
-        name: "{{ tenant_name }}"
+      ansible.builtin.shell: >-
+        oc get namespace {{ tenant_name }} -o jsonpath='{.status.phase}'
       register: r_ns
+      changed_when: false
       ignore_errors: true
 
     # -------------------------------------------------------
@@ -261,8 +279,7 @@
     - name: Build task results
       ansible.builtin.set_fact:
         _task1_ok: >-
-          {{ r_ns.resources | default([]) |
-             selectattr('status.phase', 'equalto', 'Active') | list | length > 0 }}
+          {{ r_ns.rc | default(1) == 0 and 'Active' in (r_ns.stdout | default('')) }}
         _task2_ok: >-
           {{ not (r_realm.failed | default(true)) and
              (r_realm.json.enabled | default(false)) | bool }}
