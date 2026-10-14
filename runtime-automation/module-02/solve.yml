@@ -17,10 +17,10 @@
     fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
     break_glass_user: "{{ tenant_name }}-osac-break-glass"
     device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
-    config_admin: "{{ ansible_env.HOME }}/admin"
-    config_breakglass: "{{ ansible_env.HOME }}/breakglass"
-    config_alice: "{{ ansible_env.HOME }}/alice"
-    config_bob: "{{ ansible_env.HOME }}/bob"
+    config_admin: "{{ lookup('env', 'HOME') }}/admin"
+    config_breakglass: "{{ lookup('env', 'HOME') }}/breakglass"
+    config_alice: "{{ lookup('env', 'HOME') }}/alice"
+    config_bob: "{{ lookup('env', 'HOME') }}/bob"
 
   tasks:
     # =========================================================================
