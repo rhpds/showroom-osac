@@ -452,6 +452,14 @@
       until: r_rb_ready.rc == 0
       changed_when: false
 
+    - name: Re-login Alice to refresh token with new role
+      ansible.builtin.shell: >-
+        {{ device_login_script }}
+        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
+        "{{ tenant_admin }}" "{{ osac_user_password }}"
+        "{{ config_alice }}"
+      changed_when: false
+
     - name: Verify Alice has tenant-admin role
       ansible.builtin.shell: osac --config "{{ config_alice }}" whoami
       register: r_alice_whoami
