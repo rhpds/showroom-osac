@@ -2,16 +2,29 @@
 # Module 3: Virtual Machine as a Service — solve playbook
 # Automates all exercises: storage config, catalog publishing, networking
 # verification, VM deployment with DataVolume fix, and RBAC verification.
-- name: Module 03 - Virtual Machine as a Service Solve
+- name: Register bastion in inventory
   hosts: localhost
-  connection: local
+  gather_facts: false
+  tasks:
+    - name: Add bastion host
+      ansible.builtin.add_host:
+        name: bastion
+        ansible_host: "{{ bastion_public_hostname }}"
+        ansible_port: "{{ bastion_ssh_port }}"
+        ansible_user: "{{ bastion_ssh_user_name }}"
+        ansible_password: "{{ bastion_ssh_password }}"
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+
+- name: Module 03 - Virtual Machine as a Service Solve
+  hosts: bastion
   gather_facts: false
   vars:
     osac_namespace: osac
     tenant_name: sai-corp
     keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
     fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
-    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+    device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+    device_login_script: "/home/{{ bastion_ssh_user_name }}/osac-device-login.sh"
     storage_class_name: lvms-vg1
     disk_image_name: fedora
     instance_type_name: small-1-2
@@ -19,6 +32,13 @@
     fedora_registry_url: docker://quay.io/containerdisks/fedora:latest
 
   tasks:
+
+    - name: Copy device login script to bastion
+      ansible.builtin.copy:
+        src: "{{ device_login_script_src }}"
+        dest: "{{ device_login_script }}"
+        mode: '0755'
+      changed_when: false
 
     # =========================================================================
     # Exercise 1: Configure storage for tenant workloads
@@ -71,25 +91,17 @@
         - "'already exists' not in r_storagetier.stderr"
 
     - name: Label lvms-vg1 storage class for sai-corp tenant
-      kubernetes.core.k8s:
-        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
-        validate_certs: false
-        state: patched
-        api_version: storage.k8s.io/v1
-        kind: StorageClass
-        name: "{{ storage_class_name }}"
-        definition:
-          metadata:
-            labels:
-              osac.openshift.io/tenant: sai-corp
-              osac.openshift.io/storage-tier: local
+      ansible.builtin.shell: >-
+        oc label sc {{ storage_class_name }}
+        osac.openshift.io/tenant=sai-corp
+        osac.openshift.io/storage-tier=local
+        --overwrite
+      changed_when: true
 
     - name: Wait for tenant sai-corp to show Ready with local storage tier
       ansible.builtin.shell: |
         oc get tenant sai-corp -n {{ osac_namespace }} \
           -o jsonpath='{.status.phase} {.status.storageClasses}{"\n"}'
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
       register: r_tenant_status
       retries: 20
       delay: 5
@@ -292,8 +304,6 @@
         fi
         echo "VM_NS=${VM_NS}"
         echo "VM_NAME=${VM_NAME}"
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
       register: r_vm_discovery
       retries: 12
       delay: 10
@@ -308,8 +318,6 @@
     - name: Discover DataVolume name
       ansible.builtin.shell: >-
         oc get dv -n "{{ vm_ns }}" --no-headers 2>/dev/null | awk '{print $1}' | head -1
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
       register: r_dv_name
       retries: 10
       delay: 5
@@ -323,76 +331,56 @@
     # DataVolume fix: CDI cannot pull from quay.io inside pod network.
     # ALWAYS run this sequence — do not make it conditional.
     - name: DataVolume fix — halt VM
-      kubernetes.core.k8s:
-        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
-        validate_certs: false
-        state: patched
-        api_version: kubevirt.io/v1
-        kind: VirtualMachine
-        name: "{{ vm_name }}"
-        namespace: "{{ vm_ns }}"
-        definition:
-          spec:
-            runStrategy: Halted
+      ansible.builtin.shell: >-
+        oc patch vm "{{ vm_name }}" -n "{{ vm_ns }}" --type=merge
+        -p '{"spec":{"runStrategy":"Halted"}}'
+      changed_when: true
 
     - name: DataVolume fix — brief pause for VMI teardown
       ansible.builtin.pause:
         seconds: 5
 
     - name: DataVolume fix — delete stuck DataVolume
-      kubernetes.core.k8s:
-        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
-        validate_certs: false
-        state: absent
-        api_version: cdi.kubevirt.io/v1beta1
-        kind: DataVolume
-        name: "{{ dv_name }}"
-        namespace: "{{ vm_ns }}"
-        wait: true
-        wait_timeout: 180
+      ansible.builtin.shell: >-
+        oc delete dv "{{ dv_name }}" -n "{{ vm_ns }}" --wait=true --timeout=180s
+      changed_when: true
 
     - name: DataVolume fix — delete prime-* PVCs
       ansible.builtin.shell: |
         oc get pvc -n "{{ vm_ns }}" --no-headers 2>/dev/null \
           | awk '/prime-/{print $1}' \
           | xargs -r -n1 oc delete pvc -n "{{ vm_ns }}" --wait=false
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
       changed_when: true
       ignore_errors: true
 
     - name: DataVolume fix — create new DataVolume with pullMethod node
-      kubernetes.core.k8s:
-        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
-        validate_certs: false
-        state: present
-        definition:
-          apiVersion: cdi.kubevirt.io/v1beta1
-          kind: DataVolume
-          metadata:
-            name: "{{ dv_name }}"
-            namespace: "{{ vm_ns }}"
-            annotations:
-              cdi.kubevirt.io/storage.bind.immediate.requested: "true"
-          spec:
-            source:
-              registry:
-                url: "{{ fedora_registry_url }}"
-                pullMethod: node
-            pvc:
-              accessModes:
-                - ReadWriteOnce
-              resources:
-                requests:
-                  storage: 10Gi
-              storageClassName: "{{ storage_class_name }}"
+      ansible.builtin.shell: |
+        cat <<EOF | oc apply -f -
+        apiVersion: cdi.kubevirt.io/v1beta1
+        kind: DataVolume
+        metadata:
+          name: {{ dv_name }}
+          namespace: {{ vm_ns }}
+          annotations:
+            cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+        spec:
+          source:
+            registry:
+              url: "{{ fedora_registry_url }}"
+              pullMethod: node
+          pvc:
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 10Gi
+            storageClassName: "{{ storage_class_name }}"
+        EOF
+      changed_when: true
 
     - name: Wait for DataVolume to reach Succeeded (up to 15 min)
       ansible.builtin.shell: >-
         oc get dv "{{ dv_name }}" -n "{{ vm_ns }}"
         -o jsonpath='{.status.phase}'
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
       register: r_dv_phase
       retries: 30
       delay: 30
@@ -401,17 +389,10 @@
       ignore_errors: true
 
     - name: Patch VM back to runStrategy Always
-      kubernetes.core.k8s:
-        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
-        validate_certs: false
-        state: patched
-        api_version: kubevirt.io/v1
-        kind: VirtualMachine
-        name: "{{ vm_name }}"
-        namespace: "{{ vm_ns }}"
-        definition:
-          spec:
-            runStrategy: Always
+      ansible.builtin.shell: >-
+        oc patch vm "{{ vm_name }}" -n "{{ vm_ns }}" --type=merge
+        -p '{"spec":{"runStrategy":"Always"}}'
+      changed_when: true
 
     - name: Wait for portal-vm to reach RUNNING state (up to 15 min)
       ansible.builtin.shell: >-
