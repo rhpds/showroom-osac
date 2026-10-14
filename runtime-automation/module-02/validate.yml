@@ -356,3 +356,14 @@
           {{ '✅' if _task10_ok else '❌' }} Task 10: Project default ACTIVE — {{ 'ok' if _task10_ok else 'FAILED — create the default project in sai-corp as alice (Exercise 4)' }}
           {{ '✅' if _task11_ok else '❌' }} Task 11: ProjectMembership bob-viewer — {{ 'ok' if _task11_ok else 'FAILED — create the bob-viewer ProjectMembership with VIEWER role as alice (Exercise 4)' }}
           {{ '✅' if _task12_ok else '❌' }} Task 12: RBAC enforcement for bob — {{ 'ok' if _task12_ok else 'FAILED — bob should receive PermissionDenied; verify bob-viewer membership role is VIEWER not ADMIN' }}
+      register: r_validate
+      ignore_errors: true
+
+    - name: Show validation results
+      ansible.builtin.debug:
+        msg: "{{ r_validate.msg }}"
+
+    - name: Fail if validation did not pass
+      ansible.builtin.fail:
+        msg: "One or more validation checks failed — see results above"
+      when: r_validate.failed | default(false)
