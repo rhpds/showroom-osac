@@ -145,7 +145,7 @@
       p.replaceWith(wrap);
     });
     document.querySelectorAll('.validate-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () { runStream('validate', this.getAttribute('data-module'), this.closest('.btn-section')); });
+      btn.addEventListener('click', function () { runStream('validation', this.getAttribute('data-module'), this.closest('.btn-section')); });
     });
   }
 
@@ -188,7 +188,7 @@
     var currentTask = null;
     var pendingLi   = null;
 
-    var es = new EventSource('/stream/' + stage + '/' + moduleName);
+    var es = new EventSource('/stream/' + moduleName + '/' + stage);
 
     es.onmessage = function (event) {
       if (event.data === '__DONE__') {

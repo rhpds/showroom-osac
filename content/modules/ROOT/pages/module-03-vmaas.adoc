@@ -27,24 +27,12 @@ In this exercise, you create the storage backend and tier as the platform admini
 
 === Steps
 
-////
-. Log in to the Red Hat cloud extensions platform as the *platform administrator*:
-+
-[source,role=execute,subs=attributes]
-----
-osac login --insecure \
-  --issuer="{osac_keycloak_url}/realms/osac" \
-  --flow=password \
-  --user={osac_admin_user} \
-  --password={osac_admin_password} \
-  {osac_fulfillment_internal_api_url}
-----
-////
-. Create a storage backend using the LVMS provider and capture its UUID:
+. As the platform administrator create a storage backend using the LVMS provider and capture its UUID:
 +
 [source,role=execute]
 ----
-BACKEND_OUTPUT=$(osac --config $HOME/admin create storagebackend \
+BACKEND_OUTPUT=$(osac --config $HOME/admin \
+  create storagebackend \
   --name local \
   --provider lvms \
   --endpoint n/a \
@@ -66,7 +54,8 @@ BACKEND_ID=01a0ced0-a5fe-793b-9f6e-061d5f7d16fd
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin create storagetier \
+osac --config $HOME/admin \
+  create storagetier \
   --name sai-corp \
   --backend-id "${BACKEND_ID}" \
   --protocol BLOCK
@@ -121,24 +110,12 @@ A tenant cannot deploy a virtual machine without three platform-level resources:
 
 === Steps
 
-////
-. Ensure you are still logged in as the platform administrator. If not, log in again:
-+
-[source,role=execute,subs=attributes]
-----
-osac login --insecure \
-  --issuer="{osac_keycloak_url}/realms/osac" \
-  --flow=password \
-  --user={osac_admin_user} \
-  --password={osac_admin_password} \
-  {osac_fulfillment_internal_api_url}
-----
-////
-. Create a Fedora disk image from the public container disk registry:
+. As the platform administrator, create a Fedora disk image from the public container disk registry:
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin create diskimage \
+osac --config $HOME/admin \
+  create diskimage \
   --name fedora \
   --source-ref quay.io/containerdisks/fedora:latest \
   --architecture amd64
@@ -173,7 +150,8 @@ osac --config $HOME/admin \
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin get instancetype
+osac --config $HOME/admin \
+  get instancetype
 ----
 +
 .Sample output
@@ -187,6 +165,7 @@ small-1-2  -         1      2       0     -         ACTIVE  Small - 1 vCPU, 2 Gi
 [source,role=execute]
 ----
 cat > ${HOME}/yaml/standard-linux-vm.yaml <<'EOF'
+---
 "@type": type.googleapis.com/osac.public.v1.ComputeInstanceCatalogItem
 metadata:
   name: standard-linux-vm
@@ -202,7 +181,8 @@ EOF
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin create -f ${HOME}/yaml/standard-linux-vm.yaml
+osac --config $HOME/admin \
+  create -f ${HOME}/yaml/standard-linux-vm.yaml
 ----
 +
 .Sample output
@@ -214,7 +194,8 @@ Created computeinstancecatalogitem name 'standard-linux-vm' and identifier '01a0
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin get computeinstancecatalogitem
+osac --config $HOME/admin \
+  get computeinstancecatalogitem
 ----
 +
 .Sample output
@@ -231,56 +212,39 @@ When a tenant is created, Red Hat cloud extensions automatically provisions a de
 
 === Steps
 
-////
-. Log out the platform administrator session:
-+
-[source,role=execute]
-----
-osac logout
-----
-
-. Log in as *Alice* via the device flow:
-+
-[source,role=execute,subs=attributes]
-----
-osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
-----
-+
-Complete the login in a *fresh incognito* window:
-+
-.. Copy the URL displayed in the terminal
-.. Open a new *incognito/private* browser window
-.. Paste the URL and press Enter
-.. Enter the code that the `osac login` command printed
-.. On the login page, enter `alice`, then click *Sign In*
-.. Enter username `alice` and password `{osac_user_password}`, then click *Sign In*
-.. Return to the terminal — you should see `Authentication succeeded`
-+
-IMPORTANT: Always use a fresh incognito window for each device flow login. A cached browser session may use the wrong identity.
-////
-. Confirm Alice's identity and tenant-admin role:
-+
-[source,role=execute]
-----
-osac --config $HOME/alice whoami
-----
-+
-.Sample output
-----
-Logged in as: alice
-Tenant: sai-corp
-Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
-----
-+
-If `tenant-admin` does not appear in the roles, return to Module 2 Exercise 4 and complete the RoleBinding.
-
-. Verify the auto-provisioned networking resources are ready:
+. As Alice (the tenant administrator), verify the auto-provisioned networking resources are ready:
 +
 [source,role=execute]
 ----
 osac --config $HOME/alice get virtualnetwork
+----
++
+.Sample output
+----
+TENANT    DELETING  PROJECT  ID                                    NAME     IPV4-CIDR      IPV6-CIDR  STATE
+sai-corp  -         -        01a13050-6fdd-7ca0-aabb-b9fddb3e961e  default  10.200.0.0/16  -          READY
+----
++
+[source,role=execute]
+----
 osac --config $HOME/alice get subnet
+----
++
+.Sample output
+----
+TENANT    DELETING  PROJECT  ID                                    NAME          VIRTUAL-NETWORK  IPV4-CIDR      IPV6-CIDR  STATE
+sai-corp  -         -        01a13050-e83c-7cdc-87e1-00e7768517e5  default-ipv4  default          10.200.0.0/20  -          READY
+----
++
+[source,role=execute]
+----
 osac --config $HOME/alice get securitygroup
+----
++
+.Sample output
+----
+TENANT    DELETING  PROJECT  ID                                    NAME     VIRTUAL-NETWORK  INGRESS-RULES  EGRESS-RULES  STATE
+sai-corp  -         -        01a13050-e852-7063-930b-92257b008611  default  default          0              1             READY
 ----
 +
 All three resources should show `READY` status. The typical default CIDR is `10.200.0.0/16` for the virtual network and `10.200.0.0/20` for the subnet.
@@ -322,7 +286,7 @@ osac --config $HOME/alice create computeinstance \
   --instance-type small-1-2 \
   --disk-image fedora \
   --boot-disk-size 10 \
-  --boot-disk-storage-tier local \
+  --boot-disk-storage-tier sai-corp \
   --run-strategy Always \
   --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}" \
   --user-data '#cloud-config
@@ -344,8 +308,8 @@ Created compute instance '01a0d377-5991-7e0e-8b3a-5135683208ec'.
 +
 [source,role=execute]
 ----
-VM_NS=$(oc get vm -A --no-headers | grep -v NAME | head -1 | awk '{print $1}')
-VM_NAME=$(oc get vm -A --no-headers | grep -v NAME | head -1 | awk '{print $2}')
+VM_NS=$(oc get vm -A --no-headers | grep -v NAME | grep subnet | awk '{print $1}')
+VM_NAME=$(oc get vm -A --no-headers | grep -v NAME | grep subnet | awk '{print $2}')
 DV_NAME=$(oc get dv -n "${VM_NS}" --no-headers | awk '{print $1}')
 
 echo "VM_NS=${VM_NS}"
@@ -373,6 +337,7 @@ oc get pvc -n "${VM_NS}" --no-headers | awk '/prime-/{print $1}' \
   | xargs -r -n1 oc delete pvc -n "${VM_NS}" --wait=false
 
 cat <<EOF | oc apply -f -
+---
 apiVersion: cdi.kubevirt.io/v1beta1
 kind: DataVolume
 metadata:
@@ -415,7 +380,8 @@ oc patch vm "${VM_NAME}" -n "${VM_NS}" --type=merge \
 +
 [source,role=execute]
 ----
-osac --config $HOME/alice get computeinstance
+osac --config $HOME/alice \
+  get computeinstance
 ----
 +
 .Sample output
@@ -439,7 +405,8 @@ The `VirtualMachine` and `VirtualMachineInstance` objects should show `Running`.
 +
 [source,role=execute]
 ----
-osac --config $HOME/alice console serial computeinstance portal-vm
+osac --config $HOME/alice \
+  console serial computeinstance portal-vm
 ----
 +
 Log in with username `fedora-admin` and password `{osac_user_password}`.
@@ -471,26 +438,7 @@ RBAC enforcement extends beyond tenant management to workloads. In this exercise
 
 === Steps
 
-////
-. Log out Alice's session:
-+
-[source,role=execute]
-----
-osac logout
-----
-
-. Log in as *Bob* via the device flow:
-+
-[source,role=execute,subs=attributes]
-----
-osac login --insecure --address {osac_fulfillment_internal_api_url} --flow device
-----
-+
-Complete the login in a *fresh incognito* window. Enter `bob` / `{osac_user_password}`.
-+
-IMPORTANT: Always use a fresh incognito window. A cached browser session may use the wrong identity.
-////
-. Confirm Bob's identity — note that `tenant-admin` does not appear in the roles:
+. Remind yourself of Bob's identity — note that `tenant-admin` does not appear in the roles:
 +
 [source,role=execute]
 ----
@@ -508,7 +456,8 @@ Roles: offline_access, uma_authorization, default-roles-my realm
 +
 [source,role=execute]
 ----
-osac --config $HOME/bob get computeinstance
+osac --config $HOME/bob \
+  get computeinstance
 ----
 +
 .Sample output
@@ -523,7 +472,8 @@ Bob can see Alice's VM — viewer access includes read permissions on compute in
 +
 [source,role=execute]
 ----
-osac --config $HOME/bob delete computeinstance portal-vm
+osac --config $HOME/bob \
+  delete computeinstance portal-vm
 ----
 +
 .Sample output
@@ -537,13 +487,14 @@ The `PermissionDenied` error confirms that RBAC is enforced: a viewer can list w
 +
 [source,role=execute]
 ----
-osac --config $HOME/bob create computeinstance \
+osac --config $HOME/bob \
+  create computeinstance \
   --name vm-not-allowed \
   --catalog-item "${CATALOG_ID}" \
   --instance-type small-1-2 \
   --disk-image fedora \
   --boot-disk-size 10 \
-  --boot-disk-storage-tier local \
+  --boot-disk-storage-tier sai-corp \
   --run-strategy Always \
   --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}" \
   --user-data '#cloud-config
