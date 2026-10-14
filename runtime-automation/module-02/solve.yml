@@ -500,8 +500,15 @@
 
     # =========================================================================
     # Exercise 5: Verify RBAC enforcement
-    # Bob is already logged in from Exercise 3 — no re-login needed.
     # =========================================================================
+
+    - name: Re-login Bob to refresh token with project membership
+      ansible.builtin.shell: >-
+        {{ device_login_script }}
+        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
+        "{{ tenant_user }}" "{{ osac_user_password }}"
+        "{{ config_bob }}"
+      changed_when: false
 
     - name: Verify Bob identity
       ansible.builtin.shell: osac --config "{{ config_bob }}" whoami
