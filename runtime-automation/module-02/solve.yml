@@ -48,17 +48,12 @@
         mode: '0755'
       changed_when: false
 
-    - name: Set shell variables
-      ansible.builtin.shell: |
-        cat << EOF >> ${HOME}/.bashrc
-        export TENANT={{ tenant_name }}
-        export TENANT_ADMIN={{ tenant_admin }}
-        export TENANT_USER={{ tenant_user }}
-        export REALM=osac
-        EOF
-        source ${HOME}/.bashrc
-        mkdir -p ${HOME}/yaml
-      changed_when: true
+    - name: Create yaml working directory
+      ansible.builtin.file:
+        path: "/home/{{ bastion_ssh_user_name }}/yaml"
+        state: directory
+        mode: '0755'
+      changed_when: false
 
     - name: Login as platform admin (public API)
       ansible.builtin.shell: >-
@@ -208,18 +203,6 @@
         - { username: bob, first: Bob }
       register: r_user_create
       changed_when: r_user_create.status == 201
-
-    - name: Save OIDC env vars
-      ansible.builtin.shell: |
-        cat << EOF >> ${HOME}/.bashrc
-        export OIDC_CLIENT_ID='{{ idp_client_id }}'
-        export OIDC_CLIENT_SECRET='{{ idp_client_secret }}'
-        export OIDC_ISSUER='{{ keycloak_url }}/realms/{{ idp_realm }}'
-        export OIDC_TOKEN_URL='{{ keycloak_url }}/realms/{{ idp_realm }}/protocol/openid-connect/token'
-        export OIDC_AUTHORIZATION_URL='{{ keycloak_url }}/realms/{{ idp_realm }}/protocol/openid-connect/auth'
-        EOF
-        source ${HOME}/.bashrc
-      changed_when: true
 
     - name: Set break-glass password as non-temporary via KC admin API
       block:
@@ -489,14 +472,6 @@
       failed_when:
         - r_proj.rc != 0
         - "'already exists' not in r_proj.stderr"
-
-    - name: Save project ID
-      ansible.builtin.shell: |
-        PROJ_ID=$(osac --config "{{ config_alice }}" get project default -o json | jq -r .id)
-        echo "PROJ_ID=${PROJ_ID}" >> ${HOME}/.bashrc
-        echo "${PROJ_ID}"
-      register: r_proj_id
-      changed_when: false
 
     - name: Create ProjectMembership for Bob as viewer
       ansible.builtin.shell: |
