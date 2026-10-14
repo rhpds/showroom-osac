@@ -2,8 +2,21 @@
 # Module 2: Managing Tenants — solve playbook
 # Automates all exercises: tenant creation, IdP setup, user onboarding,
 # role assignment, project creation, and RBAC verification.
-- name: Module 02 - Tenant Onboarding and Identity Management
+- name: Register bastion in inventory
   hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Add bastion host
+      ansible.builtin.add_host:
+        name: bastion
+        ansible_host: "{{ bastion_public_hostname }}"
+        ansible_port: "{{ bastion_ssh_port }}"
+        ansible_user: "{{ bastion_ssh_user_name }}"
+        ansible_password: "{{ bastion_ssh_password }}"
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+
+- name: Module 02 - Tenant Onboarding and Identity Management
+  hosts: bastion
   gather_facts: false
   vars:
     osac_namespace: osac
@@ -16,16 +29,24 @@
     keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
     fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
     break_glass_user: "{{ tenant_name }}-osac-break-glass"
-    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
-    config_admin: "{{ lookup('env', 'HOME') }}/admin"
-    config_breakglass: "{{ lookup('env', 'HOME') }}/breakglass"
-    config_alice: "{{ lookup('env', 'HOME') }}/alice"
-    config_bob: "{{ lookup('env', 'HOME') }}/bob"
+    device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+    device_login_script: "/home/{{ bastion_ssh_user_name }}/osac-device-login.sh"
+    config_admin: "/home/{{ bastion_ssh_user_name }}/admin"
+    config_breakglass: "/home/{{ bastion_ssh_user_name }}/breakglass"
+    config_alice: "/home/{{ bastion_ssh_user_name }}/alice"
+    config_bob: "/home/{{ bastion_ssh_user_name }}/bob"
 
   tasks:
     # =========================================================================
     # Exercise 1: Create a tenant and verify onboarding
     # =========================================================================
+
+    - name: Copy device login script to bastion
+      ansible.builtin.copy:
+        src: "{{ device_login_script_src }}"
+        dest: "{{ device_login_script }}"
+        mode: '0755'
+      changed_when: false
 
     - name: Set shell variables
       ansible.builtin.shell: |
@@ -114,15 +135,12 @@
       failed_when: r_kc_org.json | length == 0
 
     - name: Verify tenant namespace exists
-      kubernetes.core.k8s_info:
-        api_version: v1
-        kind: Namespace
-        name: "{{ tenant_name }}"
+      ansible.builtin.shell: oc get namespace {{ tenant_name }}
       register: r_ns
       retries: 20
       delay: 6
-      until: r_ns.resources | length > 0
-      failed_when: r_ns.resources | length == 0
+      until: r_ns.rc == 0
+      changed_when: false
 
     # =========================================================================
     # Exercise 2: Set up a corporate identity provider
