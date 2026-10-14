@@ -303,6 +303,26 @@
       until: r_idp_ready.rc == 0
       changed_when: false
 
+    - name: Refresh KC token before IdP enable check
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          client_id: admin-cli
+          username: "{{ osac_keycloak_admin_user }}"
+          password: "{{ osac_keycloak_admin_password }}"
+        validate_certs: false
+        status_code: 200
+      register: r_kc_token_refresh
+      changed_when: false
+
+    - name: Update KC token fact
+      ansible.builtin.set_fact:
+        kc_token: "{{ r_kc_token_refresh.json.access_token }}"
+      changed_when: false
+
     - name: Get realm-level KC IdP for sai-corp
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/osac/identity-provider/instances/{{ tenant_name }}-{{ tenant_name }}"
