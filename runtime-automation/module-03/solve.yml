@@ -62,17 +62,9 @@
           --endpoint n/a \
           --username n/a \
           --password n/a 2>&1)
-        if echo "${OUTPUT}" | grep -q "Created storage backend"; then
-          # Success: extract UUID from single-quoted item in "Created storage backend '...'."
-          echo "${OUTPUT}" | grep -o "'[^']*'" | grep -oE '[0-9a-f-]{36}' | head -1
-        else
-          # Already exists or error — show raw output for debugging
-          echo "${OUTPUT}" >&2
-          # Try to get ID from listing (grep for local line, extract UUID)
-          osac --config "$HOME/admin" get storagebackend 2>&1 \
-            | grep -i 'local' \
-            | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1
-        fi
+        # Extract UUID from single-quoted content in output (works for both
+        # "Created storage backend '...'" and "already exists with identifier '...'" messages)
+        echo "${OUTPUT}" | grep -o "'[^']*'" | grep -oE '[0-9a-f-]{36}' | head -1
       register: r_backend_id
       changed_when: false
       failed_when: r_backend_id.stdout | trim | length < 10
