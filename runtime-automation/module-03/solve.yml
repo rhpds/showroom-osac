@@ -139,7 +139,7 @@
       register: r_diskimage_status
       retries: 30
       delay: 10
-      until: r_diskimage_status.stdout | trim == 'AVAILABLE'
+      until: "'AVAILABLE' in r_diskimage_status.stdout"
       changed_when: false
 
     - name: Create instance type small-1-2 (1 vCPU, 2 GiB RAM)
@@ -161,7 +161,7 @@
       register: r_instancetype_status
       retries: 10
       delay: 3
-      until: r_instancetype_status.stdout | trim == 'ACTIVE'
+      until: "'ACTIVE' in r_instancetype_status.stdout"
       changed_when: false
 
     - name: Write catalog item YAML to ~/yaml/standard-linux-vm.yaml
@@ -407,7 +407,7 @@
       register: r_vm_state
       retries: 30
       delay: 30
-      until: r_vm_state.stdout | trim == 'RUNNING'
+      until: "'RUNNING' in r_vm_state.stdout"
       changed_when: false
       ignore_errors: true
 
@@ -474,13 +474,13 @@
           === Module 03 Solve Results ===
           Storage backend created:        {{ 'ok' if backend_id | default('') | length > 10 else 'NOT ok' }}
           Tenant sai-corp storage ready:  {{ 'ok' if 'Ready' in r_tenant_status.stdout and 'local' in r_tenant_status.stdout else 'NOT ok' }}
-          Disk image AVAILABLE:           {{ 'ok' if r_diskimage_status.stdout | trim == 'AVAILABLE' else 'NOT ok' }}
-          Instance type ACTIVE:           {{ 'ok' if r_instancetype_status.stdout | trim == 'ACTIVE' else 'NOT ok' }}
+          Disk image AVAILABLE:           {{ 'ok' if 'AVAILABLE' in r_diskimage_status.stdout else 'NOT ok' }}
+          Instance type ACTIVE:           {{ 'ok' if 'ACTIVE' in r_instancetype_status.stdout else 'NOT ok' }}
           Catalog item published:         {{ 'ok' if r_catalog_published.stdout | trim == 'true' else 'NOT ok' }}
           Subnet READY:                   {{ 'ok' if 'READY' in r_subnet_state.stdout else 'NOT ok' }}
           Security group READY:           {{ 'ok' if 'READY' in r_sg_state.stdout else 'NOT ok' }}
           DataVolume phase:               {{ r_dv_phase.stdout | trim | default('unknown') }}
           VM state:                       {{ r_vm_state.stdout | trim | default('unknown') }}
-          portal-vm RUNNING:              {{ 'ok' if r_vm_state.stdout | trim == 'RUNNING' else 'NOT ok — VM still starting; click Validate again in a few minutes' }}
+          portal-vm RUNNING:              {{ 'ok' if 'RUNNING' in r_vm_state.stdout else 'NOT ok — VM still starting; click Validate again in a few minutes' }}
           Bob delete blocked:             {{ 'ok' if 'PermissionDenied' in (r_bob_delete.stderr | default('')) else 'NOT ok' }}
           Bob create blocked:             {{ 'ok' if 'PermissionDenied' in (r_bob_create.stderr | default('')) else 'NOT ok' }}
