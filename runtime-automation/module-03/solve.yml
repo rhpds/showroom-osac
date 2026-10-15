@@ -54,6 +54,13 @@
         {{ fulfillment_api_url }}
       changed_when: false
 
+    - name: Login to private API for storage operations
+      ansible.builtin.shell: >-
+        osac --config "$HOME/admin" login --insecure --private
+        --token-script "oc create token admin -n {{ osac_namespace }}"
+        --address "{{ fulfillment_api_url }}"
+      changed_when: false
+
     - name: Create or get storage backend (lvms)
       ansible.builtin.shell: |
         OUTPUT=$(osac --config "$HOME/admin" create storagebackend \
