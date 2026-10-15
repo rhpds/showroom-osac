@@ -5,6 +5,11 @@
 
 toc::[]
 
+[WARNING]
+====
+This module is *VERY MUCH* work in progress. It is currently not guaranteed to work...
+====
+
 SAI Corp's teams can now provision virtual machines on demand through the VMaaS catalog. But their platform engineers also need full OpenShift clusters — for CI/CD pipelines, containerized workloads, and isolated test environments — provisioned with the same self-service experience.
 
 In this module, you enable Cluster as a Service (CaaS) for the OSAC platform. As the Sovereign Cloud Corp platform administrator, you configure the network bridge that hosted-cluster traffic needs, provision a KubeVirt VM that acts as a simulated bare metal server, and publish the catalog objects that let tenants order clusters on demand. Then Alice, SAI Corp's tenant administrator, places a cluster order. The platform orchestrates a HyperShift Hosted Control Plane on the registered agent — no physical hardware required.
