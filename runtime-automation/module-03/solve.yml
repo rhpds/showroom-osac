@@ -65,7 +65,8 @@
         if echo "${OUTPUT}" | grep -q "Created storage backend"; then
           echo "${OUTPUT}" | grep -o "'[^']*'" | tr -d "'"
         elif echo "${OUTPUT}" | grep -qi "already exists"; then
-          osac --config "$HOME/admin" get storagebackend local -o json | jq -r '.id'
+          osac --config "$HOME/admin" get storagebackend local 2>&1 \
+            | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1
         else
           echo "${OUTPUT}" >&2
           exit 1
