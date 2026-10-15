@@ -81,6 +81,10 @@
       changed_when: false
       failed_when: r_backend_id.stdout | trim | length < 10
 
+    - name: Set backend ID fact
+      ansible.builtin.set_fact:
+        backend_id: "{{ r_backend_id.stdout | trim }}"
+
     - name: Create storage tier for sai-corp tenant
       ansible.builtin.shell: >-
         osac --config "$HOME/admin" create storagetier
