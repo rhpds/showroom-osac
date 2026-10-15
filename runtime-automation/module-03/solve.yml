@@ -80,6 +80,17 @@
       ansible.builtin.set_fact:
         backend_id: "{{ r_backend_id.stdout | trim }}"
 
+    - name: Debug — list storage backends visible to admin
+      ansible.builtin.shell: >-
+        osac --config "$HOME/admin" get storagebackend 2>&1
+      register: r_debug_backends
+      changed_when: false
+      failed_when: false
+
+    - name: Debug — show backends output
+      ansible.builtin.debug:
+        msg: "backends: {{ r_debug_backends.stdout }} err: {{ r_debug_backends.stderr }}"
+
     - name: Create storage tier for sai-corp tenant
       ansible.builtin.shell: >-
         osac --config "$HOME/admin" create storagetier
