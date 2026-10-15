@@ -56,14 +56,14 @@ BACKEND_ID=01a0ced0-a5fe-793b-9f6e-061d5f7d16fd
 ----
 osac --config $HOME/admin \
   create storagetier \
-  --name sai-corp \
+  --name local \
   --backend-id "${BACKEND_ID}" \
   --protocol BLOCK
 ----
 +
 .Sample output
 ----
-Created storage tier 'sai-corp'.
+Created storage tier 'local'.
 ----
 
 . Label the LVM storage class for the `sai-corp` tenant so the platform maps the `local` tier to the correct Kubernetes storage class:

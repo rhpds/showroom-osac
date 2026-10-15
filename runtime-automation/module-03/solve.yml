@@ -88,7 +88,7 @@
     - name: Create storage tier for sai-corp tenant
       ansible.builtin.shell: >-
         osac --config "$HOME/admin" create storagetier
-        --name sai-corp
+        --name local
         --backend-id "{{ backend_id }}"
         --protocol BLOCK
       register: r_storagetier
