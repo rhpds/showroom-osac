@@ -412,10 +412,18 @@ metadata:
   name: iso-download
   namespace: hardware-inventory
 spec:
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   containers:
   - name: dl
     image: registry.redhat.io/ubi9/ubi:latest
     command: ["sh","-c","curl -sfL -o /data/agent-discovery.iso '${ISO_URL}' && ls -lh /data/agent-discovery.iso && sleep 3600"]
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
     volumeMounts:
     - name: data
       mountPath: /data
