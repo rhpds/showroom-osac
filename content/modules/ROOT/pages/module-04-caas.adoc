@@ -100,8 +100,11 @@ cat ~/.ssh/id_ed25519.pub
 ----
 oc get secret pull-secret -n openshift-config \
   -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "${HOME}/pull-secret-cluster.json"
+
 export PULL_SECRET="${HOME}/pull-secret-cluster.json"
+
 test -s "$PULL_SECRET" && echo "Pull secret OK"
+
 python3 -c "import json,pathlib; print('Registries:', sorted(json.loads(pathlib.Path('${PULL_SECRET}').read_text()).get('auths',{})))"
 ----
 
@@ -111,8 +114,8 @@ python3 -c "import json,pathlib; print('Registries:', sorted(json.loads(pathlib.
 ----
 osac --config $HOME/admin \
   login --insecure --private \
-  --address "${API_INT}" \
-  --token-script "oc create token -n ${OSAC_NS} admin"
+  --address {osac_fulfillment_internal_api_url} \
+  --token-script "oc create token -n osac admin"
 ----
 +
 .Sample output
@@ -122,7 +125,7 @@ Successfully logged in to https://fulfillment-internal-api-osac.apps.cluster-987
 +
 [NOTE]
 ====
-The `--private` flag connects to the internal fulfillment API, which exposes cloud-admin–only resources such as `BareMetalInstanceType` and `ClusterVersion`. The tenant public API does not expose these endpoints.
+The `--private` flag connects to the internal fulfillment API, which exposes cloud-admin-only resources such as `BareMetalInstanceType` and `ClusterVersion`. The tenant public API does not expose these endpoints.
 ====
 
 . Confirm the current service state. CaaS and BMaaS should be enabled:
@@ -150,6 +153,7 @@ You also patch the fulfillment service DNS configuration to use the `noop` DNS d
 
 === Steps
 
+////
 . Verify that `HOSTED_BASE` is set before patching DNS:
 +
 [source,role=execute]
@@ -158,17 +162,17 @@ You also patch the fulfillment service DNS configuration to use the `noop` DNS d
   && echo "HOSTED_BASE=${HOSTED_BASE}" \
   || { echo "ERROR: HOSTED_BASE empty — re-run Exercise 1 step 2"; exit 1; }
 ----
-
+////
 . Patch the fulfillment ConfigMap to use the `noop` DNS driver:
 +
 [source,role=execute]
 ----
-oc -n ${OSAC_NS} patch cm cluster-fulfillment-ig --type merge -p "{
+oc -n osac patch cm cluster-fulfillment-ig --type merge -p "{
   \"data\": {
     \"NETWORK_STEPS_COLLECTION\": \"ci.steps\",
     \"DNS_CLASS\": \"dns.noop.dns\",
-    \"EXTERNAL_ACCESS_BASE_DOMAIN\": \"${HOSTED_BASE}\",
-    \"HOSTED_CLUSTER_BASE_DOMAIN\": \"${HOSTED_BASE}\",
+    \"EXTERNAL_ACCESS_BASE_DOMAIN\": \"hosted.cluster-{guid}.dyn.redhatworkshops.io\",
+    \"HOSTED_CLUSTER_BASE_DOMAIN\": \"hosted.cluster-{guid}.dyn.redhatworkshops.io\",
     \"HOSTED_CLUSTER_CONTROLLER_AVAILABILITY_POLICY\": \"SingleReplica\",
     \"HOSTED_CLUSTER_INFRASTRUCTURE_AVAILABILITY_POLICY\": \"SingleReplica\"
   }
@@ -179,7 +183,7 @@ oc -n ${OSAC_NS} patch cm cluster-fulfillment-ig --type merge -p "{
 +
 [source,role=execute]
 ----
-oc get cm cluster-fulfillment-ig -n ${OSAC_NS} \
+oc get cm cluster-fulfillment-ig -n osac \
   -o jsonpath='DNS_CLASS={.data.DNS_CLASS}{"\n"}HOSTED={.data.HOSTED_CLUSTER_BASE_DOMAIN}{"\n"}'
 ----
 +
@@ -225,30 +229,30 @@ spec:
       version: 3.4.0
     storage:
       files:
-        - path: /usr/local/bin/osac-setup-br-untagged.sh
-          mode: 0755
-          overwrite: false
-          contents:
-            source: "data:text/plain;charset=utf-8;base64,\${SCRIPT_B64}"
+      - path: /usr/local/bin/osac-setup-br-untagged.sh
+        mode: 0755
+        overwrite: false
+        contents:
+          source: "data:text/plain;charset=utf-8;base64,\${SCRIPT_B64}"
     systemd:
       units:
-        - name: osac-br-untagged.service
-          enabled: true
-          contents: |
-            [Unit]
-            Description=OSAC CaaS br-untagged
-            After=network-online.target ovs-vswitchd.service
-            Wants=network-online.target
-            [Service]
-            Type=oneshot
-            RemainAfterExit=yes
-            ExecStart=/usr/local/bin/osac-setup-br-untagged.sh
-            [Install]
-            WantedBy=multi-user.target
+      - name: osac-br-untagged.service
+        enabled: true
+        contents: |
+          [Unit]
+          Description=OSAC CaaS br-untagged
+          After=network-online.target ovs-vswitchd.service
+          Wants=network-online.target
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/bin/osac-setup-br-untagged.sh
+          [Install]
+          WantedBy=multi-user.target
 EOF
 ----
 
-. Watch the MachineConfigPool until the workers finish rebooting. This takes 10–20 minutes on first apply:
+. Watch the MachineConfigPool until the workers finish rebooting. This takes 10-20 minutes on first apply:
 +
 [source,role=execute]
 ----
@@ -290,9 +294,10 @@ This exercise walks through the full agent provisioning flow: InfraEnv → NAD �
 +
 [source,role=execute]
 ----
-oc create namespace "${HW_NS}" --dry-run=client -o yaml | oc apply -f -
+oc create namespace hardware-inventory
+
 oc get secret pull-secret -n openshift-config -o json \
-  | python3 -c "import json,sys; s=json.load(sys.stdin); s['metadata']={'name':'pull-secret','namespace':'${HW_NS}'}; json.dump(s,sys.stdout)" \
+  | python3 -c "import json,sys; s=json.load(sys.stdin); s['metadata']={'name':'pull-secret','namespace':'hardware-inventory'}; json.dump(s,sys.stdout)" \
   | oc apply -f -
 ----
 
@@ -301,13 +306,14 @@ oc get secret pull-secret -n openshift-config -o json \
 [source,role=execute]
 ----
 SSH_PUB=$(cat ~/.ssh/id_ed25519.pub)
+
 cat <<EOF | oc apply -f -
 ---
 apiVersion: agent-install.openshift.io/v1beta1
 kind: InfraEnv
 metadata:
   name: hardware-inventory
-  namespace: ${HW_NS}
+  namespace: hardware-inventory
 spec:
   pullSecretRef:
     name: pull-secret
@@ -320,6 +326,9 @@ EOF
 +
 [source,role=execute]
 ----
+ROUTER_IP=$(oc get svc router-internal-default -n openshift-ingress -o jsonpath='{.spec.clusterIP}')
+HUB_BASE=$(oc get dnses.config/cluster -o jsonpath='{.spec.baseDomain}')
+
 IGNITION=$(ROUTER_IP="$ROUTER_IP" HUB_BASE="$HUB_BASE" python3 <<'PY'
 import json, os, urllib.parse
 w, hub = os.environ["ROUTER_IP"], os.environ["HUB_BASE"]
@@ -332,7 +341,7 @@ src = "data:text/plain;charset=utf-8," + urllib.parse.quote(hosts)
 print(json.dumps({"ignition":{"version":"3.2.0"},"storage":{"files":[{"path":"/etc/hosts","mode":420,"overwrite":True,"contents":{"source":src}}]}}))
 PY
 )
-oc patch infraenv hardware-inventory -n ${HW_NS} --type merge \
+oc patch infraenv hardware-inventory -n hardware-inventory --type merge \
   --patch "{\"spec\":{\"ignitionConfigOverride\":$(echo "$IGNITION" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}}"
 ----
 
@@ -341,7 +350,8 @@ oc patch infraenv hardware-inventory -n ${HW_NS} --type merge \
 [source,role=execute]
 ----
 sleep 20
-oc get infraenv hardware-inventory -n ${HW_NS} -o jsonpath='{.status.isoDownloadURL}{"\n"}'
+
+oc get infraenv hardware-inventory -n hardware-inventory -o jsonpath='{.status.isoDownloadURL}{"\n"}'
 ----
 +
 .Sample output
@@ -360,24 +370,25 @@ cat <<EOF | oc apply -f -
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
-  name: untagged-net-${MY_NAME}
-  namespace: ${HW_NS}
+  name: untagged-net-extra
+  namespace: hardware-inventory
 spec:
   config: |
     {
       "cniVersion": "0.3.1",
-      "name": "untagged-net-${MY_NAME}",
+      "name": "untagged-net-extra",
       "type": "bridge",
       "bridge": "br-untagged",
       "ipam": {
         "type": "whereabouts",
         "range": "10.10.10.0/24",
-        "range_start": "${BRIDGE_IP}",
-        "range_end": "${BRIDGE_IP}"
+        "range_start": "10.10.10.50",
+        "range_end": "10.10.10.50"
       }
     }
 EOF
-oc get net-attach-def untagged-net-${MY_NAME} -n ${HW_NS}
+
+oc get net-attach-def untagged-net-extra -n hardware-inventory
 ----
 
 . Create a blank 120 GiB DataVolume that will serve as the agent VM's root disk. HyperShift installs RHCOS onto this disk during cluster provisioning:
@@ -389,8 +400,8 @@ cat <<EOF | oc apply -f -
 apiVersion: cdi.kubevirt.io/v1beta1
 kind: DataVolume
 metadata:
-  name: ${VM_NAME}-rootdisk
-  namespace: ${HW_NS}
+  name: agent-01-rootdisk
+  namespace: hardware-inventory
 spec:
   source:
     blank: {}
@@ -399,27 +410,27 @@ spec:
     resources:
       requests:
         storage: 120Gi
-    storageClassName: ${STORAGE_CLASS}
+    storageClassName: ocs-external-storagecluster-ceph-rbd-virtualization
 EOF
 
-oc wait dv ${VM_NAME}-rootdisk -n ${HW_NS} --for=condition=Ready --timeout=600s
+oc wait dv agent-01-rootdisk -n hardware-inventory --for=condition=Ready --timeout=600s
 ----
 
 . Download the full discovery ISO from inside the cluster. The bastion cannot reach the `*.apps` ingress directly, so you run the download inside a throwaway pod that has in-cluster network access:
 +
 [source,role=execute]
 ----
-ISO_URL=$(oc get infraenv hardware-inventory -n ${HW_NS} -o jsonpath='{.status.isoDownloadURL}')
+ISO_URL=$(oc get infraenv hardware-inventory -n hardware-inventory -o jsonpath='{.status.isoDownloadURL}')
 echo "$ISO_URL" | grep -q full.iso || echo "WARN: not full.iso — check step 4"
 
-oc delete pod iso-download -n ${HW_NS} --ignore-not-found --wait=true
+oc delete pod iso-download -n hardware-inventory --ignore-not-found --wait=true
 cat <<PODEOF | oc apply -f -
 ---
 apiVersion: v1
 kind: Pod
 metadata:
   name: iso-download
-  namespace: ${HW_NS}
+  namespace: hardware-inventory
 spec:
   containers:
   - name: dl
@@ -435,7 +446,7 @@ spec:
   restartPolicy: Never
 PODEOF
 
-oc wait pod/iso-download -n ${HW_NS} --for=condition=Ready --timeout=180s
+oc wait pod/iso-download -n hardware-inventory --for=condition=Ready --timeout=180s
 ----
 
 . Wait for the download to finish, then copy the ISO to the bastion and verify its size (must be greater than 400 MB):
@@ -443,12 +454,16 @@ oc wait pod/iso-download -n ${HW_NS} --for=condition=Ready --timeout=180s
 [source,role=execute]
 ----
 for i in $(seq 1 90); do
-  oc logs iso-download -n ${HW_NS} 2>/dev/null | grep -q agent-discovery.iso && break
+  oc logs iso-download -n hardware-inventory 2>/dev/null | grep -q agent-discovery.iso && break
   sleep 5
 done
-oc cp ${HW_NS}/iso-download:/data/agent-discovery.iso /tmp/agent-discovery.iso
-oc delete pod iso-download -n ${HW_NS} --wait=false
+
+oc cp hardware-inventory/iso-download:/data/agent-discovery.iso /tmp/agent-discovery.iso
+
+oc delete pod iso-download -n hardware-inventory --wait=false
+
 ls -lh /tmp/agent-discovery.iso
+
 test "$(stat -c%s /tmp/agent-discovery.iso)" -gt 400000000 && echo "ISO size OK"
 ----
 +
@@ -462,13 +477,13 @@ ISO size OK
 +
 [source,role=execute]
 ----
-virtctl image-upload dv ${VM_NAME}-iso \
-  --namespace ${HW_NS} --size=4Gi \
+virtctl image-upload dv agent-01-iso \
+  --namespace hardware-inventory --size=4Gi \
   --image-path=/tmp/agent-discovery.iso \
-  --storage-class=${STORAGE_CLASS} \
+  --storage-class=ocs-external-storagecluster-ceph-rbd-virtualization \
   --access-mode=ReadWriteMany --insecure
 
-oc wait dv ${VM_NAME}-iso -n ${HW_NS} --for=condition=Ready --timeout=600s
+oc wait dv agent-01-iso -n hardware-inventory --for=condition=Ready --timeout=600s
 ----
 +
 [WARNING]
@@ -480,19 +495,21 @@ Do not start the agent VM until this DataVolume shows `Succeeded`. Starting the 
 +
 [source,role=execute]
 ----
+AGENT_WORKER=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}')
+
 cat <<EOF | oc apply -f -
 ---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: ${VM_NAME}
-  namespace: ${HW_NS}
+  name: agent-01
+  namespace: hardware-inventory
 spec:
   runStrategy: Always
   template:
     metadata:
       labels:
-        kubevirt.io/vm: ${VM_NAME}
+        kubevirt.io/vm: agent-01
     spec:
       affinity:
         nodeAffinity:
@@ -529,24 +546,24 @@ spec:
         pod: {}
       - name: vlan
         multus:
-          networkName: ${HW_NS}/untagged-net-${MY_NAME}
+          networkName: hardware-inventory/untagged-net-extra
       volumes:
       - name: rootdisk
         dataVolume:
-          name: ${VM_NAME}-rootdisk
+          name: agent-01-rootdisk
       - name: iso
         persistentVolumeClaim:
-          claimName: ${VM_NAME}-iso
+          claimName: agent-01-iso
 EOF
 
-oc wait vmi ${VM_NAME} -n ${HW_NS} --for=jsonpath='{.status.phase}'=Running --timeout=600s
+oc wait vmi agent-01 -n hardware-inventory --for=jsonpath='{.status.phase}'=Running --timeout=600s
 ----
 
-. Watch for the Agent to register. This takes 3–8 minutes after the VM starts:
+. Watch for the Agent to register. This takes 3-8 minutes after the VM starts:
 +
 [source,role=execute]
 ----
-watch oc get agents -n ${HW_NS}
+watch oc get agents -n hardware-inventory
 ----
 +
 Press `Ctrl+C` once an agent appears.
@@ -557,13 +574,16 @@ If no agent appears after 8 minutes, the guest may not be resolving the assisted
 
 [source,role=execute]
 ----
-virtctl ssh core@vmi/${VM_NAME} -n ${HW_NS} -i ~/.ssh/id_ed25519 \
+ROUTER_IP=$(oc get svc router-internal-default -n openshift-ingress -o jsonpath='{.spec.clusterIP}')
+
+virtctl ssh core@vmi/agent-01 -n hardware-inventory -i ~/.ssh/id_ed25519 \
   --local-ssh-opts='-o StrictHostKeyChecking=no' \
   --command "sudo tee /etc/hosts <<EOF
 127.0.0.1 localhost
 ${ROUTER_IP} assisted-service-multicluster-engine.apps.${HUB_BASE}
 ${ROUTER_IP} assisted-image-service-multicluster-engine.apps.${HUB_BASE}
 EOF
+
 sudo systemctl restart agent"
 ----
 ====
@@ -572,16 +592,16 @@ sudo systemctl restart agent"
 +
 [source,role=execute]
 ----
-AGENT_ID=$(oc get agents -n ${HW_NS} -o jsonpath='{.items[0].metadata.name}')
+AGENT_ID=$(oc get agents -n hardware-inventory -o jsonpath='{.items[0].metadata.name}')
 
-oc label agent "$AGENT_ID" -n ${HW_NS} \
+oc label agent "$AGENT_ID" -n hardware-inventory \
   osac.openshift.io/resource_class=ci-worker \
   osac.openshift.io/host-type=default \
   --overwrite
 
-oc patch agent "$AGENT_ID" -n ${HW_NS} --type merge -p '{"spec":{"approved":true}}'
+oc patch agent "$AGENT_ID" -n hardware-inventory --type merge -p '{"spec":{"approved":true}}'
 
-oc get agents -n ${HW_NS} \
+oc get agents -n hardware-inventory \
   -o custom-columns=NAME:.metadata.name,STATE:.status.debugInfo.state,APPROVED:.spec.approved,HOST:.status.inventory.hostname
 ----
 +
@@ -606,7 +626,7 @@ The BareMetalInstanceType and ClusterVersion require the BMaaS service to be ena
 [source,role=execute]
 ----
 osac --config $HOME/admin create baremetalinstancetype \
-  --name "${BMIT_NAME}" \
+  --name c1-metal-amd64 \
   --description "RHDP CNV agent VM — 8 vCPU 16 GiB" \
   --cpu-cores 8 \
   --cpu-architecture x86_64 \
@@ -636,7 +656,7 @@ The `--cpu-architecture` value must be the string `x86_64`, not the enum `ARCHIT
 ----
 osac --config $HOME/admin \
   create diskimage \
-  --name "${DISK_IMAGE}" \
+  --name rhcos-4-22 \
   --source-type registry \
   --source-ref oci://quay.io/rh_ee_rpiccoli/rhcos-bmi:4.22.0 \
   --architecture amd64
@@ -656,9 +676,9 @@ rhcos-4-22   -         REGISTRY     AMD64         AVAILABLE   shared
 ----
 osac --config $HOME/admin create \
   clusterversion \
-  --version "${OCP_VERSION}" \
+  --version 4.22.0-rhcos \
   --image quay.io/openshift-release-dev/ocp-release:4.22.0-multi \
-  --disk-image "${DISK_IMAGE}"
+  --disk-image "rhcos-4-22"
 
 osac --config $HOME/admin get clusterversion
 ----
@@ -675,10 +695,10 @@ rhcos-4-22      4.22.0-rhcos    quay.io/openshift-release-dev/ocp-release:4.22.0
 ----
 osac --config $HOME/admin \
   create clustercatalogitem \
-  --name "${CATALOG_ITEM}" \
+  --name hosted-ci-small \
   --title "Hosted CI small" \
   --description "Single-replica hosted OCP cluster on CNV agent VM" \
-  --template "${TEMPLATE}" \
+  --template ocp-ci-small \
   --published
 
 osac --config $HOME/admin get clustercatalogitem
@@ -745,15 +765,15 @@ osac --config $HOME/alice \
 ----
 osac --config $HOME/alice \
   create cluster \
-  --name "${CLUSTER_NAME}" \
-  --catalog-item "${CATALOG_ITEM}" \
-  --version "${OCP_VERSION}" \
-  --node-set "name=workers,size=1,baremetal-instance-type=${BMIT_NAME}" \
+  --name student-cluster \
+  --catalog-item hosted-ci-small \
+  --version 4.22.0-rhcos \
+  --node-set "name=workers,size=1,baremetal-instance-type=c1-metal-amd64" \
   --pull-secret cluster-pull-secret \
   --ssh-public-key-file "${HOME}/.ssh/id_ed25519.pub"
 
 osac --config $HOME/alice get cluster
-oc get clusterorder -n ${OSAC_NS}
+oc get clusterorder -n osac
 ----
 +
 .Sample output
@@ -787,8 +807,8 @@ osac-student-cluster       student-cluster   4.22.0    student-cluster-admin... 
 NP_NS=$(oc get nodepool -A -o jsonpath='{.items[0].metadata.namespace}')
 NP_NAME=$(oc get nodepool -n "$NP_NS" -o jsonpath='{.items[0].metadata.name}')
 
-oc label agent "$AGENT_ID" -n ${HW_NS} \
-  osac.openshift.io/clusterorder=${CLUSTER_NAME} \
+oc label agent "$AGENT_ID" -n hardware-inventory \
+  osac.openshift.io/clusterorder=student-cluster \
   osac.openshift.io/resource_class=ci-worker \
   osac.openshift.io/host-type=default \
   --overwrite
@@ -800,14 +820,16 @@ oc patch nodepool "$NP_NAME" -n "$NP_NS" --type merge -p '{"spec":{"replicas":1}
 +
 [source,role=execute]
 ----
-VIP=$(oc get svc kube-apiserver -n ${OSAC_NS}-${CLUSTER_NAME}-${CLUSTER_NAME} \
+VIP=$(oc get svc kube-apiserver -n osac-student-cluster-student-cluster \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
 VIP="${VIP:-10.10.10.240}"
+
 sudo tee -a /etc/hosts <<EOF
 ${VIP}  api.${HC_DOMAIN}
 ${VIP}  api-int.${HC_DOMAIN}
 ${VIP}  console-openshift-console.apps.${HC_DOMAIN}
 EOF
+
 cat /etc/hosts | grep "${HC_DOMAIN}"
 ----
 +
@@ -820,13 +842,13 @@ These `/etc/hosts` entries point only at the hosted cluster API and console — 
 +
 [source,role=execute]
 ----
-oc get clusterorder -n ${OSAC_NS}
+oc get clusterorder -n osac
 oc get hostedcluster -A
-oc get agents -n ${HW_NS}
-oc get secret ${CLUSTER_NAME}-admin-kubeconfig \
-  -n ${OSAC_NS}-${CLUSTER_NAME} \
-  -o jsonpath='{.data.kubeconfig}' | base64 -d > /tmp/${CLUSTER_NAME}-kubeconfig
-oc --kubeconfig=/tmp/${CLUSTER_NAME}-kubeconfig --insecure-skip-tls-verify get nodes
+oc get agents -n hardware-inventory
+oc get secret student-cluster-admin-kubeconfig \
+  -n osac-student-cluster \
+  -o jsonpath='{.data.kubeconfig}' | base64 -d > /tmp/student-cluster-kubeconfig
+oc --kubeconfig=/tmp/student-cluster-kubeconfig --insecure-skip-tls-verify get nodes
 ----
 +
 .Sample output
