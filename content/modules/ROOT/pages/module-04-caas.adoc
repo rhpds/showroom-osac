@@ -110,7 +110,7 @@ python3 -c "import json,pathlib; print('Registries:', sorted(json.loads(pathlib.
 
 . Log in to the OSAC private API as the cloud administrator using a short-lived service account token:
 +
-[source,role=execute]
+[source,role=execute,subs=attributes]
 ----
 osac --config $HOME/admin \
   login --insecure --private \
@@ -165,7 +165,7 @@ You also patch the fulfillment service DNS configuration to use the `noop` DNS d
 ////
 . Patch the fulfillment ConfigMap to use the `noop` DNS driver:
 +
-[source,role=execute]
+[source,role=execute,subs=attributes]
 ----
 oc -n osac patch cm cluster-fulfillment-ig --type merge -p "{
   \"data\": {
@@ -193,29 +193,16 @@ DNS_CLASS=dns.noop.dns
 HOSTED=hosted.cluster-9872p.dyn.redhatworkshops.io
 ----
 
-. Apply the MachineConfig that creates the `br-untagged` Linux bridge on every worker node. This is idempotent — `oc apply` is safe if the MachineConfig already exists:
+. Delete any previously applied (broken) version of the MachineConfig, then apply the corrected one:
 +
 [source,role=execute]
 ----
-SCRIPT_B64=$(base64 -w0 <<'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-if ip link show br-untagged &>/dev/null; then exit 0; fi
-for i in $(seq 1 60); do
-  ip link show br-ex &>/dev/null && break
-  sleep 2
-done
-ip link show br-ex &>/dev/null || { echo "br-ex not ready"; exit 1; }
-ip link add mv-br-ex link br-ex type macvlan mode bridge
-ip link set mv-br-ex up
-ip link add br-untagged type bridge
-ip link set br-untagged up
-ip link set mv-br-ex master br-untagged
-echo 0 > /sys/class/net/br-untagged/bridge/stp_state
-SCRIPT
-)
-
-cat <<EOF | oc apply -f -
+oc delete mc 99-osac-caas-br-untagged 2>/dev/null || true
+----
++
+[source,role=execute]
+----
+cat <<'EOF' | oc apply -f -
 ---
 apiVersion: machineconfiguration.openshift.io/v1
 kind: MachineConfig
@@ -227,28 +214,21 @@ spec:
   config:
     ignition:
       version: 3.4.0
-    storage:
-      files:
-      - path: /usr/local/bin/osac-setup-br-untagged.sh
-        mode: 0755
-        overwrite: false
-        contents:
-          source: "data:text/plain;charset=utf-8;base64,\${SCRIPT_B64}"
     systemd:
       units:
-      - name: osac-br-untagged.service
-        enabled: true
-        contents: |
-          [Unit]
-          Description=OSAC CaaS br-untagged
-          After=network-online.target ovs-vswitchd.service
-          Wants=network-online.target
-          [Service]
-          Type=oneshot
-          RemainAfterExit=yes
-          ExecStart=/usr/local/bin/osac-setup-br-untagged.sh
-          [Install]
-          WantedBy=multi-user.target
+        - name: osac-br-untagged.service
+          enabled: true
+          contents: |
+            [Unit]
+            Description=OSAC CaaS br-untagged bridge
+            After=network-online.target ovs-vswitchd.service
+            Wants=network-online.target
+            [Service]
+            Type=oneshot
+            RemainAfterExit=yes
+            ExecStart=/bin/bash -c 'ip link show br-untagged 2>/dev/null && exit 0; for i in $(seq 1 60); do ip link show br-ex 2>/dev/null && break; sleep 2; done; ip link show br-ex 2>/dev/null || { echo "br-ex not ready"; exit 1; }; ip link add mv-br-ex link br-ex type macvlan mode bridge; ip link set mv-br-ex up; ip link add br-untagged type bridge; ip link set br-untagged up; ip link set mv-br-ex master br-untagged; echo 0 > /sys/class/net/br-untagged/bridge/stp_state'
+            [Install]
+            WantedBy=multi-user.target
 EOF
 ----
 
