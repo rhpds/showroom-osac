@@ -135,7 +135,7 @@
 
     - name: Wait for disk image to reach AVAILABLE
       ansible.builtin.shell: >-
-        osac --config "$HOME/admin" get diskimage {{ disk_image_name }} -o json | jq -r '.lifecycle'
+        osac --config "$HOME/admin" get diskimage {{ disk_image_name }} -o json | jq -r '.spec.lifecycle'
       register: r_diskimage_status
       retries: 30
       delay: 10
@@ -157,7 +157,7 @@
 
     - name: Verify instance type is ACTIVE
       ansible.builtin.shell: >-
-        osac --config "$HOME/admin" get instancetype {{ instance_type_name }} -o json | jq -r '.state'
+        osac --config "$HOME/admin" get instancetype {{ instance_type_name }} 2>&1
       register: r_instancetype_status
       retries: 10
       delay: 3
@@ -190,11 +190,11 @@
 
     - name: Verify catalog item is published
       ansible.builtin.shell: >-
-        osac --config "$HOME/admin" get computeinstancecatalogitem {{ catalog_item_name }} -o json | jq -r '.published'
+        osac --config "$HOME/admin" get computeinstancecatalogitem {{ catalog_item_name }} 2>&1
       register: r_catalog_published
       retries: 10
       delay: 3
-      until: r_catalog_published.stdout | trim == 'true'
+      until: "'true' in r_catalog_published.stdout"
       changed_when: false
 
     # =========================================================================
@@ -226,7 +226,7 @@
 
     - name: Wait for subnet default-ipv4 to be READY
       ansible.builtin.shell: >-
-        osac --config "$HOME/alice" get subnet default-ipv4 -o json | jq -r '.state'
+        osac --config "$HOME/alice" get subnet default-ipv4 2>&1
       register: r_subnet_state
       retries: 20
       delay: 5
@@ -236,7 +236,7 @@
 
     - name: Wait for security group default to be READY
       ansible.builtin.shell: >-
-        osac --config "$HOME/alice" get securitygroup default -o json | jq -r '.state'
+        osac --config "$HOME/alice" get securitygroup default 2>&1
       register: r_sg_state
       retries: 20
       delay: 5
@@ -403,7 +403,7 @@
 
     - name: Wait for portal-vm to reach RUNNING state (up to 15 min)
       ansible.builtin.shell: >-
-        osac --config "$HOME/alice" get computeinstance portal-vm -o json | jq -r '.state'
+        osac --config "$HOME/alice" get computeinstance portal-vm 2>&1
       register: r_vm_state
       retries: 30
       delay: 30
