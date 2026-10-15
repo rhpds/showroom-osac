@@ -193,7 +193,25 @@ HOSTED=hosted.cluster-9872p.dyn.redhatworkshops.io
 +
 [source,role=execute]
 ----
-cat <<'EOF' | oc apply -f -
+SCRIPT_B64=$(base64 -w0 <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+if ip link show br-untagged &>/dev/null; then exit 0; fi
+for i in $(seq 1 60); do
+  ip link show br-ex &>/dev/null && break
+  sleep 2
+done
+ip link show br-ex &>/dev/null || { echo "br-ex not ready"; exit 1; }
+ip link add mv-br-ex link br-ex type macvlan mode bridge
+ip link set mv-br-ex up
+ip link add br-untagged type bridge
+ip link set br-untagged up
+ip link set mv-br-ex master br-untagged
+echo 0 > /sys/class/net/br-untagged/bridge/stp_state
+SCRIPT
+)
+
+cat <<EOF | oc apply -f -
 ---
 apiVersion: machineconfiguration.openshift.io/v1
 kind: MachineConfig
@@ -209,23 +227,9 @@ spec:
       files:
         - path: /usr/local/bin/osac-setup-br-untagged.sh
           mode: 0755
-          overwrite: true
+          overwrite: false
           contents:
-            inline: |
-              #!/bin/bash
-              set -euo pipefail
-              if ip link show br-untagged &>/dev/null; then exit 0; fi
-              for i in $(seq 1 60); do
-                ip link show br-ex &>/dev/null && break
-                sleep 2
-              done
-              ip link show br-ex &>/dev/null || { echo "br-ex not ready"; exit 1; }
-              ip link add mv-br-ex link br-ex type macvlan mode bridge
-              ip link set mv-br-ex up
-              ip link add br-untagged type bridge
-              ip link set br-untagged up
-              ip link set mv-br-ex master br-untagged
-              echo 0 > /sys/class/net/br-untagged/bridge/stp_state
+            source: "data:text/plain;charset=utf-8;base64,\${SCRIPT_B64}"
     systemd:
       units:
         - name: osac-br-untagged.service
