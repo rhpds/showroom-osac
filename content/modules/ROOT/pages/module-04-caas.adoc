@@ -19,12 +19,133 @@ By the end of this module, you'll be able to:
 * Publish platform catalog objects: `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem`
 * Order a hosted OpenShift cluster as a tenant using the OSAC CLI
 
+== Exercise 0: Set up the BMF VM to host bare metal servers
+
+[NOTE]
+====
+Once the steps are solid this will be fully automated and no longer necessary in future environments.
+====
+
+From the bastion connect to the BMF VM:
+
+[source,role=execute]
+----
+sudo ssh 10.10.10.2
+----
+
+On the BMF VM install packages:
+
+[source,role=execute]
+----
+dnf install -y qemu-kvm libvirt virt-install python3-pip python3-devel gcc pkgconf-pkg-config
+----
+
+Enable the sockets:
+
+[source,role=execute]
+----
+systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket
+----
+
+Set up Python virtual environment and install the required packages:
+
+[source,role=execute]
+----
+python3 -m venv /opt/sushy
+source /opt/sushy/bin/activate
+
+pip install -U pip
+pip install sushy-tools
+----
+
+Test
+
+[source,role=execute]
+----
+virsh -c qemu:///system list --all
+ls /dev/kvm
+----
+
+set up Sushy:
+
+[source,role=execute]
+----
+mkdir -p /etc/sushy
+
+cat > /etc/sushy/sushy-emulator.conf <<'EOF'
+SUSHY_EMULATOR_LISTEN_IP = u'0.0.0.0'
+SUSHY_EMULATOR_LISTEN_PORT = 8000
+SUSHY_EMULATOR_LIBVIRT_URI = u'qemu:///system'
+EOF
+----
+
+Test creating a bare metal server:
+[source,role=execute]
+----
+virt-install --name node1 --memory 1024 --vcpus 2   --disk size=2 --pxe --network network=default   --osinfo detect=on,require=off --noautoconsole
+
+virsh list --all
+virsh net-list --all
+virsh net-start default
+----
+
+Make it permanent
+
+[source,role=execute]
+----
+cat > /etc/systemd/system/sushy-emulator.service <<'EOF'
+[Unit]
+Description=Sushy Redfish emulator
+After=network.target virtqemud.socket
+
+[Service]
+ExecStart=/opt/sushy/bin/sushy-emulator --config /etc/sushy/sushy-emulator.conf
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload && systemctl enable --now sushy-emulator
+----
+
+Check that redfish is running:
+
+[source,role=execute]
+----
+curl -s http://localhost:8000/redfish/v1/Systems | python3 -m json.tool
+----
+You should see your VMs UUID listed as a member.
+
+Then try a power action:
+
+[source,role=execute]
+----
+UUID=$(virsh domuuid node1)
+
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"ResetType":"ForceOff"}' \
+  http://localhost:8000/redfish/v1/Systems/$UUID/Actions/ComputerSystem.Reset
+
+virsh domstate node1
+----
+
+Finally you can then log out of the BMF VM and return to the bastion.
+
+On the bastion you can test the Redfish API:
+
+[source,role=execute]
+----
+curl http://10.10.10.2:8000/redfish/v1/Systems
+----
+
 == Exercise 1: Set up the lab environment
 
 Before running any CaaS workflow, you need a set of shell variables that the subsequent exercises depend on. Many values — the hub base domain, the worker node hosting the agent VM, the cluster ingress IP — are derived dynamically from the running cluster.
 
 === Steps
 
+////
 . Export the fixed variables. Adjust `MY_NAME`, `CLUSTER_NAME`, and `CATALOG_ITEM` to match your environment:
 +
 [source,role=execute]
@@ -74,6 +195,7 @@ WORKER=worker-0.cluster-9872p.dyn.redhatworkshops.io
 ROUTER_IP=172.30.56.12
 HOSTED_BASE=hosted.cluster-9872p.dyn.redhatworkshops.io
 ----
+////
 
 . Verify the required tools are available on the bastion:
 +
@@ -544,6 +666,8 @@ spec:
           claimName: agent-01-iso
 EOF
 
+sleep 5
+
 oc wait vmi agent-01 -n hardware-inventory --for=jsonpath='{.status.phase}'=Running --timeout=600s
 ----
 
@@ -887,3 +1011,4 @@ SAI Corp can now provision hosted OpenShift clusters through the OSAC self-servi
 * *BMaaS and CaaS are independently gated*: The Helm chart controls each service with a feature flag. CaaS can be enabled while BMaaS is off, but the `BareMetalInstanceType` and cluster node provisioning both require BMaaS to be on.
 * *Catalog items decouple ordering from implementation*: The tenant specifies a `--catalog-item` name; the platform controls which template, OCP version, and hardware profile backs it. This lets Sovereign Cloud Corp update hardware or OCP versions without changing what tenants see in the catalog.
 * *`--catalog-item` replaces `--template` on cluster create*: The `--template` flag is deprecated. Always use `--catalog-item` for cluster orders; the two flags are mutually exclusive and cannot be combined.
+
