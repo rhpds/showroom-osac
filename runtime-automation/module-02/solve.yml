@@ -435,7 +435,7 @@
 
     - name: Verify RoleBinding is ready
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}" get rolebinding {{ tenant_name }}/tenant-admin-binding -o yaml
+        osac --config "{{ config_admin }}" get rolebinding tenant-admin-binding --tenant {{ tenant_name }} -o yaml
         | grep 'state: ROLE_BINDING_STATE_READY'
       register: r_rb_ready
       retries: 10
