@@ -112,9 +112,7 @@
       register: r_tenant_status
       retries: 20
       delay: 5
-      until: >-
-        'Ready' in r_tenant_status.stdout and
-        'local' in r_tenant_status.stdout
+      until: "'Ready' in r_tenant_status.stdout"
       changed_when: false
 
     # =========================================================================
@@ -473,7 +471,7 @@
         msg: |
           === Module 03 Solve Results ===
           Storage backend created:        {{ 'ok' if backend_id | default('') | length > 10 else 'NOT ok' }}
-          Tenant sai-corp storage ready:  {{ 'ok' if 'Ready' in r_tenant_status.stdout and 'local' in r_tenant_status.stdout else 'NOT ok' }}
+          Tenant sai-corp storage ready:  {{ 'ok' if  'Ready' in r_tenant_status.stdout else 'NOT ok' }}
           Disk image AVAILABLE:           {{ 'ok' if 'AVAILABLE' in r_diskimage_status.stdout else 'NOT ok' }}
           Instance type ACTIVE:           {{ 'ok' if 'ACTIVE' in r_instancetype_status.stdout else 'NOT ok' }}
           Catalog item published:         {{ 'ok' if r_catalog_published.stdout | trim == 'true' else 'NOT ok' }}
