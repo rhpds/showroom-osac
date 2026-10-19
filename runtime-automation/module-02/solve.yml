@@ -405,6 +405,14 @@
       changed_when: false
       failed_when: r_alice_id.stdout | length < 10
 
+    - name: Get tenant-admin role ID
+      ansible.builtin.shell: >-
+        osac --config "{{ config_admin }}" get role tenant-admin -o json
+        | jq -r '.id // .[0].id'
+      register: r_role_id
+      changed_when: false
+      failed_when: r_role_id.stdout | trim | length < 10
+
     - name: Create tenant-admin RoleBinding for Alice
       ansible.builtin.shell: |
         cat > /tmp/rolebinding.yaml <<EOF
@@ -414,7 +422,7 @@
           tenant: {{ tenant_name }}
         spec:
           role:
-            name: tenant-admin
+            id: {{ r_role_id.stdout | trim }}
           users:
             - name: {{ tenant_admin }}
         EOF
@@ -427,7 +435,7 @@
 
     - name: Verify RoleBinding is ready
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}" get rolebinding -o yaml
+        osac --config "{{ config_admin }}" get rolebinding {{ tenant_name }}/tenant-admin-binding -o yaml
         | grep 'state: ROLE_BINDING_STATE_READY'
       register: r_rb_ready
       retries: 10
