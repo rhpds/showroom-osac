@@ -301,8 +301,8 @@
 
     - name: Discover VM namespace and name (retry until provisioned)
       ansible.builtin.shell: |
-        VM_NS=$(oc get vm -A --no-headers 2>/dev/null | grep -v NAME | head -1 | awk '{print $1}')
-        VM_NAME=$(oc get vm -A --no-headers 2>/dev/null | grep -v NAME | head -1 | awk '{print $2}')
+        VM_NS=$(oc get vm -A --sort-by=.metadata.creationTimestamp --no-headers 2>/dev/null | grep subnet | tail -1 | awk '{print $1}')
+        VM_NAME=$(oc get vm -A --sort-by=.metadata.creationTimestamp --no-headers 2>/dev/null | grep subnet | tail -1 | awk '{print $2}')
         if [ -z "${VM_NS}" ] || [ -z "${VM_NAME}" ]; then
           echo "VM not yet provisioned" >&2
           exit 1
