@@ -304,39 +304,19 @@ virt-install --name virtual-bmh-1 \
   --memory 8192 --vcpus 4 \
   --disk size=120,format=qcow2,bus=virtio,pool=default \
   --network network=default,mac=52:54:00:ca:aa:01 \
-  --boot uefi --os-variant rhel9-unknown \
+  --boot loader=/usr/share/edk2/ovmf/OVMF_CODE.fd,loader_ro=yes,loader_type=pflash,nvram_template=/usr/share/edk2/ovmf/OVMF_VARS.fd \
+  --os-variant rhel9-unknown \
   --import --noautoconsole
 ----
 
-. Confirm that UEFI Secure Boot is off. The unsigned IPA discovery ISO will not boot with Secure Boot enabled:
+. Confirm that Secure Boot is off:
 +
 [source,role=execute]
 ----
 virsh dumpxml virtual-bmh-1 | grep -E 'loader|nvram|secure'
 ----
 +
-You want to see `OVMF_CODE.fd` and `secure='no'`. If the output shows `OVMF_CODE.secboot.fd` or `secure='yes'`, apply the fix below before creating the BMH.
-
-. *If* Secure Boot is enabled, disable it by redefining the VM with the non-secboot firmware. Skip this step if `secure='no'` was already shown above:
-+
-[source,role=execute]
-----
-virsh destroy virtual-bmh-1
-
-virsh dumpxml virtual-bmh-1 > /tmp/virtual-bmh-1.xml
-sed -i "s|OVMF_CODE.secboot.fd|OVMF_CODE.fd|g" /tmp/virtual-bmh-1.xml
-sed -i "s|secure='yes'|secure='no'|g" /tmp/virtual-bmh-1.xml
-sed -i "s|<feature enabled='yes' name='secure-boot'/>|<feature enabled='no' name='secure-boot'/>|g" /tmp/virtual-bmh-1.xml
-sed -i "s|<feature enabled='yes' name='enrolled-keys'/>|<feature enabled='no' name='enrolled-keys'/>|g" /tmp/virtual-bmh-1.xml
-
-virsh undefine virtual-bmh-1 --nvram
-virsh define /tmp/virtual-bmh-1.xml
-virsh start virtual-bmh-1
-
-virsh dumpxml virtual-bmh-1 | grep -E 'loader|nvram|secure'
-----
-+
-The final grep must show `OVMF_CODE.fd` and `secure='no'` before you continue.
+You want to see `OVMF_CODE.fd` (not `secboot`) and no `secure='yes'`.
 
 . Capture the VM UUID:
 +
