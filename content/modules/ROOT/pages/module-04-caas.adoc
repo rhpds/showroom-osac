@@ -7,149 +7,32 @@ toc::[]
 
 SAI Corp's teams can now provision virtual machines on demand through the VMaaS catalog. But their platform engineers also need full OpenShift clusters — for CI/CD pipelines, containerized workloads, and isolated test environments — provisioned with the same self-service experience.
 
-In this module, you enable Cluster as a Service (CaaS) for the OSAC platform. As the Sovereign Cloud Corp platform administrator, you configure Sushy on the bare-metal fabric host so Ironic can manage libvirt VMs as if they were physical servers, register a `BareMetalHost` that points at that Redfish endpoint, and publish the catalog objects that let tenants order clusters on demand. Then Alice, SAI Corp's tenant administrator, places a cluster order. The platform orchestrates a HyperShift Hosted Control Plane whose worker node boots directly onto the registered bare-metal host — no additional manual steps required.
+In this module, you enable Cluster as a Service (CaaS) for the OSAC platform. As the Sovereign Cloud Corp platform administrator, you will use a pre-configure Sushy emulator on the bare-metal fabric host so Ironic can manage libvirt VMs as if they were physical servers, register a `BareMetalHost` that points at that Redfish endpoint, and publish the catalog objects that let tenants order clusters on demand. Then Alice, SAI Corp's tenant administrator, places a cluster order. The platform orchestrates a HyperShift Hosted Control Plane whose worker node boots directly onto the registered bare-metal host — no additional manual steps required.
 
 == Learning objectives
 
 By the end of this module, you'll be able to:
 
-* Set up Sushy on the BMF host so Ironic can manage libvirt VMs through Redfish
+* Validate the Sushy setup on the BMF host so Ironic can manage libvirt VMs through Redfish
 * Register a `BareMetalHost` pointing at the Sushy/Redfish endpoint
 * Wait for Metal3 to inspect and make the host available
 * Publish platform catalog objects: `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem`
 * Order a hosted OpenShift cluster as a tenant using the OSAC CLI
-
-== Exercise 0: Set up the BMF VM to host bare metal servers
-
-[NOTE]
-====
-Once the steps are solid this will be fully automated and no longer necessary in future environments.
-====
-
-The bare-metal fabric host (`10.10.10.2`) runs libvirt and Sushy. Sushy emulates a Redfish BMC for each libvirt VM, so Ironic can power-cycle and provision them as if they were physical servers.
-
-Skip this exercise if the bastion already receives a valid Redfish response:
-
-[source,role=execute]
-----
-curl -sS -o /dev/null -w 'sushy=%{http_code}\n' http://10.10.10.2:8000/redfish/v1/Systems
-----
-
-If `sushy=200`, skip to Exercise 1.
-
-Otherwise, connect to the BMF host:
-
-[source,role=execute]
-----
-sudo ssh 10.10.10.2
-----
-
-Install the required packages. `python3-libvirt` must be installed on the system (not in the venv) so Sushy can import it:
-
-[source,role=execute]
-----
-dnf install -y qemu-kvm libvirt \
-  virt-install python3-pip python3-devel gcc \
-  pkgconf-pkg-config python3-libvirt \
-  coreos-installer
-----
-
-Enable the libvirt sockets:
-
-[source,role=execute]
-----
-systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket
-----
-
-Create the Python virtual environment. The `--system-site-packages` flag is required so the venv can import the system `libvirt` module:
-
-[source,role=execute]
-----
-python3 -m venv --system-site-packages /opt/sushy
-source /opt/sushy/bin/activate
-pip install -U pip
-pip install 'sushy-tools==2.1.0'
-----
-
-Verify that libvirt and KVM are accessible:
-
-[source,role=execute]
-----
-virsh -c qemu:///system list --all
-ls /dev/kvm
-----
-
-Create the Sushy configuration file:
-
-[source,role=execute]
-----
-mkdir -p /etc/sushy
-cat > /etc/sushy/sushy-emulator.conf <<'EOF'
-SUSHY_EMULATOR_LISTEN_IP = u'0.0.0.0'
-SUSHY_EMULATOR_LISTEN_PORT = 8000
-SUSHY_EMULATOR_LIBVIRT_URI = u'qemu:///system'
-EOF
-----
-
-Create a minimal smoke-test VM (`node1`). This is only a Redfish sanity check — it is not used as a CaaS worker:
-
-[source,role=execute]
-----
-virt-install --name node1 --memory 1024 --vcpus 2 \
-  --disk size=2 --pxe --network network=default \
-  --osinfo detect=on,require=off --noautoconsole
-
-virsh list --all
-virsh net-list --all
-virsh net-start default 2>/dev/null || true
-----
-
-Create the systemd unit for Sushy and start it:
-
-[source,role=execute]
-----
-cat > /etc/systemd/system/sushy-emulator.service <<'EOF'
-[Unit]
-Description=Sushy Redfish emulator
-After=network.target virtqemud.socket
-
-[Service]
-ExecStart=/opt/sushy/bin/sushy-emulator --config /etc/sushy/sushy-emulator.conf
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload && systemctl enable --now sushy-emulator
-----
-
-Verify that Sushy is responding and lists the `node1` VM:
-
-[source,role=execute]
-----
-curl -s http://localhost:8000/redfish/v1/Systems | python3 -m json.tool
-----
-
-You should see a system UUID (from `node1`). Log out of the BMF host:
-[source,role=execute]
-----
-exit
-----
-
-Test Sushy access from the bastion:
-[source,role=execute]
-----
-curl -sS -o /dev/null -w 'sushy=%{http_code}\n' http://10.10.10.2:8000/redfish/v1/Systems
-----
-
-`node1` is only a smoke test (1 GiB / 2 GiB). The actual CaaS worker VM is created in Exercise 3.
 
 == Exercise 1: Set up the lab environment
 
 Before running any CaaS workflow, verify the required tools and extract the cluster pull secret. You will log in as the cloud administrator.
 
 === Steps
+
+. Verify that the Sushy emulator is responding on the BMF host:
++
+[source,role=execute]
+----
+curl -sS -o /dev/null -w 'sushy=%{http_code}\n' http://10.10.10.2:8000/redfish/v1/Systems
+----
++
+If `sushy=200`, everything is set up properly. If not, refer to the appendix for setup instructions.
 
 . Verify the required tools are available on the bastion:
 +
@@ -377,7 +260,7 @@ oc label bmh virtual-bmh-1 -n osac \
   osac.openshift.io/host-type=default --overwrite
 ----
 
-. Watch the `BareMetalHost` move through `registering` → `inspecting` → `available`. Inspection takes 5–30 minutes:
+. Watch the `BareMetalHost` move through `registering` → `inspecting` → `available`. Inspection takes 5-30 minutes:
 +
 [source,role=execute]
 ----
@@ -517,7 +400,7 @@ osac --config $HOME/alice login --insecure \
   {osac_fulfillment_internal_api_url}
 ----
 +
-The CLI prints a URL and a short code. Open the *Red Hat cloud extensions* browser tab, navigate to that URL, enter the code, and log in as `alice` / `{osac_user_password}`.
+The CLI prints a URL and a short code. Open a *new incognito browser window*, navigate to that URL, enter the code, and log in as `alice` / `{osac_user_password}`.
 +
 [source,role=execute]
 ----
@@ -528,7 +411,7 @@ osac --config $HOME/alice whoami
 ----
 Logged in as: alice
 Tenant: sai-corp
-Role: tenant-admin
+Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
 ----
 
 . Confirm that Alice can see the published catalog item:
@@ -557,7 +440,7 @@ osac --config $HOME/alice create secret \
 osac --config $HOME/alice create cluster \
   --name sai-corp-caas-1 \
   --catalog-item hosted-ci-small \
-  --version 4.22.0-rhcos \
+  --version 4.22.0 \
   --node-set "name=workers,size=1,baremetal-instance-type=c1-metal-amd64" \
   --set node_sets.workers.baremetal_instance_type.shared=true \
   --pull-secret cluster-pull-secret \
@@ -687,3 +570,147 @@ SAI Corp can now provision hosted OpenShift clusters through the OSAC self-servi
 * *BMaaS and CaaS are independently gated*: The Helm chart controls each service with a feature flag. CaaS can be enabled while BMaaS is off, but the `BareMetalInstanceType` and cluster node provisioning both require BMaaS to be on.
 * *Catalog items decouple ordering from implementation*: The tenant specifies a `--catalog-item` name; the platform controls which template, OCP version, and hardware profile backs it. Sovereign Cloud Corp can update hardware or OCP versions without changing what tenants see in the catalog.
 * *`--catalog-item` replaces `--template` on cluster create*: The `--template` flag is deprecated. Always use `--catalog-item` for cluster orders; the two flags are mutually exclusive.
+
+== Appendix: Set up the BMF VM to host bare metal servers
+
+[NOTE]
+====
+This has already been set up for you in the RHDP lab. You only need to follow these steps if you are running the lab in a different environment or if the Sushy emulator is not responding on the BMF host.
+====
+
+The bare-metal fabric host (`10.10.10.2`) runs libvirt and Sushy. Sushy emulates a Redfish BMC for each libvirt VM, so Ironic can power-cycle and provision them as if they were physical servers.
+
+. Connect to the BMF host:
++
+[source,role=execute]
+----
+sudo ssh 10.10.10.2
+----
+
+. Install the required packages. `python3-libvirt` must be installed on the system (not in the venv) so Sushy can import it:
++
+[source,role=execute]
+----
+dnf install -y qemu-kvm libvirt \
+  virt-install python3-pip python3-devel gcc \
+  pkgconf-pkg-config python3-libvirt \
+  coreos-installer
+----
+
+. Enable the libvirt sockets:
++
+[source,role=execute]
+----
+systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket
+----
+
+. Create the Python virtual environment. The `--system-site-packages` flag is required so the venv can import the system `libvirt` module:
++
+[source,role=execute]
+----
+python3 -m venv --system-site-packages /opt/sushy
+source /opt/sushy/bin/activate
+pip install -U pip
+pip install 'sushy-tools==2.1.0'
+----
+
+. Verify that libvirt and KVM are accessible:
++
+[source,role=execute]
+----
+virsh -c qemu:///system list --all
+ls /dev/kvm
+----
+
+. Create the Sushy configuration file:
++
+[source,role=execute]
+----
+mkdir -p /etc/sushy
+cat > /etc/sushy/sushy-emulator.conf <<'EOF'
+SUSHY_EMULATOR_LISTEN_IP = u'0.0.0.0'
+SUSHY_EMULATOR_LISTEN_PORT = 8000
+SUSHY_EMULATOR_LIBVIRT_URI = u'qemu:///system'
+EOF
+----
+
+. List the available libvirt networks:
++
+[source,role=execute]
+----
+virsh list --all
+----
++
+.Sample Output
+----
+----
+
+. If the network `default` is not running, start it:
++
+[source,role=execute]
+----
+virsh net-start default
+----
++
+.Sample Output
+----
+----
+
+. Create the systemd unit for Sushy and start it:
++
+[source,role=execute]
+----
+cat > /etc/systemd/system/sushy-emulator.service <<'EOF'
+[Unit]
+Description=Sushy Redfish emulator
+After=network.target virtqemud.socket
+
+[Service]
+ExecStart=/opt/sushy/bin/sushy-emulator --config /etc/sushy/sushy-emulator.conf
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload && systemctl enable --now sushy-emulator
+----
+
+. Create a minimal smoke-test VM (`node1`). This is only a Redfish sanity check — it is not used as a CaaS worker:
++
+[source,role=execute]
+----
+virt-install --name node1 --memory 1024 --vcpus 2 \
+  --disk size=2 --pxe --network network=default \
+  --osinfo detect=on,require=off --noautoconsole
+----
+
+. Verify that Sushy is responding and lists the `node1` VM:
++
+[source,role=execute]
+----
+curl -s http://localhost:8000/redfish/v1/Systems | python3 -m json.tool
+----
++
+You should see a system UUID (from `node1`).
+
+. Remove the smoke test VM if you want to free up resources on the BMF host.
++
+[source,role=execute]
+----
+virsh destroy node1
+----
+
+. Clean up the disk image:
++
+[source,role=execute]
+----
+virsh undefine node1 --remove-all-storage
+----
+
+. Exit back to bastion:
++
+[source,role=execute]
+----
+exit
+----
