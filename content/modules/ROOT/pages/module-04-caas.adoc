@@ -34,17 +34,6 @@ curl -sS -o /dev/null -w 'sushy=%{http_code}\n' http://10.10.10.2:8000/redfish/v
 +
 If `sushy=200`, everything is set up properly. If not, refer to the appendix for setup instructions.
 
-. Verify the required tools are available on the bastion:
-+
-[source,role=execute]
-----
-oc whoami
-oc get nodes -o wide
-which oc osac
-----
-+
-All commands must succeed. If `osac` is missing, refer to the credentials page for installation instructions.
-
 . Generate an SSH key pair if one does not already exist:
 +
 [source,role=execute]
@@ -67,9 +56,13 @@ test -s "${HOME}/pull-secret-cluster.json" && echo "Pull secret OK"
 +
 [source,role=execute,subs=attributes]
 ----
-osac --config $HOME/admin login --insecure --private \
-  --address {osac_fulfillment_internal_api_url} \
-  --token-script "oc create token -n osac admin"
+osac --config $HOME/admin \     
+  login --insecure --private \
+  --issuer="https://keycloak-keycloak.{openshift_cluster_ingress_domain}/realms/osac" \
+  --flow=password \
+  --user=wkadmin \
+  --password=wolfgang \
+  {osac_fulfillment_internal_api_url}
 
 osac --config $HOME/admin whoami
 ----
@@ -126,6 +119,18 @@ oc get secret osac-inventory-config -n osac \
   -o jsonpath='{.data.inventory\.yaml}' | base64 -d
 ----
 +
+.Sample Output
+[source,yaml]
+----
+name: metal3-inventory
+type: metal3
+options:
+  metal3:
+    namespace: osac
+hostClass: metal3
+networkClass: ""
+----
++
 Expect `type: metal3` and `namespace: osac`.
 
 . Patch the fulfillment ConfigMap to use the `noop` DNS driver:
@@ -173,14 +178,19 @@ sudo ssh 10.10.10.2
 [source,role=execute]
 ----
 # Create the default storage pool if it does not already exist
-mkdir -p /var/lib/libvirt/images
+# [root@bmf ~]# virsh -c qemu:///system pool-list --all
+# Name      State    Autostart
+#-------------------------------
+# default   active   yes
 
-virsh -c qemu:///system pool-define-as default dir \
-  --target /var/lib/libvirt/images 2>/dev/null || true
+# mkdir -p /var/lib/libvirt/images
 
-virsh -c qemu:///system pool-start default 2>/dev/null || true
+# virsh -c qemu:///system pool-define-as default dir \
+#  --target /var/lib/libvirt/images 2>/dev/null || true
 
-virsh -c qemu:///system pool-autostart default
+# virsh -c qemu:///system pool-start default 2>/dev/null || true
+
+# virsh -c qemu:///system pool-autostart default
 
 virt-install --name virtual-bmh-1 \
   --memory 8192 --vcpus 4 \
@@ -190,6 +200,14 @@ virt-install --name virtual-bmh-1 \
   --os-variant rhel9-unknown \
   --import --noautoconsole
 ----
++
+.Sample Output
+----
+Starting install...
+Allocating 'virtual-bmh-1.qcow2'                                                                                                        | 120 GB  00:00:01     
+Creating domain...                                                                                                                      |         00:00:00     
+Domain creation completed.
+----
 
 . Confirm that Secure Boot is off:
 +
@@ -198,13 +216,68 @@ virt-install --name virtual-bmh-1 \
 virsh dumpxml virtual-bmh-1 | grep -E 'loader|nvram|secure'
 ----
 +
+.Sample Output
+----
+      <feature enabled='no' name='secure-boot'/>
+    <loader readonly='yes' type='pflash' format='raw'>/usr/share/edk2/ovmf/OVMF_CODE.fd</loader>
+    <nvram template='/usr/share/edk2/ovmf/OVMF_VARS.fd' templateFormat='raw' format='raw'>/var/lib/libvirt/qemu/nvram/virtual-bmh-1_VARS.fd</nvram>
+----
++
 You want to see `OVMF_CODE.fd` (not `secboot`) and no `secure='yes'`.
 
-. Capture the VM UUID:
+. Check that the VM is running:
 +
 [source,role=execute]
 ----
-virsh -c qemu:///system domuuid virtual-bmh-1
+virsh -c qemu:///system list --all
+----
++
+.Sample Output
+----
+ Id   Name            State
+-------------------------------
+ 1    virtual-bmh-1   running
+----
+
+. Get information about the running VM:
++
+[source,role=execute]
+----
+virsh -c qemu:///system dominfo virtual-bmh-1
+----
++
+.Sample Output
+----
+Id:             1
+Name:           virtual-bmh-1
+UUID:           22440142-6208-4b37-92a8-916aa7906012
+OS Type:        hvm
+State:          running
+CPU(s):         4
+CPU time:       8.9s
+Max memory:     8388608 KiB
+Used memory:    8388608 KiB
+Persistent:     yes
+Autostart:      disable
+Autostart Once: disable
+Managed save:   no
+Security model: selinux
+Security DOI:   0
+Security label: system_u:system_r:svirt_t:s0:c104,c402 (enforcing)
+----
+
+. And finally validate network and mac address:
++
+[source,role=execute]
+----
+virsh -c qemu:///system domiflist virtual-bmh-1
+----
++
+.Sample Output
+----
+ Interface   Type      Source    Model    MAC
+-------------------------------------------------------------
+ vnet0       network   default   virtio   52:54:00:ca:aa:01
 ----
 
 . Log out of the BMF host:
@@ -251,6 +324,12 @@ spec:
     disableCertificateVerification: true
 EOF
 ----
++
+.Sample Output
+----
+secret/virtual-bmh-1-bmc-secret created
+baremetalhost.metal3.io/virtual-bmh-1 created
+----
 
 . Label the `BareMetalHost` so OSAC can claim it:
 +
@@ -260,7 +339,7 @@ oc label bmh virtual-bmh-1 -n osac \
   osac.openshift.io/host-type=default --overwrite
 ----
 
-. Watch the `BareMetalHost` move through `registering` → `inspecting` → `available`. Inspection takes 5-30 minutes:
+. Watch the `BareMetalHost` move through `registering` → `inspecting` → `available`. Inspection takes approximately 5 minutes:
 +
 [source,role=execute]
 ----
@@ -269,27 +348,12 @@ watch -n 15 "oc get bmh virtual-bmh-1 -n osac \
 ----
 +
 Press `Ctrl+C` when `STATE=available`. The `BareMetalHost` must reach `available` before you proceed.
-+
-[WARNING]
-====
-If the `BareMetalHost` stays `inspecting` with no progress, the IPA discovery agent cannot reach Ironic or pull its container images. The most common cause on this lab is that the BMF host's nftables forward policy blocks traffic between the libvirt NAT bridge (`virbr0`) and the hub network or the internet. Contact your instructor if inspection does not complete within 30 minutes.
-====
 
 == Exercise 4: Publish cluster catalog objects
 
 With an `available` `BareMetalHost` in the inventory, you can publish the catalog objects tenants need to order a cluster. This exercise covers four resources: the `BareMetalInstanceType` (compute profile), the `DiskImage` (RHCOS OS source), the `ClusterVersion` (OCP release), and the `ClusterCatalogItem` (self-service template).
 
 === Steps
-
-. Check whether the catalog objects already exist before creating them:
-+
-[source,role=execute]
-----
-osac --config $HOME/admin get baremetalinstancetype
-osac --config $HOME/admin get diskimage
-osac --config $HOME/admin get clusterversion
-osac --config $HOME/admin get clustercatalogitem
-----
 
 . Create the `BareMetalInstanceType` that describes the worker VM's hardware profile:
 +
@@ -310,8 +374,8 @@ osac --config $HOME/admin get baremetalinstancetype
 +
 .Sample output
 ----
-NAME            CPU_CORES  CPU_ARCH  MEMORY_GB  STATE
-c1-metal-amd64  4          x86_64    8          ACTIVE
+TENANT  DELETING  NAME            ID              CORES  MEMORY  ACCELERATORS  DESCRIPTION
+shared  -         c1-metal-amd64  c1-metal-amd64  4      8 GB    -             RHDP libvirt+sushy BMH
 ----
 +
 [NOTE]
@@ -319,44 +383,32 @@ c1-metal-amd64  4          x86_64    8          ACTIVE
 The `--cpu-architecture` value must be the string `x86_64`, not the enum `ARCHITECTURE_AMD64`. The `--host-label` must match the label applied to the BMH in Exercise 3.
 ====
 
-. Create the RHCOS `DiskImage`:
+. Validate that the the RHCOS `DiskImage` exists:
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin create diskimage \
-  --name rhcos-4-22 \
-  --source-type registry \
-  --source-ref oci://quay.io/osac-project/rhcos:4.22.0 \
-  --architecture amd64
-
 osac --config $HOME/admin get diskimage
 ----
 +
 .Sample output
 ----
-NAME         DELETING  SOURCE_TYPE  ARCHITECTURE  LIFECYCLE   TENANT
-rhcos-4-22   -         REGISTRY     AMD64         AVAILABLE   shared
+NAME        DELETING  ID                                    SOURCE_REF                               GUEST_OS_FAMILY  ARCHITECTURE  LIFECYCLE  TENANT
+rhcos-4-22  -         01a1598a-cab0-7046-b8d5-cc6f9bba7ca6  oci://quay.io/osac-project/rhcos:4.22.0  LINUX            AMD64         AVAILABLE  shared
 ----
 
-. Create the `ClusterVersion` that links an OCP release image to the disk image:
+. Validate which `ClusterVersions` exist that link an OCP release image to the disk image:
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin create clusterversion \
-  --version 4.22.0-rhcos \
-  --image quay.io/openshift-release-dev/ocp-release:4.22.0-multi \
-  --disk-image rhcos-4-22 \
-  --enabled
-
 osac --config $HOME/admin get clusterversion
 ----
 +
 .Sample output
 ----
-VERSION         IMAGE
-4.22.0-rhcos    quay.io/openshift-release-dev/ocp-release:4.22.0-multi
+NAME    DELETING  VERSION  STATE   ENABLED  DEFAULT  IMAGE
+4-20-0  -         4.20.0   ACTIVE  true     false    quay.io/openshift-release-dev/ocp-release:4.20.0-multi
+4-22-0  -         4.22.0   ACTIVE  true     true     quay.io/openshift-release-dev/ocp-release:4.22.0-multi
 ----
-
 . Create and publish the `ClusterCatalogItem`:
 +
 [source,role=execute]
@@ -373,8 +425,8 @@ osac --config $HOME/admin get clustercatalogitem
 +
 .Sample output
 ----
-NAME              TITLE              PUBLISHED
-hosted-ci-small   Hosted CI small    true
+TENANT  DELETING  PROJECT  ID                                    NAME             TITLE            PUBLISHED
+shared  -         -        01a159db-18ad-7778-9309-b6c28c1ecd40  hosted-ci-small  Hosted CI small  true
 ----
 +
 Confirm the item shows `true` in the `PUBLISHED` column before continuing.
@@ -382,11 +434,6 @@ Confirm the item shows `true` in the `PUBLISHED` column before continuing.
 == Exercise 5: Order a hosted cluster as Alice
 
 With the catalog objects published, Alice can now self-service a hosted OpenShift cluster without involving the platform team. Alice authenticates through the SAI Corp identity provider using the device flow.
-
-[NOTE]
-====
-Alice's credentials live in the `sai-corp-idp` Keycloak realm, which is federated into the `osac` realm via identity brokering. The password direct-grant cannot broker federated credentials, so `--flow=password` fails with `invalid_grant`. Use `--flow=device` instead — it redirects through the IdP chain. The device flow stores a token locally; subsequent `osac` commands use that stored token against the internal API, so the OSAC-4519 HTTP/2 issue on the public Route is not a concern.
-====
 
 === Steps
 
@@ -421,6 +468,12 @@ Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
 osac --config $HOME/alice get clustercatalogitems --filter 'this.published'
 ----
 +
+.Sample Output
+----
+ENANT  DELETING  PROJECT  ID                                    NAME             TITLE            PUBLISHED
+shared  -         -        01a159db-18ad-7778-9309-b6c28c1ecd40  hosted-ci-small  Hosted CI small  true
+----
++
 The `hosted-ci-small` catalog item must appear before proceeding.
 
 . Create a pull secret in Alice's tenant so the cluster can pull images from Red Hat registries:
@@ -438,28 +491,45 @@ osac --config $HOME/alice create secret \
 [source,role=execute]
 ----
 osac --config $HOME/alice create cluster \
-  --name sai-corp-caas-1 \
+  --name sai-corp-cluster-1 \
   --catalog-item hosted-ci-small \
   --version 4.22.0 \
   --node-set "name=workers,size=1,baremetal-instance-type=c1-metal-amd64" \
   --set node_sets.workers.baremetal_instance_type.shared=true \
   --pull-secret cluster-pull-secret \
   --ssh-public-key-file "${HOME}/.ssh/id_ed25519.pub"
+----
++
+.Sample output
+----
+TBD
+----
 
+. Validate the cluster got created and is `Progressing`:
++
+[source,role=execute]
+----
 osac --config $HOME/alice get cluster
+----
++
+.Sample Output
+----
+TENANT    DELETING  PROJECT  ID                                    NAME                TEMPLATE      VERSION  STATE        API URL  CONSOLE URL  API ENDPOINT  INGRESS ENDPOINT
+sai-corp  -         -        01a159dd-b28a-7e79-8c3e-12e4499b2797  sai-corp-cluster-1  ocp-ci-small  4.22.0   PROGRESSING  -        -            -             -
+----
+
+. Check the `ClusterOrder`:
++
+[source,role=execute]
+----
 oc get clusterorder -n osac
 ----
 +
 .Sample output
 ----
-NAME              STATE
-sai-corp-caas-1   Pending
+NAME          TEMPLATE                      PHASE
+order-6bngl   osac.templates.ocp_ci_small   Progressing
 ----
-+
-[IMPORTANT]
-====
-Do not run `create cluster` a second time. Do not pass `--catalog-item` and `--template` together — the two flags are mutually exclusive.
-====
 
 . Watch the provisioning pipeline. The order progresses through these stages:
 +
