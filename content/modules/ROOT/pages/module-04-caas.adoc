@@ -327,6 +327,7 @@ virsh dumpxml virtual-bmh-1 > /tmp/virtual-bmh-1.xml
 sed -i "s|OVMF_CODE.secboot.fd|OVMF_CODE.fd|g" /tmp/virtual-bmh-1.xml
 sed -i "s|secure='yes'|secure='no'|g" /tmp/virtual-bmh-1.xml
 sed -i "s|<feature enabled='yes' name='secure-boot'/>|<feature enabled='no' name='secure-boot'/>|g" /tmp/virtual-bmh-1.xml
+sed -i "s|<feature enabled='yes' name='enrolled-keys'/>|<feature enabled='no' name='enrolled-keys'/>|g" /tmp/virtual-bmh-1.xml
 
 virsh undefine virtual-bmh-1 --nvram
 virsh define /tmp/virtual-bmh-1.xml
