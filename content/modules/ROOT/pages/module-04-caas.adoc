@@ -5,11 +5,6 @@
 
 toc::[]
 
-[WARNING]
-====
-This module is *VERY MUCH* work in progress. It is currently not guaranteed to work...
-====
-
 SAI Corp's teams can now provision virtual machines on demand through the VMaaS catalog. But their platform engineers also need full OpenShift clusters — for CI/CD pipelines, containerized workloads, and isolated test environments — provisioned with the same self-service experience.
 
 In this module, you enable Cluster as a Service (CaaS) for the OSAC platform. As the Sovereign Cloud Corp platform administrator, you configure Sushy on the bare-metal fabric host so Ironic can manage libvirt VMs as if they were physical servers, register a `BareMetalHost` that points at that Redfish endpoint, and publish the catalog objects that let tenants order clusters on demand. Then Alice, SAI Corp's tenant administrator, places a cluster order. The platform orchestrates a HyperShift Hosted Control Plane whose worker node boots directly onto the registered bare-metal host — no additional manual steps required.
@@ -53,8 +48,10 @@ Install the required packages. `python3-libvirt` must be installed on the system
 
 [source,role=execute]
 ----
-dnf install -y qemu-kvm libvirt virt-install python3-pip python3-devel gcc \
-  pkgconf-pkg-config python3-libvirt
+dnf install -y qemu-kvm libvirt \
+  virt-install python3-pip python3-devel gcc \
+  pkgconf-pkg-config python3-libvirt \
+  coreos-installer
 ----
 
 Enable the libvirt sockets:
@@ -134,11 +131,15 @@ Verify that Sushy is responding and lists the `node1` VM:
 curl -s http://localhost:8000/redfish/v1/Systems | python3 -m json.tool
 ----
 
-You should see a system UUID (from `node1`). Log out of the BMF host and test from the bastion:
-
+You should see a system UUID (from `node1`). Log out of the BMF host:
 [source,role=execute]
 ----
 exit
+----
+
+Test Sushy access from the bastion:
+[source,role=execute]
+----
 curl -sS -o /dev/null -w 'sushy=%{http_code}\n' http://10.10.10.2:8000/redfish/v1/Systems
 ----
 
@@ -216,14 +217,9 @@ vmaas:
 
 You patch Metal3 to watch BMHs in the `osac` namespace and configure the fulfillment service to use the `noop` DNS driver. The `noop` driver is required in RHDP environments that do not have external Route53 access.
 
-[NOTE]
-====
-The Linux bridge (`br-untagged`) and MachineConfig from previous lab versions are not required for the BMH/Sushy path. The CaaS worker VM runs on the BMF host, not on hub workers.
-====
-
 === Steps
 
-. Patch Metal3 to watch BareMetalHosts in all namespaces so it can manage hosts in `osac`:
+. Patch Metal3 to watch `BareMetalHosts` in all namespaces so it can manage hosts in `osac`:
 +
 [source,role=execute]
 ----
@@ -295,9 +291,12 @@ sudo ssh 10.10.10.2
 ----
 # Create the default storage pool if it does not already exist
 mkdir -p /var/lib/libvirt/images
+
 virsh -c qemu:///system pool-define-as default dir \
   --target /var/lib/libvirt/images 2>/dev/null || true
+
 virsh -c qemu:///system pool-start default 2>/dev/null || true
+
 virsh -c qemu:///system pool-autostart default
 
 virt-install --name virtual-bmh-1 \
@@ -324,8 +323,6 @@ You want to see `OVMF_CODE.fd` (not `secboot`) and no `secure='yes'`.
 ----
 virsh -c qemu:///system domuuid virtual-bmh-1
 ----
-+
-Copy the UUID — you need it in the next step.
 
 . Log out of the BMF host:
 +
@@ -334,13 +331,15 @@ Copy the UUID — you need it in the next step.
 exit
 ----
 
-. On the bastion, create the BMC secret and the `BareMetalHost`. Replace `<vm-uuid>` with the UUID you copied in the previous step:
+. On the bastion, create the BMC secret and the `BareMetalHost`:
 +
 [source,role=execute]
 ----
-VM_UUID=<vm-uuid>
+export VM_UUID=$(sudo ssh 10.10.10.2 virsh -c qemu:///system domuuid virtual-bmh-1)
+echo "VM_UUID=${VM_UUID}"
 
 oc apply -f - <<EOF
+---
 apiVersion: v1
 kind: Secret
 metadata:
@@ -370,7 +369,7 @@ spec:
 EOF
 ----
 
-. Label the BMH so OSAC can claim it:
+. Label the `BareMetalHost` so OSAC can claim it:
 +
 [source,role=execute]
 ----
@@ -378,7 +377,7 @@ oc label bmh virtual-bmh-1 -n osac \
   osac.openshift.io/host-type=default --overwrite
 ----
 
-. Watch the BMH move through `registering` → `inspecting` → `available`. Inspection takes 5–30 minutes:
+. Watch the `BareMetalHost` move through `registering` → `inspecting` → `available`. Inspection takes 5–30 minutes:
 +
 [source,role=execute]
 ----
@@ -386,16 +385,16 @@ watch -n 15 "oc get bmh virtual-bmh-1 -n osac \
   -o custom-columns=NAME:.metadata.name,STATUS:.status.operationalStatus,STATE:.status.provisioning.state,HOST-TYPE:.metadata.labels.osac\\.openshift\\.io/host-type"
 ----
 +
-Press `Ctrl+C` when `STATE=available`. The BMH must reach `available` before you proceed.
+Press `Ctrl+C` when `STATE=available`. The `BareMetalHost` must reach `available` before you proceed.
 +
 [WARNING]
 ====
-If the BMH stays `inspecting` with no progress, the IPA discovery agent cannot reach Ironic or pull its container images. The most common cause on this lab is that the BMF host's nftables forward policy blocks traffic between the libvirt NAT bridge (`virbr0`) and the hub network or the internet. Contact your instructor if inspection does not complete within 30 minutes.
+If the `BareMetalHost` stays `inspecting` with no progress, the IPA discovery agent cannot reach Ironic or pull its container images. The most common cause on this lab is that the BMF host's nftables forward policy blocks traffic between the libvirt NAT bridge (`virbr0`) and the hub network or the internet. Contact your instructor if inspection does not complete within 30 minutes.
 ====
 
 == Exercise 4: Publish cluster catalog objects
 
-With an `available` BareMetalHost in the inventory, you can publish the catalog objects tenants need to order a cluster. This exercise covers four resources: the `BareMetalInstanceType` (compute profile), the `DiskImage` (RHCOS OS source), the `ClusterVersion` (OCP release), and the `ClusterCatalogItem` (self-service template).
+With an `available` `BareMetalHost` in the inventory, you can publish the catalog objects tenants need to order a cluster. This exercise covers four resources: the `BareMetalInstanceType` (compute profile), the `DiskImage` (RHCOS OS source), the `ClusterVersion` (OCP release), and the `ClusterCatalogItem` (self-service template).
 
 === Steps
 
@@ -499,26 +498,29 @@ Confirm the item shows `true` in the `PUBLISHED` column before continuing.
 
 == Exercise 5: Order a hosted cluster as Alice
 
-With the catalog objects published, Alice can now self-service a hosted OpenShift cluster without involving the platform team. Alice logs in to the internal API using the Keycloak password flow.
+With the catalog objects published, Alice can now self-service a hosted OpenShift cluster without involving the platform team. Alice authenticates through the SAI Corp identity provider using the device flow.
 
 [NOTE]
 ====
-The public `fulfillment-api` Route has an HTTP/2 incompatibility that breaks the `osac` CLI stream (OSAC-4519). Tenant login must use the internal API (`{osac_fulfillment_internal_api_url}`), not the public Route.
+Alice's credentials live in the `sai-corp-idp` Keycloak realm, which is federated into the `osac` realm via identity brokering. The password direct-grant cannot broker federated credentials, so `--flow=password` fails with `invalid_grant`. Use `--flow=device` instead — it redirects through the IdP chain. The device flow stores a token locally; subsequent `osac` commands use that stored token against the internal API, so the OSAC-4519 HTTP/2 issue on the public Route is not a concern.
 ====
 
 === Steps
 
-. Log in to the internal OSAC API as Alice:
+. Log in to the OSAC API as Alice using the device flow:
 +
 [source,role=execute,subs=attributes]
 ----
 osac --config $HOME/alice login --insecure \
   --issuer="{osac_keycloak_url}/realms/osac" \
-  --flow=password \
-  --user=alice \
-  --password='{osac_user_password}' \
+  --flow=device \
   {osac_fulfillment_internal_api_url}
-
+----
++
+The CLI prints a URL and a short code. Open the *Red Hat cloud extensions* browser tab, navigate to that URL, enter the code, and log in as `alice` / `{osac_user_password}`.
++
+[source,role=execute]
+----
 osac --config $HOME/alice whoami
 ----
 +
