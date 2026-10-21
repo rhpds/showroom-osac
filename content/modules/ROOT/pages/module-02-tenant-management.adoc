@@ -159,6 +159,34 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms" \
 +
 Expected: `HTTP 201` (created) or `HTTP 409` (already exists).
 
+. Extend the realm's session limits to 24 hours. Keycloak's defaults end a login session after 30 minutes without activity and after 10 hours in total. Later modules include long waits, for example while a cluster provisions, and the default idle limit would log Alice and Bob out in the middle of them. The `osac` realm that Red Hat cloud extensions uses is already set to the same 24-hour values:
++
+[source,role=execute,subs=attributes]
+----
+curl -sk -X PUT "{osac_keycloak_url}/admin/realms/sai-corp-idp" \
+  -H "Authorization: Bearer ${KC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ssoSessionIdleTimeout": 86400,
+    "ssoSessionMaxLifespan": 86400
+  }' -w "Update session limits: HTTP %\{http_code}\n" -o /dev/null
+
+curl -sk "{osac_keycloak_url}/admin/realms/sai-corp-idp" \
+  -H "Authorization: Bearer ${KC_TOKEN}" \
+  | jq '{ssoSessionIdleTimeout, ssoSessionMaxLifespan}'
+----
++
+.Sample output
+----
+Update session limits: HTTP 204
+{
+  "ssoSessionIdleTimeout": 86400,
+  "ssoSessionMaxLifespan": 86400
+}
+----
++
+The values are in seconds; `86400` is 24 hours.
+
 . Create an OIDC client in the `sai-corp-idp` realm for Red Hat cloud extensions federation:
 +
 [source,role=execute,subs=attributes]

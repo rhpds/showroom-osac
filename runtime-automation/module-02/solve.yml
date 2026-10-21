@@ -157,6 +157,19 @@
       register: r_realm_create
       changed_when: r_realm_create.status == 201
 
+    - name: Set sai-corp-idp session limits to 24h
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        body_format: json
+        body:
+          ssoSessionIdleTimeout: 86400
+          ssoSessionMaxLifespan: 86400
+        validate_certs: false
+        status_code: [204]
+
     - name: Create OIDC federation client
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/clients"
