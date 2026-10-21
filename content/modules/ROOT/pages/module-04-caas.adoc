@@ -56,12 +56,12 @@ test -s "${HOME}/pull-secret-cluster.json" && echo "Pull secret OK"
 +
 [source,role=execute,subs=attributes]
 ----
-osac --config $HOME/admin \     
+osac --config $HOME/admin \
   login --insecure --private \
   --issuer="https://keycloak-keycloak.{openshift_cluster_ingress_domain}/realms/osac" \
   --flow=password \
-  --user=wkadmin \
-  --password=wolfgang \
+  --user= {osac_admin_user} \
+  --password={osac_admin_password} \
   {osac_fulfillment_internal_api_url}
 
 osac --config $HOME/admin whoami
@@ -109,6 +109,21 @@ oc get provisioning provisioning-configuration \
 .Sample output
 ----
 watchAllNamespaces=true
+----
+
+. Changing `watchAllNamespaces` restarts the Metal3 baremetal operator. Its admission webhook has no endpoints until the new pod is ready, and any `BareMetalHost` create or label in that window fails with `no endpoints available for service`. Wait for the rollout to finish:
++
+[source,role=execute]
+----
+oc rollout status deployment/metal3-baremetal-operator -n openshift-machine-api --timeout=300s
+oc get endpoints baremetal-operator-webhook-service -n openshift-machine-api
+----
++
+.Sample output
+----
+deployment "metal3-baremetal-operator" successfully rolled out
+NAME                                 ENDPOINTS           AGE
+baremetal-operator-webhook-service   10.234.0.251:9447   6d
 ----
 
 . Verify that the OSAC inventory is configured for Metal3 and the `osac` namespace:
@@ -162,6 +177,25 @@ oc get cm cluster-fulfillment-ig -n osac \
 DNS=dns.noop.dns HOSTED=hosted.cluster-9872p.dyn.redhatworkshops.io
 ----
 
+. Set a fabric manager on the `k8s-only` NetworkClass. Without it the `baremetalworker` controller never creates a `BareMetalInstance` and the `BareMetalHost` is never claimed. The NetworkClass is not exposed by the `osac` CLI in this build, so patch the fulfillment database directly:
++
+[source,role=execute]
+----
+PG_POD=$(oc get pods -n osac-infra -o name | grep postgres)
+
+oc exec -n osac-infra ${PG_POD} -- psql -U postgres osac_service -c \
+  "UPDATE network_classes SET data = data || '{\"fabric_manager\": \"cudn_net\"}'::jsonb
+   WHERE name = 'k8s-only'
+   RETURNING name, data->>'fabric_manager' AS fabric_manager, data->>'k8s_manager' AS k8s_manager;"
+----
++
+.Sample output
+----
+   name   | fabric_manager | k8s_manager
+----------+----------------+-------------
+ k8s-only | cudn_net       | k8s_only
+----
+
 == Exercise 3: Provision a bare-metal worker host
 
 CaaS needs at least one registered `BareMetalHost` before a tenant can order a cluster. In this RHDP lab a libvirt VM on the BMF host acts as a simulated bare-metal server. Sushy exposes it as a Redfish BMC. Metal3 / Ironic inspects and provisions it exactly as it would a physical host.
@@ -204,8 +238,8 @@ virt-install --name virtual-bmh-1 \
 .Sample Output
 ----
 Starting install...
-Allocating 'virtual-bmh-1.qcow2'                                                                                                        | 120 GB  00:00:01     
-Creating domain...                                                                                                                      |         00:00:00     
+Allocating 'virtual-bmh-1.qcow2'                                                                                                        | 120 GB  00:00:01
+Creating domain...                                                                                                                      |         00:00:00
 Domain creation completed.
 ----
 
@@ -315,7 +349,7 @@ spec:
   online: true
   bootMACAddress: 52:54:00:ca:aa:01
   bootMode: UEFI
-  automatedCleaningMode: metadata
+  automatedCleaningMode: disabled
   rootDeviceHints:
     deviceName: /dev/vda
   bmc:
@@ -348,6 +382,82 @@ watch -n 15 "oc get bmh virtual-bmh-1 -n osac \
 ----
 +
 Press `Ctrl+C` when `STATE=available`. The `BareMetalHost` must reach `available` before you proceed.
++
+[NOTE]
+====
+The `BareMetalHost` uses `automatedCleaningMode: disabled`. Disk cleaning runs the IPA agent again between deployments, and that needs the same Ironic-to-agent path you open in the next step. A failed clean drops the host into `deprovisioning` and deletes the `BareMetalInstance`. A lab worker does not need its disk wiped between orders.
+====
++
+[TIP]
+====
+If the host stays in `inspecting` for more than 10 minutes, the IPA discovery agent on the worker cannot reach Ironic on the hub or `quay.io`. In the RHDP lab this is already handled on the BMF host. In other environments, on the BMF host:
+
+* allow `virbr0` ⇄ `enp2s0` (hub) and `virbr0` ⇄ `enp1s0` (internet) in `inet filter forward`, and masquerade `192.168.122.0/24` out of both;
+* DNAT `10.10.10.100:6180` (the IPA rootfs URL on the provisioning VIP) to the node that actually serves it. That is the node running the `metal3` pod (`oc get pods -n openshift-machine-api -o wide | grep '^metal3-'`), not necessarily the VIP holder;
+* if `coreos-installer iso kargs show` on the attached ISO has no `ipa-api-url`, add `ipa-api-url=https://10.10.10.100:6385 ipa-insecure=1` with `coreos-installer iso kargs modify -a` and `virsh reboot virtual-bmh-1`.
+
+If inspection already timed out (`ERROR=inspection error`), do *not* `virsh destroy` the VM. Delete the `BareMetalHost`, then re-apply the Secret *and* the `BareMetalHost` from the previous step, and label it again.
+====
+
+. Open the return path from Ironic to the IPA agent. During provisioning, Ironic on the hub polls the IPA agent on the worker at `<guest-ip>:9999`. The worker sits on the libvirt NAT network (`192.168.122.0/24`) behind the BMF host. By default the hub has no route to that network, libvirt rejects inbound connections to guests, and libvirt NAT rewrites the agent's replies. Without this step the `BareMetalHost` stays in `provisioning` while Ironic logs `ConnectTimeout` to port `9999` every minute, and eventually fails.
++
+Add a route to the guest network on every control-plane node. Ironic runs in the host-network `metal3` pod, which can be rescheduled to any control-plane node:
++
+[source,role=execute]
+----
+for NODE in $(oc get nodes -l node-role.kubernetes.io/master -o name); do
+  oc debug ${NODE} -q -- nsenter -a -t 1 -- sh -c \
+    'ip route replace 192.168.122.0/24 via 10.10.10.2 dev br-ex && ip route show 192.168.122.0/24'
+done
+----
++
+.Sample output
+----
+192.168.122.0/24 via 10.10.10.2 dev br-ex
+192.168.122.0/24 via 10.10.10.2 dev br-ex
+192.168.122.0/24 via 10.10.10.2 dev br-ex
+----
++
+On the BMF host, allow the traffic through the host firewall and the libvirt firewall, and limit libvirt's NAT to new outbound connections:
++
+[source,role=execute]
+----
+sudo ssh 10.10.10.2 bash -s <<'EOF'
+nft insert rule inet filter forward iifname enp2s0 oifname virbr0 ip daddr 192.168.122.0/24 tcp dport 9999 ct state new accept
+nft insert rule inet filter forward iifname enp2s0 oifname virbr0 icmp type echo-request accept
+nft insert rule ip libvirt_network guest_input oif virbr0 ip daddr 192.168.122.0/24 tcp dport 9999 accept
+nft add rule ip libvirt_network guest_nat meta l4proto '{ tcp, udp }' ip saddr 192.168.122.0/24 ip daddr != 192.168.122.0/24 ct state new masquerade to :1024-65535
+nft add rule ip libvirt_network guest_nat ip saddr 192.168.122.0/24 ip daddr != 192.168.122.0/24 ct state new masquerade
+sysctl -w net.ipv4.conf.enp2s0.rp_filter=0 net.ipv4.conf.virbr0.rp_filter=0
+nft -a list chain ip libvirt_network guest_nat
+EOF
+----
++
+libvirt's default `guest_nat` chain masquerades guest traffic without checking connection state, which rewrites the agent's replies to Ironic so they arrive from the wrong address. Delete libvirt's original `masquerade` rules, the ones *without* `ct state new`, so only the two rules you just added remain:
++
+[source,role=execute]
+----
+sudo ssh 10.10.10.2 bash -s <<'EOF'
+for H in $(nft -a list chain ip libvirt_network guest_nat \
+    | awk '/masquerade/ && !/ct state new/ {print $NF}'); do
+  nft delete rule ip libvirt_network guest_nat handle ${H}
+done
+nft list chain ip libvirt_network guest_nat | grep masquerade
+EOF
+----
++
+.Sample output
+----
+		meta l4proto { tcp, udp } ip saddr 192.168.122.0/24 ip daddr != 192.168.122.0/24 ct state new masquerade to :1024-65535
+		ip saddr 192.168.122.0/24 ip daddr != 192.168.122.0/24 ct state new masquerade
+----
++
+[WARNING]
+====
+These routes and rules live in memory only. Do *not* run `systemctl reload nftables` on the BMF host. The on-disk configuration is an empty template, and reloading wipes the working ruleset. libvirt also rebuilds its `libvirt_network` table when the `default` network or `virtnetworkd` restarts. Re-apply this step after a reboot of the BMF host or a hub control-plane node.
+====
++
+The IPA agent only listens while the host is being provisioned, so you verify this path in Exercise 5.
 
 == Exercise 4: Publish cluster catalog objects
 
@@ -518,101 +628,321 @@ TENANT    DELETING  PROJECT  ID                                    NAME         
 sai-corp  -         -        01a159dd-b28a-7e79-8c3e-12e4499b2797  sai-corp-cluster-1  ocp-ci-small  4.22.0   PROGRESSING  -        -            -             -
 ----
 
-. Check the `ClusterOrder`:
+. Check the `ClusterOrder` and record the values the next steps use. The hosted cluster's DNS domain is `<order-name>.<hosted base domain>`, and the hosted control plane runs in namespace `osac-<order-name>-<order-name>`:
 +
 [source,role=execute]
 ----
-oc get clusterorder -n osac
+ORDER=$(oc get clusterorder -n osac --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
+DOMAIN=${ORDER}.$(oc get cm cluster-fulfillment-ig -n osac -o jsonpath='{.data.HOSTED_CLUSTER_BASE_DOMAIN}')
+HCP_NS=osac-${ORDER}
+echo "ORDER=${ORDER} DOMAIN=${DOMAIN} HCP_NS=${HCP_NS}"
+
+oc get clusterorder ${ORDER} -n osac
 ----
 +
 .Sample output
 ----
+ORDER=order-6bngl DOMAIN=order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io HCP_NS=osac-order-6bngl
 NAME          TEMPLATE                      PHASE
 order-6bngl   osac.templates.ocp_ci_small   Progressing
 ----
-
-. Watch the provisioning pipeline. The order progresses through these stages:
 +
-[source,role=execute]
-----
-watch -n 10 "oc get clusterorder,bmh,bmi,agent -n osac; oc get nodepool -A"
-----
+The order goes through these stages. The steps below tell you what to do at each one:
 +
-[cols="1,3",options="header"]
+[cols="1,3,3",options="header"]
 |===
-| Stage | What you see
+| Stage | What you see | Your action
 
 | 1
-| ClusterOrder `Progressing`; HostedCluster and NodePool appear
+| ClusterOrder `Progressing`; HostedCluster and NodePool appear; API VIP assigned
+| Check the subnet; point `api` DNS at the VIP
 
 | 2
-| `BaremetalInstance` (BMI) created; BMH `CONSUMER` set
+| `BareMetalInstance` (BMI) created; BMH `CONSUMER` set; BMH `provisioning`
+| Verify Ironic can reach the IPA agent
 
 | 3
-| Ironic `write_image`; BMH state `provisioning`
+| BMH `provisioned`; BMI `Ready`; Agent appears as `insufficient`
+| Give the worker temporary wildcard DNS; restart the agent
 
 | 4
-| BMH `provisioned`; BMI `Ready`
+| Agent `installing` → reboot; guest node `Ready`; NodePool still `0/1`
+| Set the node's `providerID`
 
 | 5
-| Worker boots; Agent registers → Bound → Validated → Done
+| NodePool `1/1`; order still `Progressing`; `console` operator not available
+| Point `*.apps` DNS at the worker; restart CoreDNS if needed
 
 | 6
-| NodePool `1/1`; order `Ready`; `osac get cluster` shows `READY`
+| Order `Ready`; `osac get cluster` shows `READY`
+| Verify the cluster
 |===
 +
-Press `Ctrl+C` when the order shows `Ready`. Full provisioning typically takes 20–40 minutes.
+[NOTE]
+====
+Every step after this one exists only because this lab uses `dns.noop` (no Route53) and a NAT-ed libvirt worker. On a platform with real DNS and a routed provisioning network, the order goes from stage 1 to stage 6 with no intervention.
 
-. Verify the cluster is reachable. Find the hosted cluster namespace and extract the admin kubeconfig:
+If the RHDP bastion has `~/rhdp-caas/caas-wa.sh`, you can run `~/rhdp-caas/caas-wa.sh auto` in a second terminal instead. It detects each stage and applies the stage 1 DNS step and the stage 3–5 steps automatically.
+====
+
+. Check the tenant's default subnet. The `cudn_net` subnet playbook creates the subnet's namespace and `ClusterUserDefinedNetwork` but does not write the output ConfigMap the operator expects, so the subnet can end up `Failed`. A `BareMetalInstance` cannot be created without a `Ready` subnet:
 +
 [source,role=execute]
 ----
-oc get hostedcluster -A
+oc get subnet -n osac
+----
++
+If the subnet shows `Failed`, create the missing output ConfigMap. The operator requires every key to be non-empty; the VNI and route values are not used by the CUDN backend:
++
+[source,role=execute]
+----
+SUBNET=$(oc get subnet -n osac -o jsonpath='{.items[0].metadata.name}')
+
+oc apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: subnet-${SUBNET}-fabric-output
+  namespace: osac
+data:
+  namespace: ${SUBNET}
+  cudn_name: ${SUBNET}
+  l2_vni: "100"
+  l3_vni: "200"
+  route_target: "65000:100"
+  vrf_name: ${SUBNET}
+  fabric_reserved_range: 10.200.0.0/28
+  dhcp_server_ip: ""
+  dhcp_relay_ip: ""
+EOF
+
+watch -n 10 oc get subnet -n osac
+----
++
+Press `Ctrl+C` when the subnet shows `Ready`.
+
+. Wait for MetalLB to assign the hosted cluster's API VIP, then publish `api` and `api-int` in the libvirt DNS on the BMF host. The worker resolves names through libvirt's dnsmasq at `192.168.122.1`, and with `dns.noop` nothing else publishes these records:
++
+[source,role=execute]
+----
+until VIP=$(oc get svc kube-apiserver -n ${HCP_NS}-${ORDER} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null) && [ -n "${VIP}" ]; do sleep 10; done
+echo "VIP=${VIP}"
+
+sudo ssh 10.10.10.2 virsh net-update default add dns-host \
+  "\"<host ip='${VIP}'><hostname>api.${DOMAIN}</hostname><hostname>api-int.${DOMAIN}</hostname></host>\"" \
+  --live --config
+
+sudo ssh 10.10.10.2 dig +short @192.168.122.1 api.${DOMAIN}
 ----
 +
 .Sample output
 ----
-NAMESPACE               NAME              VERSION   PROGRESS   AVAILABLE
-osac-order-<id>         sai-corp-caas-1   4.22.0    Completed  True
+VIP=10.10.10.240
+Updated network default persistent config and live state
+10.10.10.240
 ----
++
+[NOTE]
+====
+Each order gets the next free address from the MetalLB pool (`10.10.10.240`–`10.10.10.250`). Always read the VIP; do not assume `.240`. If you repeat the lab with a new order, remove stale entries first with `virsh net-update default delete dns-host ...` using the same XML.
+====
+
+. Once the `BareMetalHost` reaches `provisioning`, verify that Ironic can reach the IPA agent (Exercise 3). Any of `200`, `401`, or `403` means the path works; `000` means a route or firewall rule is missing:
 +
 [source,role=execute]
 ----
-ORDER_NS=$(oc get hostedcluster -A \
-  -o jsonpath='{range .items[?(@.metadata.name=="sai-corp-caas-1")]}{.metadata.namespace}{end}')
+watch -n 10 oc get bmh,bmi -n osac
+----
++
+Press `Ctrl+C` when the BMH shows `provisioning`, then run:
++
+[source,role=execute]
+----
+GUEST_IP=$(oc get bmh virtual-bmh-1 -n osac -o jsonpath='{.status.hardware.nics[0].ip}')
+METAL3_NODE=$(oc get pods -n openshift-machine-api -o wide | awk '/^metal3-[a-z0-9]+-[a-z0-9]+ /{print $7}')
+echo "GUEST_IP=${GUEST_IP} METAL3_NODE=${METAL3_NODE}"
 
-oc get secret -n "${ORDER_NS}" \
-  -o jsonpath='{range .items[?(@.metadata.name contains "admin-kubeconfig")]}{.metadata.name}{"\n"}{end}'
-
-oc get secret -n "${ORDER_NS}" \
-  -o jsonpath='{.items[?(@.metadata.annotations.osac\.openshift\.io/kubeconfig)].data.kubeconfig}' \
-  | base64 -d > /tmp/guest.kubeconfig 2>/dev/null \
-|| oc get secret sai-corp-caas-1-admin-kubeconfig -n "${ORDER_NS}" \
-  -o jsonpath='{.data.kubeconfig}' | base64 -d > /tmp/guest.kubeconfig
-
-oc --kubeconfig=/tmp/guest.kubeconfig --insecure-skip-tls-verify get nodes -o wide
+oc debug node/${METAL3_NODE} -q -- nsenter -a -t 1 -- \
+  curl -k -sS -m 5 -o /dev/null -w '%{http_code}\n' https://${GUEST_IP}:9999/
 ----
 +
 .Sample output
 ----
-NAME                   STATUS   ROLES    AGE   VERSION
-52-54-00-ca-aa-01      Ready    worker   8m    v1.29.x
+GUEST_IP=192.168.122.207 METAL3_NODE=control-plane-cluster-lgvqj-3
+200
 ----
 +
-A single worker node at `Ready` confirms the hosted cluster is operational.
+Ironic now writes RHCOS to the disk. This takes 5–10 minutes. Do *not* `virsh destroy` the VM and do *not* place a second order while the host is `provisioning`.
+
+. Wait for the worker to boot the discovery agent. When the BMH is `provisioned`, an `Agent` named after the VM's UUID appears in `osac`. It usually reports `insufficient` because its DNS validations fail. `api` resolves through libvirt, but `*.apps` is a wildcard, and libvirt's per-name `dns-host` records cannot express it:
++
+[source,role=execute]
+----
+AGENT=$(oc get bmh virtual-bmh-1 -n osac -o jsonpath='{.spec.bmc.address}' | sed 's|.*/Systems/||')
+echo "AGENT=${AGENT}"
+
+watch -n 15 "oc get bmh virtual-bmh-1 -n osac; oc get agent -n osac"
+----
++
+Press `Ctrl+C` when the agent shows up, then look at its state and failing validations:
++
+[source,role=execute]
+----
+oc get agent ${AGENT} -n osac -o jsonpath='{.status.debugInfo.state}{"\n"}'
+oc get agent ${AGENT} -n osac -o json \
+  | jq -r '.status.validationsInfo[][]? | select(.status=="failure") | .message'
+----
++
+.Sample output
+----
+insufficient
+Couldn't resolve domain name api.order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io ...
+Couldn't resolve domain name *.apps.order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io ...
+----
+
+. Give the worker a temporary wildcard DNS entry for the whole hosted domain, then restart the agent so it re-runs its validations. You reach the worker through the BMF host. Define a helper first:
++
+[source,role=execute]
+----
+guest_ssh() {
+  ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+    -o 'ProxyCommand=sudo ssh -W %h:%p root@10.10.10.2' core@${GUEST_IP} "$@"
+}
+----
++
+[source,role=execute]
+----
+guest_ssh sudo bash -s <<EOF
+install -d /etc/NetworkManager/dnsmasq.d /etc/NetworkManager/conf.d
+echo 'address=/.${DOMAIN}/${VIP}' > /etc/NetworkManager/dnsmasq.d/hosted.conf
+printf '[main]\ndns=dnsmasq\n' > /etc/NetworkManager/conf.d/90-dnsmasq.conf
+systemctl reload NetworkManager
+sleep 3
+getent hosts api.${DOMAIN} probe.apps.${DOMAIN}
+systemctl restart agent.service
+EOF
+----
++
+.Sample output
+----
+10.10.10.240    api.order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io
+10.10.10.240    probe.apps.order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io
+----
++
+Within a minute the agent moves to `installing`. It writes the image, then reboots into the installed OS. The reboot wipes these temporary files, which is intentional. Do *not* restart NetworkManager or the agent once the state is `installing`.
+
+. Wait for the guest node, then set its `providerID`. The agent CAPI provider is supposed to set `providerID` on the guest node, but in this build it does not. Without it the Machine never links to the node and the NodePool stays at `0/1`. Extract the hosted cluster's kubeconfig. Talk to the API by its VIP so the bastion needs no DNS entry:
++
+[source,role=execute]
+----
+oc extract secret/${ORDER}-admin-kubeconfig -n ${HCP_NS} --to=/tmp/${ORDER} --confirm
+guest_oc() {
+  oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify "$@"
+}
+
+watch -n 15 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get nodes; oc get nodepool -A"
+----
++
+Press `Ctrl+C` when the node shows `Ready`, then:
++
+[source,role=execute]
+----
+NODE=$(guest_oc get nodes -o jsonpath='{.items[0].metadata.name}')
+echo "NODE=${NODE} providerID=$(guest_oc get node ${NODE} -o jsonpath='{.spec.providerID}')"
+
+guest_oc patch node ${NODE} --type merge -p "{\"spec\":{\"providerID\":\"agent://${AGENT}\"}}"
+----
++
+Run the patch only if `providerID` was empty. Within a minute `oc get nodepool -A` shows `1/1` and the Machine shows `Running`.
+
+. Point the cluster's `*.apps` routes at the worker. The ingress router runs on the worker, not on the API VIP. Until `console`, `oauth` and `canary` resolve to the worker, the `console` cluster operator stays unavailable and the order never becomes `Ready`. Add the records to libvirt DNS, then make sure the worker uses libvirt DNS directly so CoreDNS inside the cluster does too:
++
+[source,role=execute]
+----
+sudo ssh 10.10.10.2 virsh net-update default add dns-host \
+  "\"<host ip='${GUEST_IP}'><hostname>console-openshift-console.apps.${DOMAIN}</hostname><hostname>canary-openshift-ingress-canary.apps.${DOMAIN}</hostname><hostname>oauth-openshift.apps.${DOMAIN}</hostname></host>\"" \
+  --live --config
+
+guest_ssh 'sudo rm -f /etc/NetworkManager/conf.d/90-dnsmasq.conf /etc/NetworkManager/dnsmasq.d/hosted.conf; sudo systemctl reload NetworkManager; grep nameserver /etc/resolv.conf'
+----
++
+.Sample output
+----
+Updated network default persistent config and live state
+nameserver 192.168.122.1
+----
+
+. Watch the cluster operators and the order:
++
+[source,role=execute]
+----
+watch -n 15 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get co console,ingress,authentication; oc get clusterorder ${ORDER} -n osac"
+----
++
+If `console` stays unavailable for more than 5 minutes, check the console operator log. `server misbehaving` on `172.31.0.10` means CoreDNS started while the worker still pointed at the temporary resolver. Recreate the DNS and console operator pods:
++
+[source,role=execute]
+----
+guest_oc logs -n openshift-console-operator deploy/console-operator --since=5m | grep -i 'server misbehaving'
+
+guest_oc delete pod -n openshift-dns -l dns.operator.openshift.io/daemonset-dns=default
+guest_oc delete pod -n openshift-console-operator --all
+----
++
+Press `Ctrl+C` when the order shows `Ready`. End to end, provisioning typically takes 30–45 minutes.
+
+. Verify the cluster from both sides:
++
+[source,role=execute]
+----
+osac --config $HOME/alice get cluster
+guest_oc get nodes -o wide
+guest_oc get clusterversion
+----
++
+.Sample output
+----
+TENANT    DELETING  PROJECT  ID                                    NAME                TEMPLATE      VERSION  STATE  ...
+sai-corp  -         -        01a159dd-b28a-7e79-8c3e-12e4499b2797  sai-corp-cluster-1  ocp-ci-small  4.22.0   READY  ...
+
+NAME                 STATUS   ROLES    AGE   VERSION   INTERNAL-IP
+52-54-00-ca-aa-01    Ready    worker   20m   v1.35.x   192.168.122.207
+
+NAME      VERSION   AVAILABLE   PROGRESSING   SINCE   STATUS
+version   4.22.0    True        False         5m      Cluster version is 4.22.0
+----
++
+A single worker node at `Ready` and an `Available` cluster version confirm that the hosted cluster is operational.
+
+[TIP]
+====
+*Troubleshooting: operator errors after about 2 hours.* If the order stalls and the `osac-operator` log shows `requesting fulfillment access token failed` (for storage, virtual networks, or network classes), the operator's service token has expired. Restart the three components and the order resumes on its next retry:
+
+[source,role=execute]
+----
+oc rollout restart deployment/osac-operator deployment/fulfillment-controller deployment/fulfillment-grpc-server -n osac
+----
+
+A failed `osac-create-hosted-cluster` AAP job is retried automatically with back-off; do not create a second order.
+====
+
 
 == Learning outcomes checkpoint
 
 Review what you completed in this module:
 
-* [x] Set up Sushy on the BMF host so Ironic can manage libvirt VMs through a Redfish BMC
-* [x] Patched Metal3 to watch BareMetalHosts in all namespaces
+* [x] Validated the Sushy Redfish emulator on the BMF host
+* [x] Patched Metal3 to watch BareMetalHosts in all namespaces and waited for its webhook
 * [x] Patched the fulfillment service DNS to use the `noop` driver for RHDP environments
+* [x] Gave the `k8s-only` NetworkClass a fabric manager so bare-metal workers can be allocated
 * [x] Created a worker libvirt VM with UEFI (Secure Boot off) on the BMF host
 * [x] Applied a `BareMetalHost` and BMC secret pointing at the Sushy Redfish endpoint
 * [x] Waited for Metal3 / Ironic to inspect and move the BMH to `available`
-* [x] Created `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem`
+* [x] Opened the Ironic-to-IPA return path through the BMF host
+* [x] Created and validated `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem`
 * [x] Ordered a hosted OpenShift cluster as Alice (tenant admin for sai-corp)
+* [x] Supplied the DNS, `providerID`, and ingress workarounds a `dns.noop` NAT lab needs
 * [x] Verified the cluster reached a `Ready` worker node via the guest kubeconfig
 
 == Solve the module
