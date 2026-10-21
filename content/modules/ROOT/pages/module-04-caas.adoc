@@ -987,6 +987,195 @@ A failed `osac-create-hosted-cluster` AAP job is retried automatically with back
 ====
 
 
+== Exercise 6: Access the hosted cluster
+
+The hosted cluster is running, but nothing outside the lab can reach it yet. This lab uses `dns.noop`, so OSAC never publishes DNS records for the cluster's API or `*.apps` domain. The API VIP (`10.10.10.240`) and the worker (`192.168.122.0/24`) are on private networks.
+
+In this exercise you publish both through the hub cluster's router. The hub's `*.apps` wildcard already resolves publicly, and HyperShift already publishes the hosted cluster's OAuth server as a hub route, so logging in works once the API and console are reachable. On a production platform with a real DNS driver, OSAC publishes these endpoints itself and this exercise is not needed.
+
+=== Steps
+
+. Set the names used in this exercise and create a hub namespace for the access routes. The shell variables `ORDER`, `VIP`, `GUEST_IP` and the `guest_oc` helper come from Exercise 5:
++
+[source,role=execute]
+----
+APPS=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
+API_HOST=api-${ORDER}.${APPS}
+CONSOLE_HOST=console-${ORDER}.${APPS}
+echo "ORDER=${ORDER} VIP=${VIP} GUEST_IP=${GUEST_IP}"
+echo "API_HOST=${API_HOST}"
+echo "CONSOLE_HOST=${CONSOLE_HOST}"
+
+oc create namespace osac-hosted-access
+----
++
+.Sample output
+----
+ORDER=order-4shw4 VIP=10.10.10.240 GUEST_IP=192.168.122.207
+API_HOST=api-order-4shw4.apps.cluster-kpxfr.dyn.redhatworkshops.io
+CONSOLE_HOST=console-order-4shw4.apps.cluster-kpxfr.dyn.redhatworkshops.io
+namespace/osac-hosted-access created
+----
+
+. Publish the API. A `Service` without a selector plus an `EndpointSlice` lets the hub router forward to an address outside the cluster, here the API VIP. The `Route` uses `passthrough` TLS, so the hosted cluster's API server terminates TLS itself:
++
+[source,role=execute]
+----
+oc apply -n osac-hosted-access -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-${ORDER}
+spec:
+  ports:
+  - name: https
+    port: 6443
+    targetPort: 6443
+    protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: api-${ORDER}
+  labels:
+    kubernetes.io/service-name: api-${ORDER}
+    endpointslice.kubernetes.io/managed-by: osac-lab
+addressType: IPv4
+ports:
+- name: https
+  port: 6443
+  protocol: TCP
+endpoints:
+- addresses:
+  - ${VIP}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: api-${ORDER}
+spec:
+  host: ${API_HOST}
+  to:
+    kind: Service
+    name: api-${ORDER}
+  port:
+    targetPort: https
+  tls:
+    termination: passthrough
+EOF
+----
+
+. Log in to the hosted cluster's API through the new route as `kubeadmin`. Use a separate kubeconfig file so you stay logged in to the hub. The API server's certificate does not include the new hostname, so skip TLS verification:
++
+[source,role=execute]
+----
+KUBEADMIN_PASSWORD=$(oc extract secret/${ORDER}-kubeadmin-password -n osac-${ORDER} --keys=password --to=-)
+
+oc login https://${API_HOST} -u kubeadmin -p "${KUBEADMIN_PASSWORD}" \
+  --insecure-skip-tls-verify --kubeconfig=/tmp/${ORDER}/kubeadmin.kubeconfig
+
+oc --kubeconfig=/tmp/${ORDER}/kubeadmin.kubeconfig get nodes
+----
++
+.Sample output
+----
+Login successful.
+...
+NAME                STATUS   ROLES    AGE   VERSION
+52-54-00-ca-aa-01   Ready    worker   80m   v1.35.5
+----
++
+This URL works from anywhere, including your laptop.
+
+. Check that the hub can reach the worker's ingress router. The lab provisioning adds the route and firewall rules this needs: a route to `192.168.122.0/24` on all hub nodes, and `tcp 443` allowed from the hub to the guests on the BMF host. Any HTTP code other than `000` means the path works:
++
+[source,role=execute]
+----
+ROUTER_NODE=$(oc get pods -n openshift-ingress -o wide --no-headers | awk 'NR==1{print $7}')
+
+oc debug node/${ROUTER_NODE} -q -- nsenter -a -t 1 -- \
+  curl -k -s -m 5 -o /dev/null -w '%{http_code}\n' https://${GUEST_IP}/
+----
++
+.Sample output
+----
+404
+----
++
+If you get `000`, the hub-side route or the BMF firewall rule for port `443` is missing. Ask your instructor.
+
+. Publish the console on the hub. This uses the same pattern as the API, pointing at the worker's ingress router on port `443`. Create it before you rename the console in the next step, because the console operator checks the new URL as soon as you change it:
++
+[source,role=execute]
+----
+oc apply -n osac-hosted-access -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: console-${ORDER}
+spec:
+  ports:
+  - name: https
+    port: 443
+    targetPort: 443
+    protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: console-${ORDER}
+  labels:
+    kubernetes.io/service-name: console-${ORDER}
+    endpointslice.kubernetes.io/managed-by: osac-lab
+addressType: IPv4
+ports:
+- name: https
+  port: 443
+  protocol: TCP
+endpoints:
+- addresses:
+  - ${GUEST_IP}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: console-${ORDER}
+spec:
+  host: ${CONSOLE_HOST}
+  to:
+    kind: Service
+    name: console-${ORDER}
+  port:
+    targetPort: https
+  tls:
+    termination: passthrough
+EOF
+----
+
+. Give the hosted cluster's console the public hostname. The hub router passes the request through unchanged, so the hosted cluster's own router must recognize the new name. The `componentRoutes` setting tells the console operator to serve the console under that hostname and to register it as an OAuth redirect:
++
+[source,role=execute]
+----
+guest_oc patch ingresses.config/cluster --type merge -p \
+  "{\"spec\":{\"componentRoutes\":[{\"name\":\"console\",\"namespace\":\"openshift-console\",\"hostname\":\"${CONSOLE_HOST}\"}]}}"
+
+watch -n 10 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get route -n openshift-console; oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get co console"
+----
++
+Press `Ctrl+C` when the `console` route shows the new hostname and the `console` operator is `Available`. This takes 1–2 minutes.
+
+. Open the console in your browser:
++
+[source,role=execute]
+----
+echo "https://${CONSOLE_HOST}"
+echo "kubeadmin / ${KUBEADMIN_PASSWORD}"
+----
++
+Your browser warns about the certificate, because the hosted cluster uses its own self-signed ingress certificate. Accept the warning, choose *kube:admin*, and log in with the password above. During login the browser is sent to the hosted cluster's OAuth server, which HyperShift publishes as a hub route. Accept that certificate warning too, if prompted.
++
+You now see the console of the cluster that Alice ordered, running on the bare-metal worker you registered in Exercise 3.
+
 == Learning outcomes checkpoint
 
 Review what you completed in this module:
@@ -1003,6 +1192,7 @@ Review what you completed in this module:
 * [x] Ordered a hosted OpenShift cluster as Alice (tenant admin for sai-corp)
 * [x] Supplied the DNS, `providerID`, and ingress workarounds a `dns.noop` NAT lab needs
 * [x] Verified the cluster reached a `Ready` worker node via the guest kubeconfig
+* [x] Published the hosted cluster's API and console through the hub router and logged in as `kubeadmin`
 
 == Solve the module
 
