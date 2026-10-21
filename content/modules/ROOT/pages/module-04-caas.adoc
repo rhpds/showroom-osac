@@ -1102,7 +1102,63 @@ oc debug node/${ROUTER_NODE} -q -- nsenter -a -t 1 -- \
 404
 ----
 +
-If you get `000`, the hub-side route or the BMF firewall rule for port `443` is missing. Ask your instructor.
+If you get `000`, the hub-side route or the BMF firewall rule for port `443` is missing.
++
+.If the check returns `000`, open the path by hand (expand)
+[%collapsible]
+====
+Two pieces are needed for the hub router to reach the worker's ingress router at `<guest-ip>:443`.
+
+*1. A route from every hub node to the guest network.* The hub's ingress routers run with `hostNetwork: true` on the worker nodes, so they use each node's own routing table. By default that table sends `192.168.122.0/24` to the node's default gateway, which knows nothing about the libvirt network. The NMState policy `osac-bmf-guest-route` adds `192.168.122.0/24 via 10.10.10.2 dev br-ex` (`10.10.10.2` is the BMF host), but only on control-plane nodes, because Ironic runs there. Remove its node selector so NMState applies it to every node. NMState writes the route into NetworkManager, so it survives node reboots:
+
+[source,role=execute]
+----
+oc patch nncp osac-bmf-guest-route --type json -p '[{"op":"remove","path":"/spec/nodeSelector"}]'
+
+oc wait nncp osac-bmf-guest-route --for=condition=Available --timeout=300s
+oc get nnce | grep osac-bmf-guest-route
+----
+
+.Sample output
+----
+nodenetworkconfigurationpolicy.nmstate.io/osac-bmf-guest-route patched
+nodenetworkconfigurationpolicy.nmstate.io/osac-bmf-guest-route condition met
+control-plane-cluster-kpxfr-1.osac-bmf-guest-route   Available   3h    SuccessfullyConfigured
+control-plane-cluster-kpxfr-2.osac-bmf-guest-route   Available   3h    SuccessfullyConfigured
+control-plane-cluster-kpxfr-3.osac-bmf-guest-route   Available   3h    SuccessfullyConfigured
+worker-cluster-kpxfr-1.osac-bmf-guest-route          Available   30s   SuccessfullyConfigured
+worker-cluster-kpxfr-2.osac-bmf-guest-route          Available   30s   SuccessfullyConfigured
+----
+
+*2. Firewall rules on the BMF host that let the traffic through.* Packets from the hub arrive on the BMF host's `enp2s0` (hub network) and leave on `virbr0` (libvirt bridge). Two separate firewalls sit on that path:
+
+* `inet filter forward` is the BMF host's own forwarding chain, with policy `drop`. It already allows `virbr0` → `enp2s0` (the replies) and `tcp 9999` towards the guests, but not `80` or `443`.
+* `ip libvirt_network guest_input` is libvirt's chain for traffic *into* the NAT network. It accepts only replies to connections the guests started, and rejects everything else.
+
+`nft insert` puts each rule at the top of its chain, ahead of the `drop` and `reject`. The `grep` guards make the commands safe to run twice:
+
+[source,role=execute]
+----
+sudo ssh 10.10.10.2 bash -s <<'EOF'
+nft list chain inet filter forward | grep -q 'dport.*443' || \
+  nft insert rule inet filter forward iifname enp2s0 oifname virbr0 ip daddr 192.168.122.0/24 tcp dport '{ 80, 443 }' ct state new accept
+nft list chain ip libvirt_network guest_input | grep -q 'dport.*443' || \
+  nft insert rule ip libvirt_network guest_input oif virbr0 ip daddr 192.168.122.0/24 tcp dport '{ 80, 443 }' accept
+nft list chain inet filter forward | grep 'dport.*443'
+nft list chain ip libvirt_network guest_input | grep 'dport.*443'
+EOF
+----
+
+.Sample output
+----
+		iifname "enp2s0" oifname "virbr0" ip daddr 192.168.122.0/24 tcp dport { 80, 443 } ct state new accept
+		oif "virbr0" ip daddr 192.168.122.0/24 tcp dport { 80, 443 } accept
+----
+
+These BMF rules live in memory only. The `guest_input` rule disappears when libvirt rebuilds its table, for example after a restart of `virtnetworkd`; re-run this command if that happens. Current lab provisioning adds both pieces permanently.
+
+Run the check above again. It now returns an HTTP code such as `404`.
+====
 
 . Publish the console on the hub. This uses the same pattern as the API, pointing at the worker's ingress router on port `443`. Create it before you rename the console in the next step, because the console operator checks the new URL as soon as you change it:
 +
