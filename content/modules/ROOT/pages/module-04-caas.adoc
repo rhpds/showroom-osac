@@ -410,8 +410,8 @@ Check the firewall rules on the BMF host:
 [source,role=execute]
 ----
 sudo ssh 10.10.10.2 'systemctl is-enabled osac-bmf-nft.timer \
-  && nft list chain inet filter forward | grep -q "tcp dport 9999" \
-  && nft list chain ip libvirt_network guest_input | grep -q "tcp dport 9999" \
+  && nft list chain inet filter forward | grep -q "dport.*9999" \
+  && nft list chain ip libvirt_network guest_input | grep -q "dport.*9999" \
   && ! nft list chain ip libvirt_network guest_nat | grep masquerade | grep -vq "ct state new" \
   && echo BMF OK'
 ----
