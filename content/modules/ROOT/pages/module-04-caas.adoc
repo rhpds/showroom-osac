@@ -936,7 +936,7 @@ nameserver 192.168.122.1
 +
 [source,role=execute]
 ----
-watch -n 15 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get co console ingress authentication; oc get clusterorder ${ORDER} -n osac"
+watch -n 15 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get co console ingress; oc get clusterorder ${ORDER} -n osac"
 ----
 +
 If `console` stays unavailable for more than 5 minutes, check the console operator log. `server misbehaving` on `172.31.0.10` means CoreDNS started while the worker still pointed at the temporary resolver. Recreate the DNS and console operator pods:
