@@ -356,91 +356,71 @@ If the host stays in `inspecting` for more than 10 minutes, the IPA discovery ag
 If inspection already timed out (`ERROR=inspection error`), do *not* `virsh destroy` the VM. Delete the `BareMetalHost`, then re-apply the Secret *and* the `BareMetalHost` from the previous step, and label it again.
 ====
 
-. Verify the return path from Ironic to the IPA agent. During provisioning, Ironic on the hub polls the IPA agent on the worker at `<guest-ip>:9999`. The worker sits on the libvirt NAT network (`192.168.122.0/24`) behind the BMF host. The lab provisioning makes this path work and keeps it in place across reboots: a route to `192.168.122.0/24` via the BMF host on every control-plane node, and firewall rules on the BMF host that let the hub reach port `9999` and keep libvirt NAT from rewriting the agent's replies. Without it, the `BareMetalHost` stays in `provisioning` while Ironic logs `ConnectTimeout` to port `9999`, and eventually fails.
+. Verify the return path from Ironic to the IPA agent. During provisioning, Ironic on the hub polls the IPA agent on the worker at `<guest-ip>:9999`. The worker sits on the libvirt network `192.168.122.0/24` behind the BMF host. The lab provisioning makes this path work and keeps it in place across reboots:
++
+* a route to `192.168.122.0/24` via the BMF host (`10.10.10.2`) on every hub node, set by the `osac-guest-route` MachineConfigs;
+* on the BMF host, firewall rules that let the hub reach the guests on ports `80`, `443`, and `9999`, plus NAT for the guests' own outbound traffic. The libvirt network runs in `open` forward mode, so libvirt adds no firewall rules of its own.
++
+Without this path, the `BareMetalHost` stays in `provisioning` while Ironic logs `ConnectTimeout` to port `9999`, and eventually fails.
 +
 Check the route on the hub:
 +
 [source,role=execute]
 ----
-oc get nncp osac-bmf-guest-route -o jsonpath='{.status.conditions[?(@.type=="Available")].status}{"\n"}'
+oc get mc | grep osac-guest-route
 
-for NODE in $(oc get nodes -l node-role.kubernetes.io/master -o name); do
+for NODE in $(oc get nodes -o name); do
   oc debug ${NODE} -q -- chroot /host ip route get 192.168.122.10 | head -1
 done
 ----
 +
 .Sample output
 ----
-True
+99-master-osac-guest-route                                                                    3.4.0             5m
+99-worker-osac-guest-route                                                                    3.4.0             5m
 192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.10 uid 0
 192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.11 uid 0
 192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.12 uid 0
+192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.20 uid 0
+192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.21 uid 0
 ----
 +
-Check the firewall rules on the BMF host:
+Check the firewall rule on the BMF host:
 +
 [source,role=execute]
 ----
-sudo ssh 10.10.10.2 'systemctl is-enabled osac-bmf-nft.timer \
-  && nft list chain inet filter forward | grep -q "dport.*9999" \
-  && nft list chain ip libvirt_network guest_input | grep -q "dport.*9999" \
-  && ! nft list chain ip libvirt_network guest_nat | grep masquerade | grep -vq "ct state new" \
-  && echo BMF OK'
+sudo ssh 10.10.10.2 'nft list chain inet filter forward | grep -q "dport.*9999" && echo BMF OK'
 ----
 +
 .Sample output
 ----
-enabled
 BMF OK
 ----
 +
 .If either check fails, apply the path by hand (expand)
 [%collapsible]
 ====
-These commands are lost after a reboot of the BMF host or a hub control-plane node. Do *not* run `systemctl reload nftables` on the BMF host afterwards.
+These commands do not survive a reboot of the BMF host or a hub node.
 
-Add a route to the guest network on every control-plane node. Ironic runs in the host-network `metal3` pod, which can be rescheduled to any control-plane node:
+Add the route on every hub node. Ironic runs in the host-network `metal3` pod on a control-plane node, and the hub routers run on the workers:
+
 [source,role=execute]
 ----
-for NODE in $(oc get nodes -l node-role.kubernetes.io/master -o name); do
-  oc debug ${NODE} -q -- nsenter -a -t 1 -- sh -c \
-    'ip route replace 192.168.122.0/24 via 10.10.10.2 dev br-ex && ip route show 192.168.122.0/24'
+for NODE in $(oc get nodes -o name); do
+  oc debug ${NODE} -q -- chroot /host ip route replace 192.168.122.0/24 via 10.10.10.2 dev br-ex
 done
 ----
-.Sample output
-----
-192.168.122.0/24 via 10.10.10.2 dev br-ex
-192.168.122.0/24 via 10.10.10.2 dev br-ex
-192.168.122.0/24 via 10.10.10.2 dev br-ex
-----
-On the BMF host, allow the traffic through the host firewall and the libvirt firewall, and limit libvirt's NAT to new outbound connections:
+
+On the BMF host, allow the hub to reach the guests:
+
 [source,role=execute]
 ----
 sudo ssh 10.10.10.2 bash -s <<'EOF'
-nft insert rule inet filter forward iifname enp2s0 oifname virbr0 ip daddr 192.168.122.0/24 tcp dport 9999 ct state new accept
-nft insert rule inet filter forward iifname enp2s0 oifname virbr0 icmp type echo-request accept
-nft insert rule ip libvirt_network guest_input oif virbr0 ip daddr 192.168.122.0/24 tcp dport 9999 accept
-nft add rule ip libvirt_network guest_nat meta l4proto '{ tcp, udp }' ip saddr 192.168.122.0/24 ip daddr != 192.168.122.0/24 ct state new masquerade to :1024-65535
-nft add rule ip libvirt_network guest_nat ip saddr 192.168.122.0/24 ip daddr != 192.168.122.0/24 ct state new masquerade
-sysctl -w net.ipv4.conf.enp2s0.rp_filter=0 net.ipv4.conf.virbr0.rp_filter=0
-nft -a list chain ip libvirt_network guest_nat
+sysctl -w net.ipv4.ip_forward=1
+nft list chain inet filter forward | grep -q 'dport.*9999' || \
+  nft insert rule inet filter forward iifname enp2s0 oifname virbr0 ip daddr 192.168.122.0/24 tcp dport '{ 80, 443, 9999 }' ct state new accept
+nft list chain inet filter forward | grep 'dport'
 EOF
-----
-libvirt's default `guest_nat` chain masquerades guest traffic without checking connection state, which rewrites the agent's replies to Ironic so they arrive from the wrong address. Delete libvirt's original `masquerade` rules, the ones *without* `ct state new`, so only the two rules you just added remain:
-[source,role=execute]
-----
-sudo ssh 10.10.10.2 bash -s <<'EOF'
-for H in $(nft -a list chain ip libvirt_network guest_nat \
-    | awk '/masquerade/ && !/ct state new/ {print $NF}'); do
-  nft delete rule ip libvirt_network guest_nat handle ${H}
-done
-nft list chain ip libvirt_network guest_nat | grep masquerade
-EOF
-----
-.Sample output
-----
-		meta l4proto { tcp, udp } ip saddr 192.168.122.0/24 ip daddr != 192.168.122.0/24 ct state new masquerade to :1024-65535
-		ip saddr 192.168.122.0/24 ip daddr != 192.168.122.0/24 ct state new masquerade
 ----
 ====
 +
@@ -726,7 +706,7 @@ The order goes through these stages. The steps below tell you what to do at each
 +
 [NOTE]
 ====
-Every step after this one exists only because this lab uses `dns.noop` (no Route53) and a NAT-ed libvirt worker. On a platform with real DNS and a routed provisioning network, the order goes from stage 1 to stage 6 with no intervention.
+Every step after this one exists only because this lab uses `dns.noop` (no Route53) and a worker on a private libvirt network. On a platform with real DNS and a routed provisioning network, the order goes from stage 1 to stage 6 with no intervention.
 
 Your bastion VM has a script, `~/rhdp-caas/caas-wa.sh`, you can run `~/rhdp-caas/caas-wa.sh auto` in a second terminal instead. It detects each stage and applies the stage 1 DNS step and the stage 3-5 steps automatically.
 ====
@@ -1314,55 +1294,29 @@ oc debug node/${ROUTER_NODE} -q -- nsenter -a -t 1 -- \
 ====
 Two pieces are needed for the hub router to reach the worker's ingress router at `<guest-ip>:443`.
 
-*1. A route from every hub node to the guest network.* The hub's ingress routers run with `hostNetwork: true` on the worker nodes, so they use each node's own routing table. By default that table sends `192.168.122.0/24` to the node's default gateway, which knows nothing about the libvirt network. The NMState policy `osac-bmf-guest-route` adds `192.168.122.0/24 via 10.10.10.2 dev br-ex` (`10.10.10.2` is the BMF host), but only on control-plane nodes, because Ironic runs there. Remove its node selector so NMState applies it to every node. NMState writes the route into NetworkManager, so it survives node reboots:
+*1. A route from every hub node to the guest network.* The hub's ingress routers run with `hostNetwork: true` on the worker nodes, so they use each node's own routing table. The lab provisioning adds `192.168.122.0/24 via 10.10.10.2 dev br-ex` (`10.10.10.2` is the BMF host) on every node through the `osac-guest-route` MachineConfigs. Check it, and add it by hand if it is missing:
 
 [source,role=execute]
 ----
-oc patch nncp osac-bmf-guest-route --type json -p '[{"op":"remove","path":"/spec/nodeSelector"}]'
+oc get mc | grep osac-guest-route
 
-oc wait nncp osac-bmf-guest-route --for=condition=Available --timeout=300s
-oc get nnce | grep osac-bmf-guest-route
+for NODE in $(oc get nodes -o name); do
+  oc debug ${NODE} -q -- chroot /host ip route replace 192.168.122.0/24 via 10.10.10.2 dev br-ex
+done
 ----
 
-.Sample output
-----
-nodenetworkconfigurationpolicy.nmstate.io/osac-bmf-guest-route patched
-nodenetworkconfigurationpolicy.nmstate.io/osac-bmf-guest-route condition met
-control-plane-cluster-kpxfr-1.osac-bmf-guest-route   Available   3h    SuccessfullyConfigured
-control-plane-cluster-kpxfr-2.osac-bmf-guest-route   Available   3h    SuccessfullyConfigured
-control-plane-cluster-kpxfr-3.osac-bmf-guest-route   Available   3h    SuccessfullyConfigured
-worker-cluster-kpxfr-1.osac-bmf-guest-route          Available   30s   SuccessfullyConfigured
-worker-cluster-kpxfr-2.osac-bmf-guest-route          Available   30s   SuccessfullyConfigured
-----
-
-*2. Firewall rules on the BMF host that let the traffic through.* Packets from the hub arrive on the BMF host's `enp2s0` (hub network) and leave on `virbr0` (libvirt bridge). Two separate firewalls sit on that path:
-
-* `inet filter forward` is the BMF host's own forwarding chain, with policy `drop`. It already allows `virbr0` → `enp2s0` (the replies) and `tcp 9999` towards the guests, but not `80` or `443`.
-* `ip libvirt_network guest_input` is libvirt's chain for traffic *into* the NAT network. It accepts only replies to connections the guests started, and rejects everything else.
-
-`nft insert` puts each rule at the top of its chain, ahead of the `drop` and `reject`. The `grep` guards make the commands safe to run twice:
+*2. A firewall rule on the BMF host that lets the traffic through.* Packets from the hub arrive on the BMF host's `enp2s0` (hub network) and leave on `virbr0` (libvirt bridge). The BMF host's forwarding chain `inet filter forward` has policy `drop`, so it needs an accept rule for ports `80` and `443` towards the guests. The libvirt network runs in `open` forward mode, so there is no separate libvirt firewall to open:
 
 [source,role=execute]
 ----
 sudo ssh 10.10.10.2 bash -s <<'EOF'
 nft list chain inet filter forward | grep -q 'dport.*443' || \
-  nft insert rule inet filter forward iifname enp2s0 oifname virbr0 ip daddr 192.168.122.0/24 tcp dport '{ 80, 443 }' ct state new accept
-nft list chain ip libvirt_network guest_input | grep -q 'dport.*443' || \
-  nft insert rule ip libvirt_network guest_input oif virbr0 ip daddr 192.168.122.0/24 tcp dport '{ 80, 443 }' accept
-nft list chain inet filter forward | grep 'dport.*443'
-nft list chain ip libvirt_network guest_input | grep 'dport.*443'
+  nft insert rule inet filter forward iifname enp2s0 oifname virbr0 ip daddr 192.168.122.0/24 tcp dport '{ 80, 443, 9999 }' ct state new accept
+nft list chain inet filter forward | grep 'dport'
 EOF
 ----
 
-.Sample output
-----
-		iifname "enp2s0" oifname "virbr0" ip daddr 192.168.122.0/24 tcp dport { 80, 443 } ct state new accept
-		oif "virbr0" ip daddr 192.168.122.0/24 tcp dport { 80, 443 } accept
-----
-
-These BMF rules live in memory only. The `guest_input` rule disappears when libvirt rebuilds its table, for example after a restart of `virtnetworkd`; re-run this command if that happens. Current lab provisioning adds both pieces permanently.
-
-Run the check above again. It now returns `503`.
+These manual changes do not survive a reboot. Run the check above again; it now returns `503`.
 ====
 
 . Publish the console on the hub. This uses the same pattern as the API, pointing at the worker's ingress router on port `443`. Create it before you rename the console in the next step, because the console operator checks the new URL as soon as you change it:
@@ -1531,7 +1485,7 @@ Review what you completed in this module:
 * [x] Verified the Ironic-to-IPA return path through the BMF host
 * [x] Created and validated `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem`
 * [x] Ordered a hosted OpenShift cluster as Alice (tenant admin for sai-corp)
-* [x] Supplied the DNS, `providerID`, and ingress workarounds a `dns.noop` NAT lab needs
+* [x] Supplied the DNS, `providerID`, and ingress workarounds a `dns.noop` lab needs
 * [x] Verified the cluster reached a `Ready` worker node via the guest kubeconfig
 * [x] Published the hosted cluster's API and console through the hub router and logged in as `kubeadmin`
 
