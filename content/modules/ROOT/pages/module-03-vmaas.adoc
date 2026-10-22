@@ -283,7 +283,7 @@ echo "SG_ID=${SG_ID}"
 
 . Create a virtual machine from the catalog. The `--user-data` flag passes cloud-init configuration that sets up a guest login account:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 osac --config $HOME/alice create computeinstance \
   --name portal-vm \

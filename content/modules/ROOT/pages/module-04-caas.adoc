@@ -54,7 +54,7 @@ test -s "${HOME}/pull-secret-cluster.json" && echo "Pull secret OK"
 
 . Log in to the OSAC private API as the cloud administrator:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 osac --config $HOME/admin \
   login --insecure --private \
@@ -275,7 +275,7 @@ exit
 
 . Back on the bastion, save the UUID of the worker VM and create the BMC secret and the `BareMetalHost`. The label `osac.openshift.io/host-type: default` is what makes the host available to OSAC: when a tenant orders a cluster, OSAC claims a free `BareMetalHost` whose `host-type` label matches the host label of the requested `BareMetalInstanceType`, which you create with the same label in Exercise 4:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 export VM_UUID=$(sudo ssh 10.10.10.2 virsh -c qemu:///system domuuid virtual-bmh-1)
 echo "VM_UUID=${VM_UUID}"
@@ -566,7 +566,7 @@ Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
 ====
 Log in to the OSAC API as Alice using the device flow:
 
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 osac --config $HOME/alice \
   login \

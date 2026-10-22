@@ -34,7 +34,7 @@ mkdir -p ${HOME}/yaml
 
 . Log in to the *Red Hat cloud extensions* platform *internal* fulfillment API as the *platform administrator*:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 osac --config $HOME/admin \
   login \
@@ -82,7 +82,7 @@ osac --config $HOME/admin get tenant sai-corp -o json | jq '.spec.break_glass_cr
 
 . Verify that Red Hat cloud extensions automatically created a Keycloak organization for the tenant:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
@@ -135,7 +135,7 @@ This exercise uses the Keycloak REST API via the `curl` command to create Keyclo
 
 . Obtain a Keycloak admin token:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
@@ -147,7 +147,7 @@ echo "Token obtained: ${KC_TOKEN:0:20}..."
 
 . Create the `sai-corp-idp` realm to simulate SAI Corp's corporate identity provider:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 curl -sk -X POST "{osac_keycloak_url}/admin/realms" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -163,7 +163,7 @@ Expected: `HTTP 201` (created) or `HTTP 409` (already exists).
 
 . Extend the realm's session limits to 24 hours. Keycloak's defaults end a login session after 30 minutes without activity and after 10 hours in total. Later modules include long waits, for example while a cluster provisions, and the default idle limit would log Alice and Bob out in the middle of them. The `osac` realm that Red Hat cloud extensions uses is already set to the same 24-hour values:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 curl -sk -X PUT "{osac_keycloak_url}/admin/realms/sai-corp-idp" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -191,7 +191,7 @@ The values are in seconds; `86400` is 24 hours.
 
 . Create an OIDC client in the `sai-corp-idp` realm for Red Hat cloud extensions federation:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/clients" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -212,7 +212,7 @@ Expected: `HTTP 201` (created) or `HTTP 409` (already exists).
 
 . Create user `alice` in the Sai corporate IdP realm:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -230,7 +230,7 @@ curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
 
 . Create user `bob` in the Sai corporate IdP realm:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 curl -sk -X POST "{osac_keycloak_url}/admin/realms/sai-corp-idp/users" \
   -H "Authorization: Bearer ${KC_TOKEN}" \
@@ -265,7 +265,7 @@ While you can change it to anything you want the rest of the lab will be using `
 +
 Switch to the *Terminal* tab and log in as the `sai-corp-osac-break-glass` user:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 osac --config $HOME/breakglass \
   login --insecure \
@@ -280,7 +280,7 @@ osac --config $HOME/breakglass \
 +
 Create a secret named `sai-corp-oidc-secret` in the `sai-corp` tenant namespace with the OIDC client secret:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 echo -n osac-demo-secret | osac --config $HOME/breakglass \
   create secret --name idp-client-secret \
@@ -294,7 +294,7 @@ Created secret 'idp-client-secret' (ID: 01a0ce65-e2dc-7860-97e2-c1192478de8d).
 
 . Verify the secret was created:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 osac --config $HOME/breakglass get secret idp-client-secret -o yaml
 ----
@@ -359,7 +359,7 @@ When the instructions below ask for a new *incognito/private* browser window, th
 
 . Start the device flow login for *Alice*:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 osac --config $HOME/alice \
   login --insecure \
@@ -431,7 +431,7 @@ Error: rpc error: code = PermissionDenied desc = permission denied
 
 . Start the device flow login for Bob:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 osac --config $HOME/bob \
   login --insecure \
@@ -486,7 +486,7 @@ sai-corp  -         -        -     -      ACTIVE
 
 . Verify both users are now members of the SAI Corp Keycloak organization:
 +
-[source,role=execute,subs=attributes]
+[source,role=execute,subs="attributes+"]
 ----
 KC_TOKEN=$(curl -sk -X POST "{osac_keycloak_url}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=admin-cli&username={osac_keycloak_admin_user}&password={osac_keycloak_admin_password}" \
