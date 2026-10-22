@@ -268,12 +268,17 @@ Everything is in place: storage, disk image, instance type, catalog item, and te
 
 === Steps
 
-. Retrieve the catalog item UUID for the `standard-linux-vm` catalog item:
+. Retrieve the IDs this exercise uses: the `standard-linux-vm` catalog item, and the tenant's default subnet and security group from Exercise 3:
 +
 [source,role=execute]
 ----
 CATALOG_ID=$(osac --config $HOME/alice get computeinstancecatalogitem standard-linux-vm -o json | jq -r '.id')
+SUBNET_ID=$(osac --config $HOME/alice get subnet default-ipv4 -o json | jq -r '.id')
+SG_ID=$(osac --config $HOME/alice get securitygroup default -o json | jq -r '.id')
+
 echo "CATALOG_ID=${CATALOG_ID}"
+echo "SUBNET_ID=${SUBNET_ID}"
+echo "SG_ID=${SG_ID}"
 ----
 
 . Create a virtual machine from the catalog. The `--user-data` flag passes cloud-init configuration that sets up a guest login account:
@@ -437,6 +442,19 @@ PRETTY_NAME="Fedora Linux 44 (Cloud Edition)"
 RBAC enforcement extends beyond tenant management to workloads. In this exercise, Bob — who has `viewer` access to the default project — can see the running VM but cannot create or delete one. This proves that the platform's access control model applies consistently across all resource types.
 
 === Steps
+
+. Retrieve the IDs this exercise uses. You look them up with Alice's credentials, because they are the same values Alice used to create her VM:
++
+[source,role=execute]
+----
+CATALOG_ID=$(osac --config $HOME/alice get computeinstancecatalogitem standard-linux-vm -o json | jq -r '.id')
+SUBNET_ID=$(osac --config $HOME/alice get subnet default-ipv4 -o json | jq -r '.id')
+SG_ID=$(osac --config $HOME/alice get securitygroup default -o json | jq -r '.id')
+
+echo "CATALOG_ID=${CATALOG_ID}"
+echo "SUBNET_ID=${SUBNET_ID}"
+echo "SG_ID=${SG_ID}"
+----
 
 . Remind yourself of Bob's identity — note that `tenant-admin` does not appear in the roles:
 +

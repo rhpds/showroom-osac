@@ -91,17 +91,14 @@ vmaas:
 
 == Exercise 2: Configure platform networking
 
-You patch Metal3 to watch BMHs in the `osac` namespace and verify that the fulfillment service uses the `noop` DNS driver. The `noop` driver is required in RHDP environments that do not have external Route53 access.
+In your environment the Metal3 operator has already been patched to watch for `BareMetalHosts` objects in all namespaces.
 
 === Steps
 
-. Patch Metal3 to watch `BareMetalHosts` in all namespaces so it can manage hosts in `osac`:
+. Validate that the Metal3 operator is watching all namespaces.
 +
 [source,role=execute]
 ----
-oc patch provisioning provisioning-configuration \
-  --type merge -p '{"spec":{"watchAllNamespaces": true}}'
-
 oc get provisioning provisioning-configuration \
   -o jsonpath='watchAllNamespaces={.spec.watchAllNamespaces}{"\n"}'
 ----
@@ -109,21 +106,6 @@ oc get provisioning provisioning-configuration \
 .Sample output
 ----
 watchAllNamespaces=true
-----
-
-. Changing `watchAllNamespaces` restarts the Metal3 baremetal operator. Its admission webhook has no endpoints until the new pod is ready, and any `BareMetalHost` create or label in that window fails with `no endpoints available for service`. Wait for the rollout to finish:
-+
-[source,role=execute]
-----
-oc rollout status deployment/metal3-baremetal-operator -n openshift-machine-api --timeout=300s
-oc get endpointslice -n openshift-machine-api -l kubernetes.io/service-name=baremetal-operator-webhook-service
-----
-+
-.Sample output
-----
-deployment "metal3-baremetal-operator" successfully rolled out
-NAME                                       ADDRESSTYPE   PORTS   ENDPOINTS     AGE
-baremetal-operator-webhook-service-glkg5   IPv4          9447    10.234.0.61   6h32m
 ----
 
 . Verify that the OSAC inventory is configured for Metal3 and the `osac` namespace:
@@ -148,69 +130,52 @@ networkClass: ""
 +
 Expect `type: metal3` and `namespace: osac`.
 
-. Verify that the fulfillment service uses the `noop` DNS driver. The lab provisioning already configured this, because RHDP environments have no external Route53 access:
+. Verify that the fulfillment service uses the `noop` DNS driver. The lab provisioning already configured this, because this environment has no external Route53 access:
 +
 [source,role=execute]
 ----
 oc get cm cluster-fulfillment-ig -n osac \
-  -o jsonpath='DNS={.data.DNS_CLASS} HOSTED={.data.HOSTED_CLUSTER_BASE_DOMAIN}{"\n"}'
+  -o jsonpath='DNS={.data.DNS_CLASS}{"\n"}HOSTED={.data.HOSTED_CLUSTER_BASE_DOMAIN}{"\n"}'
 ----
 +
 .Sample output
 ----
-DNS=dns.noop.dns HOSTED=hosted.cluster-9872p.dyn.redhatworkshops.io
+DNS=dns.noop.dns
+HOSTED=hosted.cluster-9872p.dyn.redhatworkshops.io
 ----
 
-. Verify that the `k8s-only` NetworkClass has a fabric manager. The lab provisioning sets it. Without it, the `baremetalworker` controller never creates a `BareMetalInstance`, and the `BareMetalHost` is never claimed. The `osac` CLI does not expose NetworkClasses in this build, so read the fulfillment database directly:
+. Verify that the `k8s-only` NetworkClass has a fabric manager. The lab provisioning sets it. Without it, the `baremetalworker` controller never creates a `BareMetalInstance`, and the `BareMetalHost` is never claimed:
 +
 [source,role=execute]
 ----
-PG_POD=$(oc get pods -n osac-infra -o name | grep postgres)
-
-oc exec -n osac-infra ${PG_POD} -c server -- psql -U postgres osac_service -c \
-  "SELECT name, data->>'k8s_manager' AS k8s_manager, data->>'fabric_manager' AS fabric_manager FROM network_classes;"
+osac --config $HOME/admin get networkclass
 ----
 +
 .Sample output
 ----
-   name   | k8s_manager | fabric_manager
-----------+-------------+----------------
- k8s-only | k8s_only    | cudn_net
-(1 row)
+PROJECT  DELETING  ID                                    NAME      TITLE                FABRIC-MANAGER  K8S-MANAGER
+-        -         01a15f7d-5772-7cdf-af88-8b77302834da  k8s-only  K8s-only networking  cudn_net        k8s_only
 ----
 +
-`fabric_manager` must show `cudn_net`. If it is empty, ask your instructor; the lab provisioning did not complete.
+`FABRIC-MANAGER` must show `cudn_net`. If it is empty, ask your instructor; the lab provisioning did not complete.
 
 == Exercise 3: Provision a bare-metal worker host
 
-CaaS needs at least one registered `BareMetalHost` before a tenant can order a cluster. In this RHDP lab a libvirt VM on the BMF host acts as a simulated bare-metal server. Sushy exposes it as a Redfish BMC. Metal3 / Ironic inspects and provisions it exactly as it would a physical host.
+CaaS needs at least one registered `BareMetalHost` before a tenant can order a cluster. In this environment a libvirt VM on a separate `BMF` Virtual Machine host acts as a simulated bare-metal server. Sushy exposes it as a Redfish BMC. Metal3 / Ironic inspects and provisions it exactly as it would a physical host.
 
 === Steps
 
-. Connect to the BMF host and create the worker VM. The disk must be blank — Ironic writes RHCOS to it during provisioning. Use a fixed MAC address so the BMH record stays consistent across reboots:
+. Connect to the BMF host:
 +
 [source,role=execute]
 ----
 sudo ssh 10.10.10.2
 ----
+
+. Create the worker VM. The disk must be blank — Ironic writes RHCOS to it during provisioning. Use a fixed MAC address so the BMH record stays consistent across reboots:
 +
 [source,role=execute]
 ----
-# Create the default storage pool if it does not already exist
-# [root@bmf ~]# virsh -c qemu:///system pool-list --all
-# Name      State    Autostart
-#-------------------------------
-# default   active   yes
-
-# mkdir -p /var/lib/libvirt/images
-
-# virsh -c qemu:///system pool-define-as default dir \
-#  --target /var/lib/libvirt/images 2>/dev/null || true
-
-# virsh -c qemu:///system pool-start default 2>/dev/null || true
-
-# virsh -c qemu:///system pool-autostart default
-
 virt-install --name virtual-bmh-1 \
   --memory 8192 --vcpus 4 \
   --disk size=120,format=qcow2,bus=virtio,pool=default \
@@ -223,8 +188,8 @@ virt-install --name virtual-bmh-1 \
 .Sample Output
 ----
 Starting install...
-Allocating 'virtual-bmh-1.qcow2'                                                                                                        | 120 GB  00:00:01
-Creating domain...                                                                                                                      |         00:00:00
+Allocating 'virtual-bmh-1.qcow2'
+Creating domain...
 Domain creation completed.
 ----
 
@@ -299,16 +264,18 @@ virsh -c qemu:///system domiflist virtual-bmh-1
  vnet0       network   default   virtio   52:54:00:ca:aa:01
 ----
 
-. Log out of the BMF host:
+. Your worker VM is ready to be adopted as a Bare Metal Host.
++
+Log out of the BMF host:
 +
 [source,role=execute]
 ----
 exit
 ----
 
-. On the bastion, create the BMC secret and the `BareMetalHost`:
+. Back on the bastion, save the UUID of the worker VM and create the BMC secret and the `BareMetalHost`. The label `osac.openshift.io/host-type: default` is what makes the host available to OSAC: when a tenant orders a cluster, OSAC claims a free `BareMetalHost` whose `host-type` label matches the host label of the requested `BareMetalInstanceType`, which you create with the same label in Exercise 4:
 +
-[source,role=execute]
+[source,role=execute,subs=attributes]
 ----
 export VM_UUID=$(sudo ssh 10.10.10.2 virsh -c qemu:///system domuuid virtual-bmh-1)
 echo "VM_UUID=${VM_UUID}"
@@ -323,13 +290,15 @@ metadata:
 type: Opaque
 stringData:
   username: admin
-  password: password
+  password: {osac_user_password}
 ---
 apiVersion: metal3.io/v1alpha1
 kind: BareMetalHost
 metadata:
   name: virtual-bmh-1
   namespace: osac
+  labels:
+    osac.openshift.io/host-type: default
 spec:
   online: true
   bootMACAddress: 52:54:00:ca:aa:01
@@ -349,14 +318,11 @@ EOF
 secret/virtual-bmh-1-bmc-secret created
 baremetalhost.metal3.io/virtual-bmh-1 created
 ----
-
-. Label the `BareMetalHost` so OSAC can claim it:
 +
-[source,role=execute]
-----
-oc label bmh virtual-bmh-1 -n osac \
-  osac.openshift.io/host-type=default --overwrite
-----
+[NOTE]
+====
+Ironic authenticates to the BMC with the credentials in `virtual-bmh-1-bmc-secret`. On a physical server those would be the iDRAC or iLO login. The Sushy emulator in this lab is not configured with an authentication file, so it accepts any username and password. The Secret is still required, because the `BareMetalHost` must reference one.
+====
 
 . Watch the `BareMetalHost` move through `registering` → `inspecting` → `available`. Inspection takes approximately 5 minutes:
 +
@@ -364,6 +330,12 @@ oc label bmh virtual-bmh-1 -n osac \
 ----
 watch -n 15 "oc get bmh virtual-bmh-1 -n osac \
   -o custom-columns=NAME:.metadata.name,STATUS:.status.operationalStatus,STATE:.status.provisioning.state,HOST-TYPE:.metadata.labels.osac\\.openshift\\.io/host-type"
+----
++
+.Sample Output
+----
+NAME            STATUS   STATE       HOST-TYPE
+virtual-bmh-1   OK       available   <none>
 ----
 +
 Press `Ctrl+C` when `STATE=available`. The `BareMetalHost` must reach `available` before you proceed.
@@ -484,7 +456,8 @@ With an `available` `BareMetalHost` in the inventory, you can publish the catalo
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin create baremetalinstancetype \
+osac --config $HOME/admin \
+  create baremetalinstancetype \
   --name c1-metal-amd64 \
   --description "RHDP libvirt+sushy BMH" \
   --cpu-cores 4 \
@@ -493,7 +466,17 @@ osac --config $HOME/admin create baremetalinstancetype \
   --memory-total-gb 8 \
   --network-port enp1s0:fabric:Ethernet:10Gbps \
   --host-label osac.openshift.io/host-type=default
+----
++
+.Sample Output
+----
+Created bare metal instance type 'c1-metal-amd64'.
+----
 
+. Validate that the `BareMetalInstanceType` exists:
++
+[source,role=execute]
+----
 osac --config $HOME/admin get baremetalinstancetype
 ----
 +
@@ -512,7 +495,8 @@ The `--cpu-architecture` value must be the string `x86_64`, not the enum `ARCHIT
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin get diskimage
+osac --config $HOME/admin \
+  get diskimage
 ----
 +
 .Sample output
@@ -520,12 +504,20 @@ osac --config $HOME/admin get diskimage
 NAME        DELETING  ID                                    SOURCE_REF                               GUEST_OS_FAMILY  ARCHITECTURE  LIFECYCLE  TENANT
 rhcos-4-22  -         01a1598a-cab0-7046-b8d5-cc6f9bba7ca6  oci://quay.io/osac-project/rhcos:4.22.0  LINUX            AMD64         AVAILABLE  shared
 ----
++
+[NOTE]
+====
+Note that the image is available in the *shared* tenant - making it available for every tenant on the platform.
+
+If you wanted your own, private image, you could create a `DiskImage` in your tenant and reference it in your `ClusterCatalogItem`. The image must be available to the tenant that orders the cluster.
+====
 
 . Validate which `ClusterVersions` exist that link an OCP release image to the disk image:
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin get clusterversion
+osac --config $HOME/admin \
+  get clusterversion
 ----
 +
 .Sample output
@@ -534,45 +526,48 @@ NAME    DELETING  VERSION  STATE   ENABLED  DEFAULT  IMAGE
 4-20-0  -         4.20.0   ACTIVE  true     false    quay.io/openshift-release-dev/ocp-release:4.20.0-multi
 4-22-0  -         4.22.0   ACTIVE  true     true     quay.io/openshift-release-dev/ocp-release:4.22.0-multi
 ----
+
 . Create and publish the `ClusterCatalogItem`:
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin create clustercatalogitem \
+osac --config $HOME/admin \
+  create clustercatalogitem \
   --name hosted-ci-small \
   --title "Hosted CI small" \
   --description "Single-replica hosted OCP cluster on bare-metal worker" \
   --template ocp-ci-small \
   --published
+----
++
+.Sample output
+----
+Created cluster catalog item '01a162e2-2eab-759f-9802-be93129fb9e7'.
+----
 
-osac --config $HOME/admin get clustercatalogitem
+. Validate the created `ClusterCatalogItem`:
++
+[source,role=execute]
+----
+osac --config $HOME/admin \
+  get clustercatalogitem
 ----
 +
 .Sample output
 ----
 TENANT  DELETING  PROJECT  ID                                    NAME             TITLE            PUBLISHED
-shared  -         -        01a159db-18ad-7778-9309-b6c28c1ecd40  hosted-ci-small  Hosted CI small  true
+shared  -         -        01a162e2-2eab-759f-9802-be93129fb9e7  hosted-ci-small  Hosted CI small  true
 ----
 +
-Confirm the item shows `true` in the `PUBLISHED` column before continuing.
+Confirm the item shows `true` in the `PUBLISHED` column before continuing. Also notice that the cluster catalog item was created in the *shared* tenant again - making this configuration available for all tenants on the platform.
 
-== Exercise 5: Order a hosted cluster as Alice
+== Exercise 5: Order a hosted cluster as a tenant administrator (Alice)
 
 With the catalog objects published, Alice can now self-service a hosted OpenShift cluster without involving the platform team. Alice authenticates through the SAI Corp identity provider using the device flow.
 
 === Steps
 
-. Log in to the OSAC API as Alice using the device flow:
-+
-[source,role=execute,subs=attributes]
-----
-osac --config $HOME/alice login --insecure \
-  --issuer="{osac_keycloak_url}/realms/osac" \
-  --flow=device \
-  {osac_fulfillment_internal_api_url}
-----
-+
-The CLI prints a URL and a short code. Open a *new incognito browser window*, navigate to that URL, enter the code, and log in as `alice` / `{osac_user_password}`.
+. Check that you are still logged in to the OSAC API as Alice:
 +
 [source,role=execute]
 ----
@@ -585,12 +580,32 @@ Logged in as: alice
 Tenant: sai-corp
 Roles: tenant-admin, offline_access, uma_authorization, default-roles-my realm
 ----
++
+.If your session has expired, log in again (expand)
+[%collapsible]
+====
+Log in to the OSAC API as Alice using the device flow:
+
+[source,role=execute,subs=attributes]
+----
+osac --config $HOME/alice \
+  login \
+  --insecure \
+  --flow=device \
+  --issuer="{osac_keycloak_url}/realms/osac" \
+  {osac_fulfillment_internal_api_url}
+----
+
+The CLI prints a URL and a short code. Open a *new incognito browser window*, navigate to that URL, enter the code, and log in as `alice` / `{osac_user_password}`. Then run `osac --config $HOME/alice whoami` again.
+====
 
 . Confirm that Alice can see the published catalog item:
 +
 [source,role=execute]
 ----
-osac --config $HOME/alice get clustercatalogitems --filter 'this.published'
+osac --config $HOME/alice \
+  get clustercatalogitems \
+  --filter 'this.published'
 ----
 +
 .Sample Output
@@ -605,7 +620,8 @@ The `hosted-ci-small` catalog item must appear before proceeding.
 +
 [source,role=execute]
 ----
-osac --config $HOME/alice create secret \
+osac --config $HOME/alice \
+  create secret \
   --name cluster-pull-secret \
   --type=pull-secret \
   --from-file=.dockerconfigjson="${HOME}/pull-secret-cluster.json"
@@ -615,7 +631,8 @@ osac --config $HOME/alice create secret \
 +
 [source,role=execute]
 ----
-osac --config $HOME/alice create cluster \
+osac --config $HOME/alice \
+  create cluster \
   --name sai-corp-cluster-1 \
   --catalog-item hosted-ci-small \
   --version 4.22.0 \
@@ -643,23 +660,37 @@ TENANT    DELETING  PROJECT  ID                                    NAME         
 sai-corp  -         -        01a159dd-b28a-7e79-8c3e-12e4499b2797  sai-corp-cluster-1  ocp-ci-small  4.22.0   PROGRESSING  -        -            -             -
 ----
 
-. Check the `ClusterOrder` and record the values the next steps use. The hosted cluster's DNS domain is `<order-name>.<hosted base domain>`, and the hosted control plane runs in namespace `osac-<order-name>-<order-name>`:
+. Check the `ClusterOrder`:
++
+[source,role=execute]
+----
+oc get clusterorder -n osac
+----
++
+.Sample output
+----
+NAME          TEMPLATE                      PHASE
+order-t4p9r   osac.templates.ocp_ci_small   Progressing
+----
+
+. Record the values the next steps use. The hosted cluster's DNS domain is `<order-name>.<hosted base domain>`, and the hosted control plane runs in namespace `osac-<order-name>-<order-name>`:
 +
 [source,role=execute]
 ----
 ORDER=$(oc get clusterorder -n osac --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
 DOMAIN=${ORDER}.$(oc get cm cluster-fulfillment-ig -n osac -o jsonpath='{.data.HOSTED_CLUSTER_BASE_DOMAIN}')
 HCP_NS=osac-${ORDER}
-echo "ORDER=${ORDER} DOMAIN=${DOMAIN} HCP_NS=${HCP_NS}"
 
-oc get clusterorder ${ORDER} -n osac
+echo "ORDER=${ORDER}"
+echo "DOMAIN=${DOMAIN}"
+echo "HCP_NS=${HCP_NS}"
 ----
 +
 .Sample output
 ----
-ORDER=order-6bngl DOMAIN=order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io HCP_NS=osac-order-6bngl
-NAME          TEMPLATE                      PHASE
-order-6bngl   osac.templates.ocp_ci_small   Progressing
+ORDER=order-t4p9r
+DOMAIN=order-t4p9r.hosted.cluster-46z6n.dyn.redhatworkshops.io
+HCP_NS=osac-order-t4p9r
 ----
 +
 The order goes through these stages. The steps below tell you what to do at each one:
@@ -677,12 +708,12 @@ The order goes through these stages. The steps below tell you what to do at each
 | Wait for `provisioned`; record the guest IP
 
 | 3
-| BMH `provisioned`; BMI `Ready`; Agent appears and goes to `STAGE` `Done`
-| Wait; only if the agent stays `insufficient`, give the worker temporary wildcard DNS
+| BMH `provisioned`; BMI `Ready`; Agent appears as `insufficient`
+| Give the worker temporary wildcard DNS; restart the agent; wait for `STAGE` `Done`
 
 | 4
 | Guest node `Ready`; Machine `Provisioned` with empty `NODENAME`; NodePool still `0/1`
-| Set the node's `providerID`
+| Link the node to its `Machine` (set `providerID`)
 
 | 5
 | NodePool `1/1`; order still `Progressing`; `console` operator not available
@@ -697,7 +728,7 @@ The order goes through these stages. The steps below tell you what to do at each
 ====
 Every step after this one exists only because this lab uses `dns.noop` (no Route53) and a NAT-ed libvirt worker. On a platform with real DNS and a routed provisioning network, the order goes from stage 1 to stage 6 with no intervention.
 
-If the RHDP bastion has `~/rhdp-caas/caas-wa.sh`, you can run `~/rhdp-caas/caas-wa.sh auto` in a second terminal instead. It detects each stage and applies the stage 1 DNS step and the stage 3–5 steps automatically.
+Your bastion VM has a script, `~/rhdp-caas/caas-wa.sh`, you can run `~/rhdp-caas/caas-wa.sh auto` in a second terminal instead. It detects each stage and applies the stage 1 DNS step and the stage 3-5 steps automatically.
 ====
 
 . Check the tenant's default subnet. The `cudn_net` subnet playbook creates the subnet's namespace and `ClusterUserDefinedNetwork` but does not write the output ConfigMap the operator expects, so the subnet can end up `Failed`. A `BareMetalInstance` cannot be created without a `Ready` subnet:
@@ -714,6 +745,7 @@ If the subnet shows `Failed`, create the missing output ConfigMap. The operator 
 SUBNET=$(oc get subnet -n osac -o jsonpath='{.items[0].metadata.name}')
 
 oc apply -f - <<EOF
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -734,7 +766,7 @@ EOF
 watch -n 10 oc get subnet -n osac
 ----
 +
-Press `Ctrl+C` when the subnet shows `Ready`.
+Press `Ctrl+C` when the subnet shows `Ready` (this should take approximately a minute).
 
 . Wait for MetalLB to assign the hosted cluster's API VIP, then publish `api` and `api-int` in the libvirt DNS on the BMF host. The worker resolves names through libvirt's dnsmasq at `192.168.122.1`, and with `dns.noop` nothing else publishes these records:
 +
@@ -759,10 +791,10 @@ Updated network default persistent config and live state
 +
 [NOTE]
 ====
-Each order gets the next free address from the MetalLB pool (`10.10.10.240`–`10.10.10.250`). Always read the VIP; do not assume `.240`. If you repeat the lab with a new order, remove stale entries first with `virsh net-update default delete dns-host ...` using the same XML.
+Each order gets the next free address from the MetalLB pool (`10.10.10.240`-`10.10.10.250`). Always read the VIP; do not assume `.240`. If you repeat the lab with a new order, remove stale entries first with `virsh net-update default delete dns-host ...` using the same XML.
 ====
 
-. Wait for Ironic to write RHCOS to the worker's disk. The BMH goes `available` → `provisioning` → `provisioned` and the BMI becomes `Ready`. This takes 5-10 minutes:
+. Wait for Ironic to write RHCOS to the worker's disk. The bare metal host goes `available` → `provisioning` → `provisioned` and the bare metal instance becomes `Ready`. Initially you will only see the bare metal host - later the bare metal instance will appear as well. Overall, this takes approximately 5-10 minutes:
 +
 [source,role=execute]
 ----
@@ -778,9 +810,9 @@ NAME                                                                           P
 baremetalinstance.osac.openshift.io/bmi-01a15ee2-6fa6-7143-b255-f6d0acab0642   Ready   osac.templates.bm_host_provisioning   metal3      osac/virtual-bmh-1
 ----
 +
-Press `Ctrl+C` when the BMH shows `provisioned` and the BMI shows `Ready`. Reaching `provisioned` confirms that Ironic reached the IPA agent on port `9999` (Exercise 3). Do *not* `virsh destroy` the VM and do *not* place a second order while the host is `provisioning`.
-+
-Record the worker's guest IP; the next steps use it:
+Press `Ctrl+C` when the bare metal host shows `provisioned` and the bare metal instance shows `Ready`. Reaching `provisioned` confirms that Ironic reached the IPA agent on port `9999` (Exercise 3). Do *not* `virsh destroy` the VM and do *not* place a second order while the host is `provisioning`.
+
+. Record the worker's guest IP; the next steps use it:
 +
 [source,role=execute]
 ----
@@ -806,16 +838,113 @@ oc debug node/${METAL3_NODE} -q -- nsenter -a -t 1 -- \
   curl -k -sS -m 5 -o /dev/null -w '%{http_code}\n' https://${GUEST_IP}:9999/
 ----
 
-Any of `200`, `401`, `403`, or `404` means the path works and Ironic is just still writing the image. `000` means the route or a firewall rule from Exercise 3 is missing; re-run the Exercise 3 checks and apply the manual fallback. If the BMH has already fallen back to `deprovisioning`, do not create a second order; fix the path and the order retries on its own.
+Any of `200`, `401`, `403`, or `404` means the path works and Ironic is just still writing the image. `000` means the route or a firewall rule from Exercise 3 is missing; re-run the Exercise 3 checks and apply the manual fallback. If the bare metal host has already fallen back to `deprovisioning`, do not create a second order; fix the path and the order retries on its own.
 ====
 
-. Wait for the worker to install and join the hosted cluster. When the BMH is `provisioned`, the worker boots the discovery agent and an `Agent` named after the VM's UUID appears in `osac`. The agent's `STAGE` goes `Rebooting` → `Joined` → `Done`:
+. Wait for the worker to boot the discovery agent. When the bare metal host is `provisioned`, the worker boots the discovery agent and an `Agent` named after the VM's UUID appears in `osac`.
++
+Get the agent's UUID from the last part of the bare metal host's BMC address (the Redfish system ID is the libvirt VM's UUID):
 +
 [source,role=execute]
 ----
 AGENT=$(oc get bmh virtual-bmh-1 -n osac -o jsonpath='{.spec.bmc.address}' | sed 's|.*/Systems/||')
 echo "AGENT=${AGENT}"
+----
++
+.Sample output
+----
+AGENT=b0dc76ad-3be1-4fc3-9611-20bac4b6bb95
+----
++
+Wait until the agent appears:
++
+[source,role=execute]
+----
+watch -n 15 "oc get bmh virtual-bmh-1 -n osac; oc get agent -n osac"
+----
++
+Press `Ctrl+C` as soon as the agent is listed. Its `STAGE` is still empty at this point.
 
+. Check why the agent cannot start installing. With `dns.noop`, nothing publishes DNS records for the hosted cluster, so the agent's DNS validations fail and it reports `insufficient`:
++
+[source,role=execute]
+----
+oc get agent ${AGENT} -n osac -o jsonpath='{.status.debugInfo.state}{"\n"}'
+oc get agent ${AGENT} -n osac -o json \
+  | jq -r '.status.validationsInfo[][]? | select(.status=="failure") | .message'
+----
++
+.Sample output
+----
+insufficient
+Couldn't resolve domain name *.apps.order-t4p9r.hosted.cluster-46z6n.dyn.redhatworkshops.io on the host. To continue installation, create the necessary DNS entries to resolve this domain name to your cluster's application ingress IP address
+----
++
+`api` already resolves through the libvirt DNS record you added, but the agent also checks a wildcard name under `*.apps`, and libvirt's per-name `dns-host` records cannot express a wildcard.
+
+. Check that you can reach the worker over SSH. The worker sits on the libvirt network behind the BMF host, so the lab provides a helper, `guest_ssh`, that jumps through the BMF host as `core`. The lab provisioning adds it to your `~/.bashrc`:
++
+[source,role=execute]
+----
+guest_ssh hostname
+----
++
+.Sample output
+----
+localhost.localdomain
+----
++
+The command prints the worker's hostname. If it hangs or asks for a password, the worker is not reachable yet; wait a minute and try again.
++
+.How `guest_ssh` works, and what to do if it is missing (expand)
+[%collapsible]
+====
+`guest_ssh` looks up the worker's IP from the `virtual-bmh-1` bare metal host (or uses `GUEST_IP` if it is set), then opens an SSH session to `core@<guest-ip>` with your lab key, using the BMF host as a jump host. Host key checks are off because the worker presents a new host key after every reinstall.
+
+If `type guest_ssh` reports `not found`, define it in your current shell:
+
+[source,role=execute]
+----
+guest_ssh() {
+  local ip=${GUEST_IP:-$(oc get bmh virtual-bmh-1 -n osac -o jsonpath='{.status.hardware.nics[0].ip}')}
+  ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+    -o 'ProxyCommand=sudo ssh -W %h:%p root@10.10.10.2' "core@${ip}" "$@"
+}
+----
+====
+
+. Give the worker a temporary wildcard DNS entry for the whole hosted domain, then restart the agent so it re-runs its validations. The entry points every name under `${DOMAIN}` at the API VIP, which is enough for the validations to pass. The script refuses to run if the worker has already booted into the installed OS:
++
+[source,role=execute]
+----
+guest_ssh sudo bash -s <<EOF
+if systemctl is-active --quiet kubelet; then
+  echo 'The worker already runs the installed OS; nothing to do.'
+  exit 0
+fi
+install -d /etc/NetworkManager/dnsmasq.d /etc/NetworkManager/conf.d
+echo 'address=/.${DOMAIN}/${VIP}' > /etc/NetworkManager/dnsmasq.d/hosted.conf
+printf '[main]\ndns=dnsmasq\n' > /etc/NetworkManager/conf.d/90-dnsmasq.conf
+systemctl reload NetworkManager
+sleep 3
+getent hosts api.${DOMAIN} probe.apps.${DOMAIN}
+systemctl restart agent.service
+EOF
+----
++
+.Sample output
+----
+10.10.10.240    api.order-t4p9r.hosted.cluster-46z6n.dyn.redhatworkshops.io
+10.10.10.240    probe.apps.order-t4p9r.hosted.cluster-46z6n.dyn.redhatworkshops.io
+----
++
+The reboot after installation wipes these temporary files, which is intentional: the installed cluster must use libvirt DNS directly. Do *not* restart NetworkManager or the agent once the agent's state is `installing`.
+
+. Now the agent should continue with the installation. Wait for the agent to install the worker and join the hosted cluster. The agent's `STAGE` goes `Writing image to disk` → `Rebooting` → `Joined` → `Done`:
++
+[source,role=execute]
+----
 watch -n 15 "oc get bmh virtual-bmh-1 -n osac; oc get agent -n osac"
 ----
 +
@@ -828,94 +957,122 @@ NAME                                   CLUSTER       APPROVED   ROLE     STAGE
 b0dc76ad-3be1-4fc3-9611-20bac4b6bb95   order-4shw4   true       worker   Done
 ----
 +
-Press `Ctrl+C` when the `STAGE` shows `Done`. This usually takes 10–15 minutes after the BMH reaches `provisioned`.
-+
-.If the agent shows no `STAGE` and its state stays `insufficient` (expand)
-[%collapsible]
-====
-Check the agent's state and failing validations:
+The first stage should be `Writing image to disk`. Keep waiting for the agent to progress through each stage. Press `Ctrl+C` when the `STAGE` shows `Done`. This usually takes 10-15 minutes.
 
-[source,role=execute]
-----
-oc get agent ${AGENT} -n osac -o jsonpath='{.status.debugInfo.state}{"\n"}'
-oc get agent ${AGENT} -n osac -o json \
-  | jq -r '.status.validationsInfo[][]? | select(.status=="failure") | .message'
-----
-
-.Sample output
-----
-insufficient
-Couldn't resolve domain name api.order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io ...
-Couldn't resolve domain name *.apps.order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io ...
-----
-
-If the failures are DNS-related, give the worker a temporary wildcard DNS entry for the whole hosted domain, then restart the agent so it re-runs its validations. `api` resolves through libvirt, but `*.apps` is a wildcard, and libvirt's per-name `dns-host` records cannot express it. Run the `guest_ssh` helper definition from the next step first, then:
-
-[source,role=execute]
-----
-guest_ssh sudo bash -s <<EOF
-install -d /etc/NetworkManager/dnsmasq.d /etc/NetworkManager/conf.d
-echo 'address=/.${DOMAIN}/${VIP}' > /etc/NetworkManager/dnsmasq.d/hosted.conf
-printf '[main]\ndns=dnsmasq\n' > /etc/NetworkManager/conf.d/90-dnsmasq.conf
-systemctl reload NetworkManager
-sleep 3
-getent hosts api.${DOMAIN} probe.apps.${DOMAIN}
-systemctl restart agent.service
-EOF
-----
-
-.Sample output
-----
-10.10.10.240    api.order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io
-10.10.10.240    probe.apps.order-6bngl.hosted.cluster-lgvqj.dyn.redhatworkshops.io
-----
-
-Within a minute the agent moves to `installing`, writes the image, and reboots into the installed OS. The reboot wipes these temporary files, which is intentional. Do *not* restart NetworkManager or the agent once the state is `installing`.
-====
-
-. Define a helper to reach the worker over SSH through the BMF host. The remaining steps use it:
-+
-[source,role=execute]
-----
-guest_ssh() {
-  ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-    -o 'ProxyCommand=sudo ssh -W %h:%p root@10.10.10.2' core@${GUEST_IP} "$@"
-}
-
-guest_ssh hostname
-----
-+
-.Sample output
-----
-52-54-00-ca-aa-01
-----
-
-. Wait for the guest node, then set its `providerID`. The agent CAPI provider is supposed to set `providerID` on the guest node, but in this build it does not. On the hub you see the Machine as `Provisioned` with a `PROVIDERID` but an empty `NODENAME`, and the NodePool stays at `0/1` (check with `oc get machines.cluster.x-k8s.io -A; oc get nodepool -A`). Extract the hosted cluster's kubeconfig. Talk to the API by its VIP so the bastion needs no DNS entry:
+. Connect to the hosted cluster. Its admin kubeconfig is stored as a secret in the hosted control plane namespace on the hub. Extract it to `/tmp/${ORDER}`:
 +
 [source,role=execute]
 ----
 oc extract secret/${ORDER}-admin-kubeconfig -n ${HCP_NS} --to=/tmp/${ORDER} --confirm
-guest_oc() {
-  oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify "$@"
-}
-
-watch -n 15 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get nodes; oc get nodepool -A"
 ----
 +
-Press `Ctrl+C` when the node shows `Ready`, then:
+The kubeconfig points at `api.<domain>`, which the bastion cannot resolve. The lab provides a helper, `guest_oc`, that runs `oc` against the hosted cluster through the API VIP instead. The lab provisioning adds it to your `~/.bashrc`. Try it:
++
+[source,role=execute]
+----
+guest_oc get clusterversion
+----
++
+.How `guest_oc` works, and what to do if it is missing (expand)
+[%collapsible]
+====
+`guest_oc` finds the newest `ClusterOrder` (or uses `ORDER` if it is set), looks up that hosted cluster's API VIP, extracts the admin kubeconfig to `/tmp/<order>/kubeconfig` if it is not there yet, and runs `oc` with that kubeconfig against `https://<vip>:6443`. TLS verification is skipped because the API certificate does not include the VIP.
+
+If `type guest_oc` reports `not found`, define it in your current shell:
+
+[source,role=execute]
+----
+guest_oc() {
+  local order vip
+  order=${ORDER:-$(oc get clusterorder -n osac --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')}
+  vip=$(oc get svc kube-apiserver -n "osac-${order}-${order}" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  [ -s "/tmp/${order}/kubeconfig" ] || \
+    oc extract "secret/${order}-admin-kubeconfig" -n "osac-${order}" --to="/tmp/${order}" --confirm >/dev/null
+  oc --kubeconfig="/tmp/${order}/kubeconfig" --server="https://${vip}:6443" --insecure-skip-tls-verify "$@"
+}
+----
+====
+
+. Wait for the worker to appear as a `Ready` node in the hosted cluster:
++
+[source,role=execute]
+----
+watch -n 15 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get nodes"
+----
++
+.Sample output
+----
+NAME                STATUS   ROLES    AGE   VERSION
+52-54-00-ca-aa-01   Ready    worker   5m    v1.35.5
+----
++
+Press `Ctrl+C` when the node shows `Ready`.
+
+. Link the node to the hub's record of the machine. The worker is running, but the order does not count it yet. Check the hub:
++
+[source,role=execute]
+----
+oc get machines.cluster.x-k8s.io -A
+oc get nodepool -A
+----
++
+.Sample output
+----
+NAMESPACE                      NAME                                 CLUSTER       NODENAME   PROVIDERID                                     PHASE         AGE   VERSION
+osac-order-t4p9r-order-t4p9r   nodepool-order-t4p9r-workers-z6cdv   order-t4p9r              agent://5e01492e-95f0-471e-ac40-14f06a36fc60   Provisioned   43m   4.22.0
+NAMESPACE          NAME                           CLUSTER       DESIRED NODES   CURRENT NODES   AUTOSCALING   AUTOREPAIR   VERSION   UPDATINGVERSION   UPDATINGCONFIG   MESSAGE
+osac-order-t4p9r   nodepool-order-t4p9r-workers   order-t4p9r   1                               False         False        4.22.0    False             False            Scaling up MachineSet to 1 replicas (actual 0)
+----
++
+Here is what is going on:
++
+* HyperShift tracks each worker on the hub as a `Machine`. The `Machine` records which physical host it uses in its `PROVIDERID` field. Here that is `agent://` plus the agent's UUID.
+* In the hosted cluster, every `Node` has a matching field, `spec.providerID`.
+* HyperShift pairs a `Machine` with its `Node` by matching these two values. Only then does it fill in `NODENAME` and count the worker in the NodePool.
+* The component that normally sets the `Node`'s value does not do so in this build, so the field is empty, the `Machine` has no `NODENAME`, and the NodePool stays at no current nodes.
++
+Set the node's `providerID` to the same value the `Machine` has:
 +
 [source,role=execute]
 ----
 NODE=$(guest_oc get nodes -o jsonpath='{.items[0].metadata.name}')
-echo "NODE=${NODE} providerID=$(guest_oc get node ${NODE} -o jsonpath='{.spec.providerID}')"
+echo "NODE=${NODE}"
+echo "providerID before: '$(guest_oc get node ${NODE} -o jsonpath='{.spec.providerID}')'"
 
 guest_oc patch node ${NODE} --type merge -p "{\"spec\":{\"providerID\":\"agent://${AGENT}\"}}"
+
+echo "providerID after:  '$(guest_oc get node ${NODE} -o jsonpath='{.spec.providerID}')'"
 ----
 +
-Run the patch only if `providerID` was empty. Within a minute `oc get nodepool -A` shows `1/1` and the Machine shows `Running`.
+.Sample output
+----
+NODE=52-54-00-ca-aa-01
+providerID before: ''
+node/52-54-00-ca-aa-01 patched
+providerID after:  'agent://5e01492e-95f0-471e-ac40-14f06a36fc60'
+----
++
+The empty value before the patch is the problem you are fixing. The patch does not read it; it writes `agent://` plus the agent UUID you saved earlier in `AGENT`, the same value the hub `Machine` shows in `PROVIDERID`. If the value before the patch already shows `agent://...`, the patch changes nothing.
++
+Within a minute the hub pairs the two:
++
+[source,role=execute]
+----
+oc get machines.cluster.x-k8s.io -A
+oc get nodepool -A
+----
++
+.Sample output
+----
+NAMESPACE                      NAME                                 CLUSTER       NODENAME            PROVIDERID                                     PHASE     AGE   VERSION
+osac-order-t4p9r-order-t4p9r   nodepool-order-t4p9r-workers-z6cdv   order-t4p9r   52-54-00-ca-aa-01   agent://5e01492e-95f0-471e-ac40-14f06a36fc60   Running   55m   4.22.0
+NAMESPACE          NAME                           CLUSTER       DESIRED NODES   CURRENT NODES   AUTOSCALING   AUTOREPAIR   VERSION   UPDATINGVERSION   UPDATINGCONFIG   MESSAGE
+osac-order-t4p9r   nodepool-order-t4p9r-workers   order-t4p9r   1               1               False         False        4.22.0    False             False
+----
 
-. Point the cluster's `*.apps` routes at the worker. The ingress router runs on the worker, not on the API VIP. Until `console`, `oauth` and `canary` resolve to the worker, the `console` cluster operator stays unavailable and the order never becomes `Ready`. Add the records to libvirt DNS, then make sure the worker uses libvirt DNS directly so CoreDNS inside the cluster does too:
+. Point the cluster's `*.apps` routes at the worker. The ingress controller pod runs on the worker, not on the API VIP. Until `console`, `oauth` and `canary` resolve to the worker, the `console` cluster operator stays unavailable and the order never becomes `Ready`.
++
+Add the records to libvirt DNS, then make sure the worker uses libvirt DNS directly so CoreDNS inside the cluster does too:
 +
 [source,role=execute]
 ----
@@ -939,8 +1096,20 @@ nameserver 192.168.122.1
 watch -n 15 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get co console ingress; oc get clusterorder ${ORDER} -n osac"
 ----
 +
-If `console` stays unavailable for more than 5 minutes, check the console operator log. `server misbehaving` on `172.31.0.10` means CoreDNS started while the worker still pointed at the temporary resolver. Recreate the DNS and console operator pods:
+.Sample output
+----
+NAME      VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE
+console   4.22.0    True        False         False      5m44s
+ingress   4.22.0    True        False         False      61m
+NAME          TEMPLATE                      PHASE
+order-t4p9r   osac.templates.ocp_ci_small   Ready
+----
 +
+.If `console` stays unavailable for more than 5 minutes (expand)
+[%collapsible]
+====
+Check the console operator log. `server misbehaving` on `172.31.0.10` means CoreDNS started while the worker still pointed at the temporary resolver. Recreate the DNS and console operator pods:
+
 [source,role=execute]
 ----
 guest_oc logs -n openshift-console-operator deploy/console-operator --since=5m | grep -i 'server misbehaving'
@@ -948,35 +1117,58 @@ guest_oc logs -n openshift-console-operator deploy/console-operator --since=5m |
 guest_oc delete pod -n openshift-dns -l dns.operator.openshift.io/daemonset-dns=default
 guest_oc delete pod -n openshift-console-operator --all
 ----
+====
 +
-Press `Ctrl+C` when the order shows `Ready`. End to end, provisioning typically takes 30–45 minutes.
+Press `Ctrl+C` when the order shows `Ready`. End to end, provisioning typically takes 30-45 minutes.
 
-. Verify the cluster from both sides:
+. Verify the cluster from the platform side side:
 +
 [source,role=execute]
 ----
 osac --config $HOME/alice get cluster
-guest_oc get nodes -o wide
-guest_oc get clusterversion
 ----
 +
 .Sample output
 ----
-TENANT    DELETING  PROJECT  ID                                    NAME                TEMPLATE      VERSION  STATE  ...
-sai-corp  -         -        01a159dd-b28a-7e79-8c3e-12e4499b2797  sai-corp-cluster-1  ocp-ci-small  4.22.0   READY  ...
+TENANT    DELETING  PROJECT  ID                                    NAME                TEMPLATE      VERSION  STATE  API URL                                                                   CONSOLE URL                                                                                     API ENDPOINT  INGRESS ENDPOINT
+sai-corp  -         -        01a162e8-a189-7125-83dc-ab58cb1b8823  sai-corp-cluster-1  ocp-ci-small  4.22.0   READY  https://api.order-t4p9r.hosted.cluster-46z6n.dyn.redhatworkshops.io:6443  https://console-openshift-console.apps.order-t4p9r.hosted.cluster-46z6n.dyn.redhatworkshops.io  -             -
+----
 
-NAME                 STATUS   ROLES    AGE   VERSION   INTERNAL-IP
-52-54-00-ca-aa-01    Ready    worker   20m   v1.35.x   192.168.122.207
+. Verify the hosted cluster on the hub:
++
+[source,role=execute]
+----
+oc get hostedcluster -A
+----
++
+.Sample output
+----
+NAMESPACE          NAME          VERSION   CP VERSION   KUBECONFIG                     PROGRESS    AVAILABLE   PROGRESSING   MESSAGE
+osac-order-t4p9r   order-t4p9r   4.22.0    4.22.0       order-t4p9r-admin-kubeconfig   Completed   True        False         The hosted control plane is available
+----
 
+. Verify the cluster from within the cluster:
++
+[source,role=execute]
+----
+guest_oc get clusterversion
+guest_oc get nodes -o wide
+----
++
+.Sample output
+----
 NAME      VERSION   AVAILABLE   PROGRESSING   SINCE   STATUS
-version   4.22.0    True        False         5m      Cluster version is 4.22.0
+version   4.22.0    True        False         3m13s   Cluster version is 4.22.0
+NAME                STATUS   ROLES    AGE   VERSION   INTERNAL-IP       EXTERNAL-IP   OS-IMAGE                                                KERNEL-VERSION                 CONTAINER-RUNTIME
+52-54-00-ca-aa-01   Ready    worker   30m   v1.35.5   192.168.122.207   <none>        Red Hat Enterprise Linux CoreOS 9.8.20260520-0 (Plow)   5.14.0-687.11.1.el9_8.x86_64   cri-o://1.35.3-13.rhaos4.22.git5a749ba.el9
 ----
 +
 A single worker node at `Ready` and an `Available` cluster version confirm that the hosted cluster is operational.
 
-[TIP]
+.Troubleshooting: operator errors after about 2 hours (expand)
+[%collapsible]
 ====
-*Troubleshooting: operator errors after about 2 hours.* If the order stalls and the `osac-operator` log shows `requesting fulfillment access token failed` (for storage, virtual networks, or network classes), the operator's service token has expired. Restart the three components and the order resumes on its next retry:
+If the order stalls and the `osac-operator` log shows `requesting fulfillment access token failed` (for storage, virtual networks, or network classes), the operator's service token has expired. Restart the three components and the order resumes on its next retry:
 
 [source,role=execute]
 ----
@@ -986,7 +1178,6 @@ oc rollout restart deployment/osac-operator deployment/fulfillment-controller de
 A failed `osac-create-hosted-cluster` AAP job is retried automatically with back-off; do not create a second order.
 ====
 
-
 == Exercise 6: Access the hosted cluster
 
 The hosted cluster is running, but nothing outside the lab can reach it yet. This lab uses `dns.noop`, so OSAC never publishes DNS records for the cluster's API or `*.apps` domain. The API VIP (`10.10.10.240`) and the worker (`192.168.122.0/24`) are on private networks.
@@ -995,14 +1186,22 @@ In this exercise you publish both through the hub cluster's router. The hub's `*
 
 === Steps
 
-. Set the names used in this exercise and create a hub namespace for the access routes. The shell variables `ORDER`, `VIP`, `GUEST_IP` and the `guest_oc` helper come from Exercise 5:
+. Set the variables used throughout this exercise and create a hub namespace for the access routes. The commands look everything up from the cluster, so this works even in a new terminal. If you open a new terminal later in this exercise, run this step again first (ignore the `AlreadyExists` error for the namespace):
 +
 [source,role=execute]
 ----
+ORDER=$(oc get clusterorder -n osac --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
+HCP_NS=osac-${ORDER}
+VIP=$(oc get svc kube-apiserver -n ${HCP_NS}-${ORDER} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+GUEST_IP=$(oc get bmh virtual-bmh-1 -n osac -o jsonpath='{.status.hardware.nics[0].ip}')
 APPS=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
 API_HOST=api-${ORDER}.${APPS}
 CONSOLE_HOST=console-${ORDER}.${APPS}
-echo "ORDER=${ORDER} VIP=${VIP} GUEST_IP=${GUEST_IP}"
+oc extract secret/${ORDER}-admin-kubeconfig -n ${HCP_NS} --to=/tmp/${ORDER} --confirm >/dev/null
+
+echo "ORDER=${ORDER}"
+echo "VIP=${VIP}"
+echo "GUEST_IP=${GUEST_IP}"
 echo "API_HOST=${API_HOST}"
 echo "CONSOLE_HOST=${CONSOLE_HOST}"
 
@@ -1011,7 +1210,9 @@ oc create namespace osac-hosted-access
 +
 .Sample output
 ----
-ORDER=order-4shw4 VIP=10.10.10.240 GUEST_IP=192.168.122.207
+ORDER=order-4shw4
+VIP=10.10.10.240
+GUEST_IP=192.168.122.207
 API_HOST=api-order-4shw4.apps.cluster-kpxfr.dyn.redhatworkshops.io
 CONSOLE_HOST=console-order-4shw4.apps.cluster-kpxfr.dyn.redhatworkshops.io
 namespace/osac-hosted-access created
@@ -1022,6 +1223,7 @@ namespace/osac-hosted-access created
 [source,role=execute]
 ----
 oc apply -n osac-hosted-access -f - <<EOF
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -1064,28 +1266,31 @@ spec:
     termination: passthrough
 EOF
 ----
++
+.Sample output
+----
+service/api-order-t4p9r created
+endpointslice.discovery.k8s.io/api-order-t4p9r created
+route.route.openshift.io/api-order-t4p9r created
+----
 
-. Log in to the hosted cluster's API through the new route as `kubeadmin`. Use a separate kubeconfig file so you stay logged in to the hub. The API server's certificate does not include the new hostname, so skip TLS verification:
+. Test the hosted cluster's API through the new route. You do not need to log in again: the hosted cluster's admin kubeconfig (extracted in the first step of this exercise) authenticates with a client certificate, and the `passthrough` route hands the TLS connection to the API server unchanged. Point the same kubeconfig at the public hostname instead of the VIP. The API server's certificate does not include the new hostname, so skip TLS verification:
 +
 [source,role=execute]
 ----
-KUBEADMIN_PASSWORD=$(oc extract secret/${ORDER}-kubeadmin-password -n osac-${ORDER} --keys=password --to=-)
-
-oc login https://${API_HOST} -u kubeadmin -p "${KUBEADMIN_PASSWORD}" \
-  --insecure-skip-tls-verify --kubeconfig=/tmp/${ORDER}/kubeadmin.kubeconfig
-
-oc --kubeconfig=/tmp/${ORDER}/kubeadmin.kubeconfig get nodes
+oc --kubeconfig=/tmp/${ORDER}/kubeconfig \
+  --server=https://${API_HOST} \
+  --insecure-skip-tls-verify \
+  get nodes
 ----
 +
 .Sample output
 ----
-Login successful.
-...
 NAME                STATUS   ROLES    AGE   VERSION
 52-54-00-ca-aa-01   Ready    worker   80m   v1.35.5
 ----
 +
-This URL works from anywhere, including your laptop.
+This URL works from anywhere, including your laptop, as long as you have the kubeconfig.
 
 . Check that the hub can reach the worker's ingress router. The lab provisioning adds the route and firewall rules this needs: a route to `192.168.122.0/24` on all hub nodes, and `tcp 443` allowed from the hub to the guests on the BMF host. Any HTTP code other than `000` means the path works:
 +
@@ -1099,10 +1304,10 @@ oc debug node/${ROUTER_NODE} -q -- nsenter -a -t 1 -- \
 +
 .Sample output
 ----
-404
+503
 ----
 +
-If you get `000`, the hub-side route or the BMF firewall rule for port `443` is missing.
+`503` is the expected answer: the request reached the hosted cluster's own router, but a bare IP address does not match any route, so the router replies "Application is not available". If you get `000`, the hub-side route or the BMF firewall rule for port `443` is missing.
 +
 .If the check returns `000`, open the path by hand (expand)
 [%collapsible]
@@ -1157,7 +1362,7 @@ EOF
 
 These BMF rules live in memory only. The `guest_input` rule disappears when libvirt rebuilds its table, for example after a restart of `virtnetworkd`; re-run this command if that happens. Current lab provisioning adds both pieces permanently.
 
-Run the check above again. It now returns an HTTP code such as `404`.
+Run the check above again. It now returns `503`.
 ====
 
 . Publish the console on the hub. This uses the same pattern as the API, pointing at the worker's ingress router on port `443`. Create it before you rename the console in the next step, because the console operator checks the new URL as soon as you change it:
@@ -1165,6 +1370,7 @@ Run the check above again. It now returns an HTTP code such as `404`.
 [source,role=execute]
 ----
 oc apply -n osac-hosted-access -f - <<EOF
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -1207,28 +1413,76 @@ spec:
     termination: passthrough
 EOF
 ----
++
+.Sample output
+----
+service/console-order-t4p9r created
+endpointslice.discovery.k8s.io/console-order-t4p9r created
+route.route.openshift.io/console-order-t4p9r created
+----
 
-. Give the hosted cluster's console the public hostname. The hub router passes the request through unchanged, so the hosted cluster's own router must recognize the new name. The `componentRoutes` setting tells the console operator to serve the console under that hostname and to register it as an OAuth redirect:
+. Provide a trusted TLS certificate for the console's public hostname. The hosted cluster's own router only has a certificate for `*.apps.<order>.hosted...`, which does not match the new name. The console operator checks its route over TLS and reports `Available=False` until the certificate matches, and the order does not become `Ready` while that is the case.
++
+The hub's own ingress certificate is a publicly trusted wildcard for `*.apps.cluster-<guid>...`, which covers the console's new hostname. Reuse it. It is needed in two places:
++
+* in the `HostedCluster` namespace on the hub, because HyperShift only accepts a serving certificate secret that exists next to the `HostedCluster`, and
+* in the hosted cluster's `openshift-config` namespace, where the console operator reads it. Ordinary secrets can be created there; only the cluster-wide `config.openshift.io` objects are managed from the hub.
 +
 [source,role=execute]
 ----
-guest_oc patch ingresses.config/cluster --type merge -p \
-  "{\"spec\":{\"componentRoutes\":[{\"name\":\"console\",\"namespace\":\"openshift-console\",\"hostname\":\"${CONSOLE_HOST}\"}]}}"
+HUB_CERT=$(oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.spec.defaultCertificate.name}')
+
+oc get secret ${HUB_CERT} -n openshift-ingress -o json \
+  | jq --arg ns ${HCP_NS} '{apiVersion: "v1", kind: "Secret", type: "kubernetes.io/tls",
+         metadata: {name: "console-custom-tls", namespace: $ns},
+         data: {"tls.crt": .data["tls.crt"], "tls.key": .data["tls.key"]}}' \
+  | oc apply -f -
+
+oc get secret ${HUB_CERT} -n openshift-ingress -o json \
+  | jq '{apiVersion: "v1", kind: "Secret", type: "kubernetes.io/tls",
+         metadata: {name: "console-custom-tls", namespace: "openshift-config"},
+         data: {"tls.crt": .data["tls.crt"], "tls.key": .data["tls.key"]}}' \
+  | oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify apply -f -
+----
++
+.Sample output
+----
+secret/console-custom-tls created
+secret/console-custom-tls created
+----
++
+[NOTE]
+====
+This copies the hub's wildcard private key into the tenant's cluster. That is acceptable in a disposable lab, but not something to do on a shared platform. There, OSAC's DNS integration would publish the hosted cluster's own `*.apps` domain with its own certificate.
+
+Do not request a separate certificate for the console hostname from the hub's DNS-validating ACME issuer. In this environment the DNS provider can leave the `_acme-challenge` record behind, and while it exists the hostname no longer resolves through the wildcard.
+====
+
+. Give the hosted cluster's console the public hostname and the certificate. The hub router passes the request through unchanged, so the hosted cluster's own router must recognize the new name. The `componentRoutes` setting tells the console operator to serve the console under that hostname, with the certificate from `console-custom-tls`, and to register the hostname as an OAuth redirect.
++
+In a hosted cluster you cannot edit cluster-wide configuration such as `ingresses.config/cluster` directly. A policy rejects the change and asks you to "modify the resource in the HostedCluster object", because the hosted control plane owns that configuration and copies it from the `HostedCluster` object on the hub. So you set `componentRoutes` in the `HostedCluster` spec:
++
+[source,role=execute]
+----
+oc patch hostedcluster ${ORDER} -n ${HCP_NS} --type merge -p \
+  "{\"spec\":{\"configuration\":{\"ingress\":{\"componentRoutes\":[{\"name\":\"console\",\"namespace\":\"openshift-console\",\"hostname\":\"${CONSOLE_HOST}\",\"servingCertKeyPairSecret\":{\"name\":\"console-custom-tls\"}}]}}}}"
 
 watch -n 10 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get route -n openshift-console; oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get co console"
 ----
 +
-Press `Ctrl+C` when the `console` route shows the new hostname and the `console` operator is `Available`. This takes 1–2 minutes.
+Press `Ctrl+C` when a `console-custom` route shows the new hostname and the `console` operator is `Available`. This takes 1-3 minutes: the hosted control plane first copies the setting into the hosted cluster, then the console operator updates the route and checks it.
 
 . Open the console in your browser:
 +
 [source,role=execute]
 ----
+KUBEADMIN_PASSWORD=$(oc extract secret/${ORDER}-kubeadmin-password -n ${HCP_NS} --keys=password --to=-)
+
 echo "https://${CONSOLE_HOST}"
 echo "kubeadmin / ${KUBEADMIN_PASSWORD}"
 ----
 +
-Your browser warns about the certificate, because the hosted cluster uses its own self-signed ingress certificate. Accept the warning, choose *kube:admin*, and log in with the password above. During login the browser is sent to the hosted cluster's OAuth server, which HyperShift publishes as a hub route. Accept that certificate warning too, if prompted.
+The console uses the trusted certificate you requested, so the browser shows no certificate warning. Choose *kube:admin* and log in with the password above. During login the browser is sent to the hosted cluster's OAuth server, which HyperShift publishes as a route on the hub, under the hub's own trusted `*.apps` certificate.
 +
 You now see the console of the cluster that Alice ordered, running on the bare-metal worker you registered in Exercise 3.
 
