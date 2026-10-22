@@ -345,7 +345,8 @@ Press `Ctrl+C` when `STATE=available`. The `BareMetalHost` must reach `available
 The `BareMetalHost` uses `automatedCleaningMode: disabled`. Disk cleaning runs the IPA agent again between deployments, and that needs the same Ironic-to-agent path you open in the next step. A failed clean drops the host into `deprovisioning` and deletes the `BareMetalInstance`. A lab worker does not need its disk wiped between orders.
 ====
 +
-[TIP]
+.If the host stays in `inspecting` for more than 10 minutes (expand)
+[%collapsible]
 ====
 If the host stays in `inspecting` for more than 10 minutes, the IPA discovery agent on the worker cannot reach Ironic on the hub or `quay.io`. In the RHDP lab this is already handled on the BMF host. In other environments, on the BMF host:
 
@@ -353,7 +354,7 @@ If the host stays in `inspecting` for more than 10 minutes, the IPA discovery ag
 * DNAT `10.10.10.100:6180` (the IPA rootfs URL on the provisioning VIP) to the node that actually serves it. That is the node running the `metal3` pod (`oc get pods -n openshift-machine-api -o wide | grep '^metal3-'`), not necessarily the VIP holder;
 * if `coreos-installer iso kargs show` on the attached ISO has no `ipa-api-url`, add `ipa-api-url=https://10.10.10.100:6385 ipa-insecure=1` with `coreos-installer iso kargs modify -a` and `virsh reboot virtual-bmh-1`.
 
-If inspection already timed out (`ERROR=inspection error`), do *not* `virsh destroy` the VM. Delete the `BareMetalHost`, then re-apply the Secret *and* the `BareMetalHost` from the previous step, and label it again.
+If inspection already timed out (`ERROR=inspection error`), do *not* `virsh destroy` the VM. Delete the `BareMetalHost`, then re-apply the Secret *and* the `BareMetalHost` from the previous step. The manifest already includes the label.
 ====
 
 . Verify the return path from Ironic to the IPA agent. During provisioning, Ironic on the hub polls the IPA agent on the worker at `<guest-ip>:9999`. The worker sits on the libvirt network `192.168.122.0/24` behind the BMF host. The lab provisioning makes this path work and keeps it in place across reboots:
@@ -362,13 +363,24 @@ If inspection already timed out (`ERROR=inspection error`), do *not* `virsh dest
 * on the BMF host, firewall rules that let the hub reach the guests on ports `80`, `443`, and `9999`, plus NAT for the guests' own outbound traffic. The libvirt network runs in `open` forward mode, so libvirt adds no firewall rules of its own.
 +
 Without this path, the `BareMetalHost` stays in `provisioning` while Ironic logs `ConnectTimeout` to port `9999`, and eventually fails.
-+
-Check the route on the hub:
+
+. Check that the MachineConfig exists on the hub cluster:
 +
 [source,role=execute]
 ----
 oc get mc | grep osac-guest-route
+----
++
+.Sample output
+----
+99-master-osac-guest-route                                                                    3.4.0             5m
+99-worker-osac-guest-route                                                                    3.4.
+----
 
+Check the route on the hub:
++
+[source,role=execute]
+----
 for NODE in $(oc get nodes -o name); do
   oc debug ${NODE} -q -- chroot /host ip route get 192.168.122.10 | head -1
 done
@@ -376,8 +388,6 @@ done
 +
 .Sample output
 ----
-99-master-osac-guest-route                                                                    3.4.0             5m
-99-worker-osac-guest-route                                                                    3.4.0             5m
 192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.10 uid 0
 192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.11 uid 0
 192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.12 uid 0
@@ -937,7 +947,7 @@ NAME                                   CLUSTER       APPROVED   ROLE     STAGE
 b0dc76ad-3be1-4fc3-9611-20bac4b6bb95   order-4shw4   true       worker   Done
 ----
 +
-The first stage should be `Writing image to disk`. Keep waiting for the agent to progress through each stage. Press `Ctrl+C` when the `STAGE` shows `Done`. This usually takes 10-15 minutes.
+The first stage should be `Writing image to disk`. It takes a few minutes for this stage to appear. Keep waiting for the agent to progress through each stage. Press `Ctrl+C` when the `STAGE` shows `Done`. This usually takes 10-15 minutes.
 
 . Connect to the hosted cluster. Its admin kubeconfig is stored as a secret in the hosted control plane namespace on the hub. Extract it to `/tmp/${ORDER}`:
 +
