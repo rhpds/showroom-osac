@@ -550,11 +550,13 @@ If you want to skip the exercises and see the final state of the tenant, click t
 <div class="solve-button-placeholder" data-module="module-03"></div>
 ++++
 
+////
 == Validate your work
 
 ++++
 <div class="validate-button-placeholder" data-module="module-03"></div>
 ++++
+////
 
 == Module summary
 
