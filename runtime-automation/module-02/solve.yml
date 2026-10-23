@@ -2,8 +2,21 @@
 # Module 2: Managing Tenants — solve playbook
 # Automates all exercises: tenant creation, IdP setup, user onboarding,
 # role assignment, project creation, and RBAC verification.
-- name: Module 02 - Tenant Onboarding and Identity Management
+- name: Register bastion in inventory
   hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Add bastion host
+      ansible.builtin.add_host:
+        name: bastion
+        ansible_host: "{{ bastion_public_hostname }}"
+        ansible_port: "{{ bastion_ssh_port }}"
+        ansible_user: "{{ bastion_ssh_user_name }}"
+        ansible_password: "{{ bastion_ssh_password }}"
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+
+- name: Module 02 - Tenant Onboarding and Identity Management
+  hosts: bastion
   gather_facts: false
   vars:
     osac_namespace: osac
@@ -16,28 +29,35 @@
     keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
     fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
     break_glass_user: "{{ tenant_name }}-osac-break-glass"
-    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+    device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+    device_login_script: "/home/{{ bastion_ssh_user_name }}/osac-device-login.sh"
+    config_admin: "/home/{{ bastion_ssh_user_name }}/admin"
+    config_breakglass: "/home/{{ bastion_ssh_user_name }}/breakglass"
+    config_alice: "/home/{{ bastion_ssh_user_name }}/alice"
+    config_bob: "/home/{{ bastion_ssh_user_name }}/bob"
 
   tasks:
     # =========================================================================
     # Exercise 1: Create a tenant and verify onboarding
     # =========================================================================
 
-    - name: Set shell variables
-      ansible.builtin.shell: |
-        cat << EOF >> ${HOME}/.bashrc
-        export TENANT={{ tenant_name }}
-        export TENANT_ADMIN={{ tenant_admin }}
-        export TENANT_USER={{ tenant_user }}
-        export REALM=osac
-        EOF
-        source ${HOME}/.bashrc
-        mkdir -p ${HOME}/osac-demo
-      changed_when: true
+    - name: Copy device login script to bastion
+      ansible.builtin.copy:
+        src: "{{ device_login_script_src }}"
+        dest: "{{ device_login_script }}"
+        mode: '0755'
+      changed_when: false
 
-    - name: Login as platform admin
+    - name: Create yaml working directory
+      ansible.builtin.file:
+        path: "/home/{{ bastion_ssh_user_name }}/yaml"
+        state: directory
+        mode: '0755'
+      changed_when: false
+
+    - name: Login as platform admin (public API)
       ansible.builtin.shell: >-
-        osac login --insecure
+        osac --config "{{ config_admin }}" login --insecure
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ osac_admin_user }}
@@ -47,7 +67,7 @@
 
     - name: Login to private API for tenant creation
       ansible.builtin.shell: >-
-        osac login --insecure --private
+        osac --config "{{ config_admin }}" login --insecure --private
         --token-script "oc create token admin -n {{ osac_namespace }}"
         --address "{{ fulfillment_api_url }}"
       changed_when: false
@@ -59,12 +79,22 @@
         metadata:
           name: {{ tenant_name }}
         EOF
-        osac create -f /tmp/tenant.yaml
+        osac --config "{{ config_admin }}" create -f /tmp/tenant.yaml
       register: r_tenant
       changed_when: "'Created tenant' in r_tenant.stdout"
       failed_when:
         - r_tenant.rc != 0
         - "'already exists' not in r_tenant.stderr"
+
+    - name: Restore admin public API session
+      ansible.builtin.shell: >-
+        osac --config "{{ config_admin }}" login --insecure
+        --issuer="{{ keycloak_url }}/realms/osac"
+        --flow=password
+        --user={{ osac_admin_user }}
+        --password={{ osac_admin_password }}
+        {{ fulfillment_api_url }}
+      changed_when: false
 
     - name: Get Keycloak admin token
       ansible.builtin.uri:
@@ -94,15 +124,18 @@
         validate_certs: false
       register: r_kc_org
       changed_when: false
+      retries: 20
+      delay: 6
+      until: r_kc_org.json | length > 0
       failed_when: r_kc_org.json | length == 0
 
     - name: Verify tenant namespace exists
-      kubernetes.core.k8s_info:
-        api_version: v1
-        kind: Namespace
-        name: "{{ tenant_name }}"
+      ansible.builtin.shell: oc get namespace {{ tenant_name }}
       register: r_ns
-      failed_when: r_ns.resources | length == 0
+      retries: 20
+      delay: 6
+      until: r_ns.rc == 0
+      changed_when: false
 
     # =========================================================================
     # Exercise 2: Set up a corporate identity provider
@@ -121,7 +154,21 @@
           displayName: SAI Corp Corporate SSO
         validate_certs: false
         status_code: [201, 409]
-      changed_when: true
+      register: r_realm_create
+      changed_when: r_realm_create.status == 201
+
+    - name: Set sai-corp-idp session limits to 24h
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        body_format: json
+        body:
+          ssoSessionIdleTimeout: 86400
+          ssoSessionMaxLifespan: 86400
+        validate_certs: false
+        status_code: [204]
 
     - name: Create OIDC federation client
       ansible.builtin.uri:
@@ -141,7 +188,8 @@
           standardFlowEnabled: true
         validate_certs: false
         status_code: [201, 409]
-      changed_when: true
+      register: r_client_create
+      changed_when: r_client_create.status == 201
 
     - name: Create IdP users
       ansible.builtin.uri:
@@ -166,19 +214,8 @@
       loop:
         - { username: alice, first: Alice }
         - { username: bob, first: Bob }
-      changed_when: true
-
-    - name: Save OIDC env vars
-      ansible.builtin.shell: |
-        cat << EOF >> ${HOME}/.bashrc
-        export OIDC_CLIENT_ID='{{ idp_client_id }}'
-        export OIDC_CLIENT_SECRET='{{ idp_client_secret }}'
-        export OIDC_ISSUER='{{ keycloak_url }}/realms/{{ idp_realm }}'
-        export OIDC_TOKEN_URL='{{ keycloak_url }}/realms/{{ idp_realm }}/protocol/openid-connect/token'
-        export OIDC_AUTHORIZATION_URL='{{ keycloak_url }}/realms/{{ idp_realm }}/protocol/openid-connect/auth'
-        EOF
-        source ${HOME}/.bashrc
-      changed_when: true
+      register: r_user_create
+      changed_when: r_user_create.status == 201
 
     - name: Set break-glass password as non-temporary via KC admin API
       block:
@@ -209,7 +246,7 @@
 
     - name: Login as break-glass user
       ansible.builtin.shell: >-
-        osac login --insecure
+        osac --config "{{ config_breakglass }}" login --insecure
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ break_glass_user }}
@@ -219,7 +256,7 @@
 
     - name: Create OSAC secret for IdP client secret
       ansible.builtin.shell: >-
-        echo -n "{{ idp_client_secret }}" | osac
+        echo -n "{{ idp_client_secret }}" | osac --config "{{ config_breakglass }}"
         create secret --name idp-client-secret
         --type value --from-file=value=-
       register: r_secret
@@ -245,7 +282,7 @@
             authorization_url: {{ keycloak_url }}/realms/{{ idp_realm }}/protocol/openid-connect/auth
             token_url: {{ keycloak_url }}/realms/{{ idp_realm }}/protocol/openid-connect/token
         EOF
-        osac create -f /tmp/idp.yaml
+        osac --config "{{ config_breakglass }}" create -f /tmp/idp.yaml
       register: r_idp
       changed_when: "'Created identityprovider' in r_idp.stdout"
       failed_when:
@@ -254,7 +291,7 @@
 
     - name: Verify IdP is ready
       ansible.builtin.shell: >-
-        osac get identityprovider {{ tenant_name }} -o yaml
+        osac --config "{{ config_breakglass }}" get identityprovider {{ tenant_name }} -o yaml
         | grep 'phase: IDENTITY_PROVIDER_PHASE_READY'
       register: r_idp_ready
       retries: 10
@@ -262,22 +299,86 @@
       until: r_idp_ready.rc == 0
       changed_when: false
 
+    - name: Refresh KC token before IdP enable check
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          client_id: admin-cli
+          username: "{{ osac_keycloak_admin_user }}"
+          password: "{{ osac_keycloak_admin_password }}"
+        validate_certs: false
+        status_code: 200
+      register: r_kc_token_refresh
+      changed_when: false
+
+    - name: Update KC token fact
+      ansible.builtin.set_fact:
+        kc_token: "{{ r_kc_token_refresh.json.access_token }}"
+      changed_when: false
+
+    - name: Get realm-level KC IdP for sai-corp
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/osac/identity-provider/instances/{{ tenant_name }}-{{ tenant_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        validate_certs: false
+      register: r_kc_idp_instance
+      changed_when: false
+      ignore_errors: true
+
+    - name: Enable Keycloak IdP for sai-corp
+      when:
+        - not (r_kc_idp_instance.failed | default(true))
+        - not (r_kc_idp_instance.json.enabled | default(false))
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/osac/identity-provider/instances/{{ tenant_name }}-{{ tenant_name }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ kc_token }}"
+        body_format: json
+        body: "{{ r_kc_idp_instance.json | combine({'enabled': true}) }}"
+        validate_certs: false
+        status_code: 204
+      changed_when: true
+
     # =========================================================================
     # Exercise 3: Onboard tenant users via SSO (programmatic device flow)
+    # Each user logs in ONCE and their session is stored in a separate config file.
     # =========================================================================
 
-    - name: Onboard federated users via device flow
-      ansible.builtin.shell: |
-        {{ device_login_script }} \
-          "{{ keycloak_url }}" "{{ fulfillment_api_url }}" \
-          "{{ item }}" "{{ osac_user_password }}"
-        osac whoami
-        osac get projects
-      register: r_onboard
+    - name: Onboard Alice via device flow
+      ansible.builtin.shell: >-
+        {{ device_login_script }}
+        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
+        "{{ tenant_admin }}" "{{ osac_user_password }}"
+        "{{ config_alice }}"
       changed_when: true
-      loop:
-        - "{{ tenant_admin }}"
-        - "{{ tenant_user }}"
+
+    - name: Trigger JIT provisioning for Alice
+      ansible.builtin.shell: |
+        osac --config "{{ config_alice }}" whoami
+        osac --config "{{ config_alice }}" get projects
+      register: r_alice_onboard
+      changed_when: false
+
+    - name: Onboard Bob via device flow
+      ansible.builtin.shell: >-
+        {{ device_login_script }}
+        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
+        "{{ tenant_user }}" "{{ osac_user_password }}"
+        "{{ config_bob }}"
+      changed_when: true
+
+    - name: Trigger JIT provisioning for Bob
+      ansible.builtin.shell: |
+        osac --config "{{ config_bob }}" whoami
+        osac --config "{{ config_bob }}" get projects
+      register: r_bob_onboard
+      changed_when: false
 
     - name: Refresh KC token for org member check
       ansible.builtin.uri:
@@ -307,24 +408,23 @@
 
     # =========================================================================
     # Exercise 4: Assign roles and manage projects
+    # Admin and Alice are already logged in — no re-login needed.
     # =========================================================================
-
-    - name: Login as platform admin
-      ansible.builtin.shell: >-
-        osac login --insecure
-        --issuer="{{ keycloak_url }}/realms/osac"
-        --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
-        {{ fulfillment_api_url }}
-      changed_when: false
 
     - name: Get Alice user ID
       ansible.builtin.shell: >-
-        osac get user {{ tenant_admin }} -o json | jq -r .id
+        osac --config "{{ config_admin }}" get user {{ tenant_admin }} -o json | jq -r .id
       register: r_alice_id
       changed_when: false
       failed_when: r_alice_id.stdout | length < 10
+
+    - name: Get tenant-admin role ID
+      ansible.builtin.shell: >-
+        osac --config "{{ config_admin }}" get role tenant-admin -o json
+        | jq -r '.id // .[0].id'
+      register: r_role_id
+      changed_when: false
+      failed_when: r_role_id.stdout | trim | length < 10
 
     - name: Create tenant-admin RoleBinding for Alice
       ansible.builtin.shell: |
@@ -335,11 +435,11 @@
           tenant: {{ tenant_name }}
         spec:
           role:
-            name: tenant-admin
+            id: {{ r_role_id.stdout | trim }}
           users:
             - name: {{ tenant_admin }}
         EOF
-        osac create -f /tmp/rolebinding.yaml
+        osac --config "{{ config_admin }}" create -f /tmp/rolebinding.yaml
       register: r_rb
       changed_when: "'Created rolebinding' in r_rb.stdout"
       failed_when:
@@ -348,7 +448,7 @@
 
     - name: Verify RoleBinding is ready
       ansible.builtin.shell: >-
-        osac get rolebinding -o yaml
+        osac --config "{{ config_admin }}" get rolebinding tenant-admin-binding --tenant {{ tenant_name }} -o yaml
         | grep 'state: ROLE_BINDING_STATE_READY'
       register: r_rb_ready
       retries: 10
@@ -356,28 +456,29 @@
       until: r_rb_ready.rc == 0
       changed_when: false
 
-    - name: Login as Alice via device flow
+    - name: Re-login Alice to refresh token with new role
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "{{ tenant_admin }}" "{{ osac_user_password }}"
+        "{{ config_alice }}"
       changed_when: false
 
     - name: Verify Alice has tenant-admin role
-      ansible.builtin.shell: osac whoami
+      ansible.builtin.shell: osac --config "{{ config_alice }}" whoami
       register: r_alice_whoami
       changed_when: false
       failed_when: "'tenant-admin' not in r_alice_whoami.stdout"
 
     - name: Verify Alice can list users
-      ansible.builtin.shell: osac get users
+      ansible.builtin.shell: osac --config "{{ config_alice }}" get users
       register: r_alice_users
       changed_when: false
       failed_when: r_alice_users.rc != 0
 
     - name: Create project
       ansible.builtin.shell: |
-        cat > ${HOME}/osac-demo/sai-project.yaml <<'EOF'
+        cat > ${HOME}/yaml/sai-project.yaml <<'EOF'
         "@type": type.googleapis.com/osac.public.v1.Project
         metadata:
           name: default
@@ -386,24 +487,16 @@
           title: Default Project
           description: Primary project for SAI Corp
         EOF
-        osac create -f ${HOME}/osac-demo/sai-project.yaml
+        osac --config "{{ config_alice }}" create -f ${HOME}/yaml/sai-project.yaml
       register: r_proj
       changed_when: "'Created project' in r_proj.stdout"
       failed_when:
         - r_proj.rc != 0
         - "'already exists' not in r_proj.stderr"
 
-    - name: Save project ID
-      ansible.builtin.shell: |
-        PROJ_ID=$(osac get project default -o json | jq -r .id)
-        echo "PROJ_ID=${PROJ_ID}" >> ${HOME}/.bashrc
-        echo "${PROJ_ID}"
-      register: r_proj_id
-      changed_when: false
-
     - name: Create ProjectMembership for Bob as viewer
       ansible.builtin.shell: |
-        cat > ${HOME}/osac-demo/bob-membership.yaml <<'EOF'
+        cat > ${HOME}/yaml/bob-membership.yaml <<'EOF'
         "@type": type.googleapis.com/osac.public.v1.ProjectMembership
         metadata:
           name: bob-viewer
@@ -414,7 +507,7 @@
           users:
             - name: {{ tenant_user }}
         EOF
-        osac create -f ${HOME}/osac-demo/bob-membership.yaml
+        osac --config "{{ config_alice }}" create -f ${HOME}/yaml/bob-membership.yaml
       register: r_pm
       changed_when: "'Created projectmembership' in r_pm.stdout"
       failed_when:
@@ -422,7 +515,7 @@
         - "'already exists' not in r_pm.stderr"
 
     - name: Verify project membership
-      ansible.builtin.shell: osac get projectmemberships
+      ansible.builtin.shell: osac --config "{{ config_alice }}" get projectmemberships
       register: r_pm_list
       changed_when: false
 
@@ -430,27 +523,28 @@
     # Exercise 5: Verify RBAC enforcement
     # =========================================================================
 
-    - name: Login as Bob via device flow
+    - name: Re-login Bob to refresh token with project membership
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "{{ tenant_user }}" "{{ osac_user_password }}"
+        "{{ config_bob }}"
       changed_when: false
 
     - name: Verify Bob identity
-      ansible.builtin.shell: osac whoami
+      ansible.builtin.shell: osac --config "{{ config_bob }}" whoami
       register: r_bob_whoami
       changed_when: false
       failed_when: "'bob' not in r_bob_whoami.stdout"
 
     - name: Bob can list projects (viewer access)
-      ansible.builtin.shell: osac get projects
+      ansible.builtin.shell: osac --config "{{ config_bob }}" get projects
       register: r_bob_projects
       changed_when: false
       failed_when: "'default' not in r_bob_projects.stdout"
 
     - name: Bob cannot delete project (RBAC enforcement)
-      ansible.builtin.shell: osac delete project default
+      ansible.builtin.shell: osac --config "{{ config_bob }}" delete project default
       register: r_bob_delete
       changed_when: false
       failed_when: "'PermissionDenied' not in r_bob_delete.stderr"
@@ -461,13 +555,3 @@
         that: "'PermissionDenied' in r_bob_delete.stderr"
         fail_msg: "RBAC enforcement failed — Bob was able to delete the project"
         success_msg: "RBAC enforcement verified — Bob cannot delete projects"
-
-    - name: Re-login as platform admin
-      ansible.builtin.shell: >-
-        osac login --insecure
-        --issuer="{{ keycloak_url }}/realms/osac"
-        --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
-        {{ fulfillment_api_url }}
-      changed_when: false

@@ -1,0 +1,447 @@
+---
+- name: Module 04 — Cluster as a Service Validation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    student_user: "{{ user | default('') }}"
+    osac_ns: osac
+    hw_ns: hardware-inventory
+    cluster_name: student-cluster
+    vm_name: agent-student-01
+    bmit_name: c1-metal-amd64
+    disk_image: rhcos-4-22
+    ocp_version: 4.22.0-rhcos
+    catalog_item: hosted-ci-small
+    tenant_cluster_ns: "osac-{{ cluster_name }}"
+  tasks:
+
+    # -------------------------------------------------------
+    # Pre-flight — derive cluster topology for API address
+    # -------------------------------------------------------
+    - name: Get ingress domain from cluster ingress config
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: config.openshift.io/v1
+        kind: Ingress
+        name: cluster
+      register: r_ingress
+      ignore_errors: true
+
+    - name: Set derived topology facts
+      when: r_ingress.resources | default([]) | length > 0
+      ansible.builtin.set_fact:
+        api_int: >-
+          https://fulfillment-internal-api-{{ osac_ns }}.{{ r_ingress.resources[0].spec.domain }}
+
+    # -------------------------------------------------------
+    # Pre-flight — OSAC admin login (required for Ex4 CLI checks)
+    # -------------------------------------------------------
+    - name: Login as OSAC admin (private API, SA token)
+      when: api_int is defined
+      ansible.builtin.shell: >-
+        osac --config "$HOME/admin" login --insecure --private
+        --address "{{ api_int }}"
+        --token-script "oc --kubeconfig={{ k8s_kubeconfig }} create token -n {{ osac_ns }} admin"
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 1 — ConfigMap cluster-fulfillment-ig patched (Ex2)
+    # -------------------------------------------------------
+    - name: Get ConfigMap cluster-fulfillment-ig
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: ConfigMap
+        namespace: "{{ osac_ns }}"
+        name: cluster-fulfillment-ig
+      register: r_cm
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 2 — MachineConfig exists + MCP worker Updated (ASYNC — up to 30 min)
+    # -------------------------------------------------------
+    - name: Get MachineConfig 99-osac-caas-br-untagged
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: machineconfiguration.openshift.io/v1
+        kind: MachineConfig
+        name: 99-osac-caas-br-untagged
+      register: r_mc
+      ignore_errors: true
+
+    - name: Get MachineConfigPool worker
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: machineconfiguration.openshift.io/v1
+        kind: MachineConfigPool
+        name: worker
+      register: r_mcp
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 3 — Namespace hardware-inventory Active + InfraEnv has ISO URL (Ex3)
+    # -------------------------------------------------------
+    - name: Check hardware-inventory namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Namespace
+        name: "{{ hw_ns }}"
+      register: r_hw_ns
+      ignore_errors: true
+
+    - name: Get InfraEnv hardware-inventory
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: agent-install.openshift.io/v1beta1
+        kind: InfraEnv
+        namespace: "{{ hw_ns }}"
+        name: hardware-inventory
+      register: r_infraenv
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 4 — NAD untagged-net-student exists (Ex3)
+    # -------------------------------------------------------
+    - name: Get NetworkAttachmentDefinition untagged-net-student
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: k8s.cni.cncf.io/v1
+        kind: NetworkAttachmentDefinition
+        namespace: "{{ hw_ns }}"
+        name: untagged-net-student
+      register: r_nad
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 5 — DataVolumes rootdisk and iso phase=Succeeded (Ex3)
+    # -------------------------------------------------------
+    - name: Get DataVolume agent-student-01-rootdisk
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: cdi.kubevirt.io/v1beta1
+        kind: DataVolume
+        namespace: "{{ hw_ns }}"
+        name: "{{ vm_name }}-rootdisk"
+      register: r_dv_root
+      ignore_errors: true
+
+    - name: Get DataVolume agent-student-01-iso
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: cdi.kubevirt.io/v1beta1
+        kind: DataVolume
+        namespace: "{{ hw_ns }}"
+        name: "{{ vm_name }}-iso"
+      register: r_dv_iso
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 6 — VirtualMachine exists + VMI phase=Running (Ex3)
+    # -------------------------------------------------------
+    - name: Get VirtualMachine agent-student-01
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: kubevirt.io/v1
+        kind: VirtualMachine
+        namespace: "{{ hw_ns }}"
+        name: "{{ vm_name }}"
+      register: r_vm
+      ignore_errors: true
+
+    - name: Get VirtualMachineInstance agent-student-01
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        namespace: "{{ hw_ns }}"
+        name: "{{ vm_name }}"
+      register: r_vmi
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 7 — Agent approved with ci-worker label (ASYNC — VM may still be booting)
+    # -------------------------------------------------------
+    - name: Get Agents in hardware-inventory
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: agent-install.openshift.io/v1beta1
+        kind: Agent
+        namespace: "{{ hw_ns }}"
+      register: r_agents
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 8 — BareMetalInstanceType c1-metal-amd64 exists (Ex4)
+    # -------------------------------------------------------
+    - name: Get BareMetalInstanceType c1-metal-amd64 via osac CLI
+      ansible.builtin.shell: >-
+        osac --config "$HOME/admin"
+        get baremetalinstancetype {{ bmit_name }}
+      register: r_bmit
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 9 — DiskImage rhcos-4-22 shows LIFECYCLE=AVAILABLE (Ex4)
+    # -------------------------------------------------------
+    - name: Get DiskImage rhcos-4-22 via osac CLI
+      ansible.builtin.shell: >-
+        osac --config "$HOME/admin"
+        get diskimage {{ disk_image }}
+      register: r_diskimage
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 10 — ClusterVersion 4.22.0-rhcos exists (Ex4)
+    # -------------------------------------------------------
+    - name: Get ClusterVersion 4.22.0-rhcos via osac CLI
+      ansible.builtin.shell: >-
+        osac --config "$HOME/admin"
+        get clusterversion {{ ocp_version }}
+      register: r_clusterversion
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 11 — ClusterCatalogItem hosted-ci-small is PUBLISHED (Ex4)
+    # -------------------------------------------------------
+    - name: Get ClusterCatalogItem hosted-ci-small via osac CLI
+      ansible.builtin.shell: >-
+        osac --config "$HOME/admin"
+        get clustercatalogitem {{ catalog_item }}
+      register: r_catalogitem
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 12 — ClusterOrder student-cluster exists in osac namespace (Ex5)
+    # -------------------------------------------------------
+    - name: Get ClusterOrder student-cluster
+      ansible.builtin.shell: >-
+        oc --kubeconfig={{ k8s_kubeconfig }}
+        get clusterorder {{ cluster_name }} -n {{ osac_ns }} --no-headers
+      register: r_clusterorder
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 13 — HostedCluster exists in osac-student-cluster (ASYNC)
+    # -------------------------------------------------------
+    - name: Get HostedCluster in osac-student-cluster namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: hypershift.openshift.io/v1beta1
+        kind: HostedCluster
+        namespace: "{{ tenant_cluster_ns }}"
+      register: r_hc
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 14 — Agent bound to cluster + NodePool replicas=1 (Ex5)
+    # -------------------------------------------------------
+    - name: Get NodePool in osac-student-cluster namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: hypershift.openshift.io/v1beta1
+        kind: NodePool
+        namespace: "{{ tenant_cluster_ns }}"
+      register: r_nodepool
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 15 — HC admin kubeconfig secret exists (Ex5)
+    # -------------------------------------------------------
+    - name: Get HC admin kubeconfig secret
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: v1
+        kind: Secret
+        namespace: "{{ tenant_cluster_ns }}"
+        name: "{{ cluster_name }}-admin-kubeconfig"
+      register: r_hc_kubeconfig
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 16 — HC worker node Ready (ASYNC — cluster provisioning 15-30 min)
+    # -------------------------------------------------------
+    - name: Write HC admin kubeconfig to /tmp for node check
+      when: r_hc_kubeconfig.resources | default([]) | length > 0
+      ansible.builtin.copy:
+        content: "{{ r_hc_kubeconfig.resources[0].data.kubeconfig | b64decode }}"
+        dest: /tmp/validate-student-cluster-kubeconfig
+        mode: "0600"
+      ignore_errors: true
+
+    - name: Get nodes from hosted cluster
+      when: r_hc_kubeconfig.resources | default([]) | length > 0
+      ansible.builtin.shell: >-
+        oc --kubeconfig=/tmp/validate-student-cluster-kubeconfig
+        --insecure-skip-tls-verify get nodes --no-headers
+      register: r_hc_nodes
+      changed_when: false
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Build task results
+    # -------------------------------------------------------
+    - name: Build task results
+      ansible.builtin.set_fact:
+        _task1_ok: >-
+          {{ r_cm.resources | default([]) | length > 0 and
+             (r_cm.resources[0].data | default({})).DNS_CLASS | default('') == 'dns.noop.dns' and
+             (r_cm.resources[0].data | default({})).HOSTED_CLUSTER_BASE_DOMAIN | default('') | length > 0 }}
+        _task2_ok: >-
+          {{ r_mc.resources | default([]) | length > 0 and
+             r_mcp.resources | default([]) | length > 0 and
+             (r_mcp.resources[0].status.conditions | default([]) |
+               selectattr('type', 'equalto', 'Updated') |
+               selectattr('status', 'equalto', 'True') | list | length > 0) and
+             (r_mcp.resources[0].status.conditions | default([]) |
+               selectattr('type', 'equalto', 'Updating') |
+               selectattr('status', 'equalto', 'False') | list | length > 0) }}
+        _task3_ok: >-
+          {{ r_hw_ns.resources | default([]) |
+               selectattr('status.phase', 'equalto', 'Active') | list | length > 0 and
+             r_infraenv.resources | default([]) | length > 0 and
+             'full.iso' in (r_infraenv.resources[0].status.isoDownloadURL | default('')) }}
+        _task4_ok: >-
+          {{ r_nad.resources | default([]) | length > 0 }}
+        _task5_ok: >-
+          {{ r_dv_root.resources | default([]) | length > 0 and
+             r_dv_root.resources[0].status.phase | default('') == 'Succeeded' and
+             r_dv_iso.resources | default([]) | length > 0 and
+             r_dv_iso.resources[0].status.phase | default('') == 'Succeeded' }}
+        _task6_ok: >-
+          {{ r_vm.resources | default([]) | length > 0 and
+             r_vmi.resources | default([]) | length > 0 and
+             r_vmi.resources[0].status.phase | default('') == 'Running' }}
+        _task7_ok: >-
+          {{ r_agents.resources | default([]) |
+               selectattr('spec.approved', 'equalto', true) | list | length > 0 and
+             'ci-worker' in
+               (r_agents.resources | default([]) |
+                selectattr('spec.approved', 'equalto', true) | list | to_json) }}
+        _task8_ok: >-
+          {{ not (r_bmit.failed | default(true)) and
+             r_bmit.rc | default(1) == 0 and
+             bmit_name in (r_bmit.stdout | default('')) }}
+        _task9_ok: >-
+          {{ not (r_diskimage.failed | default(true)) and
+             r_diskimage.rc | default(1) == 0 and
+             disk_image in (r_diskimage.stdout | default('')) and
+             'AVAILABLE' in (r_diskimage.stdout | default('')) }}
+        _task10_ok: >-
+          {{ not (r_clusterversion.failed | default(true)) and
+             r_clusterversion.rc | default(1) == 0 and
+             ocp_version in (r_clusterversion.stdout | default('')) }}
+        _task11_ok: >-
+          {{ not (r_catalogitem.failed | default(true)) and
+             r_catalogitem.rc | default(1) == 0 and
+             catalog_item in (r_catalogitem.stdout | default('')) and
+             'true' in (r_catalogitem.stdout | default('') | lower) }}
+        _task12_ok: >-
+          {{ not (r_clusterorder.failed | default(true)) and
+             r_clusterorder.rc | default(1) == 0 and
+             cluster_name in (r_clusterorder.stdout | default('')) }}
+        _task13_ok: >-
+          {{ r_hc.resources | default([]) | length > 0 }}
+        _task14_ok: >-
+          {{ 'clusterorder' in (r_agents.resources | default([]) | to_json) and
+             cluster_name in (r_agents.resources | default([]) | to_json) and
+             r_nodepool.resources | default([]) | length > 0 and
+             (r_nodepool.resources[0].spec.replicas | default(0)) | int == 1 }}
+        _task15_ok: >-
+          {{ r_hc_kubeconfig.resources | default([]) | length > 0 }}
+        _task16_ok: >-
+          {{ r_hc_nodes is defined and
+             r_hc_nodes is not skipped and
+             not (r_hc_nodes.failed | default(true)) and
+             r_hc_nodes.rc | default(1) == 0 and
+             'Ready' in (r_hc_nodes.stdout | default('')) }}
+
+    # -------------------------------------------------------
+    # Validate all tasks
+    # -------------------------------------------------------
+    - name: Validate all tasks
+      validation_check:
+        check: >-
+          {{ _task1_ok and _task2_ok and _task3_ok and _task4_ok and
+             _task5_ok and _task6_ok and _task7_ok and _task8_ok and
+             _task9_ok and _task10_ok and _task11_ok and _task12_ok and
+             _task13_ok and _task14_ok and _task15_ok and _task16_ok }}
+        pass_msg: |
+          Task 1: ConfigMap cluster-fulfillment-ig patched with DNS_CLASS=dns.noop.dns and HOSTED_CLUSTER_BASE_DOMAIN
+          Task 2: MachineConfig 99-osac-caas-br-untagged applied and worker MachineConfigPool Updated
+          Task 3: Namespace hardware-inventory Active and InfraEnv has isoDownloadURL (full.iso)
+          Task 4: NetworkAttachmentDefinition untagged-net-student exists in hardware-inventory
+          Task 5: DataVolumes agent-student-01-rootdisk and agent-student-01-iso phase=Succeeded
+          Task 6: VirtualMachine agent-student-01 exists and VMI phase=Running
+          Task 7: Agent in hardware-inventory is approved with resource_class=ci-worker label
+          Task 8: BareMetalInstanceType c1-metal-amd64 registered in OSAC
+          Task 9: DiskImage rhcos-4-22 is LIFECYCLE=AVAILABLE
+          Task 10: ClusterVersion 4.22.0-rhcos registered in OSAC
+          Task 11: ClusterCatalogItem hosted-ci-small is published
+          Task 12: ClusterOrder student-cluster exists in osac namespace
+          Task 13: HostedCluster exists in osac-student-cluster namespace
+          Task 14: Agent is bound to student-cluster and NodePool replicas=1
+          Task 15: HC admin kubeconfig secret student-cluster-admin-kubeconfig exists
+          Task 16: Hosted cluster has at least one Ready worker node
+        error_msg: |
+          {{ '  ok' if _task1_ok else 'FAIL' }} Task 1: ConfigMap cluster-fulfillment-ig — \
+          {{ 'DNS_CLASS and HOSTED_CLUSTER_BASE_DOMAIN set' if _task1_ok else \
+             'FAILED — patch the ConfigMap: oc edit cm cluster-fulfillment-ig -n osac (set DNS_CLASS=dns.noop.dns)' }}
+          {{ '  ok' if _task2_ok else 'FAIL' }} Task 2: MachineConfig + MCP worker Updated — \
+          {{ 'MachineConfig applied and workers rebooted' if _task2_ok else \
+             'FAILED — apply MachineConfig 99-osac-caas-br-untagged and wait up to 30 min for MCP rollout; \
+             check: oc get mcp worker' }}
+          {{ '  ok' if _task3_ok else 'FAIL' }} Task 3: hardware-inventory namespace + InfraEnv — \
+          {{ 'namespace Active and InfraEnv has ISO URL' if _task3_ok else \
+             'FAILED — create the hardware-inventory namespace and apply InfraEnv with imageType: full-iso' }}
+          {{ '  ok' if _task4_ok else 'FAIL' }} Task 4: NAD untagged-net-student — \
+          {{ 'exists' if _task4_ok else \
+             'FAILED — apply the NetworkAttachmentDefinition untagged-net-student in hardware-inventory' }}
+          {{ '  ok' if _task5_ok else 'FAIL' }} Task 5: DataVolumes rootdisk + iso Succeeded — \
+          {{ 'both phase=Succeeded' if _task5_ok else \
+             'FAILED — check DV status: oc get dv -n hardware-inventory (rootdisk needs 120Gi blank, iso needs virtctl upload)' }}
+          {{ '  ok' if _task6_ok else 'FAIL' }} Task 6: VM agent-student-01 Running — \
+          {{ 'VM exists and VMI phase=Running' if _task6_ok else \
+             'FAILED — start the VirtualMachine; check: oc get vmi -n hardware-inventory' }}
+          {{ '  ok' if _task7_ok else 'FAIL' }} Task 7: Agent approved with ci-worker label — \
+          {{ 'approved and labeled' if _task7_ok else \
+             'FAILED — VM may still be booting (up to 8 min); once Agent appears, \
+             approve it and add label osac.openshift.io/resource_class=ci-worker' }}
+          {{ '  ok' if _task8_ok else 'FAIL' }} Task 8: BareMetalInstanceType c1-metal-amd64 — \
+          {{ 'registered' if _task8_ok else \
+             'FAILED — create with: osac create baremetalinstancetype --name c1-metal-amd64 ...' }}
+          {{ '  ok' if _task9_ok else 'FAIL' }} Task 9: DiskImage rhcos-4-22 AVAILABLE — \
+          {{ 'LIFECYCLE=AVAILABLE' if _task9_ok else \
+             'FAILED — create with: osac create diskimage --name rhcos-4-22 --source-type registry ...' }}
+          {{ '  ok' if _task10_ok else 'FAIL' }} Task 10: ClusterVersion 4.22.0-rhcos — \
+          {{ 'registered' if _task10_ok else \
+             'FAILED — create with: osac create clusterversion --version 4.22.0-rhcos --image ... --disk-image rhcos-4-22' }}
+          {{ '  ok' if _task11_ok else 'FAIL' }} Task 11: ClusterCatalogItem hosted-ci-small published — \
+          {{ 'PUBLISHED=true' if _task11_ok else \
+             'FAILED — create with: osac create clustercatalogitem --name hosted-ci-small --published ...' }}
+          {{ '  ok' if _task12_ok else 'FAIL' }} Task 12: ClusterOrder student-cluster — \
+          {{ 'exists in osac namespace' if _task12_ok else \
+             'FAILED — order the cluster as alice: osac create cluster --name student-cluster --catalog-item hosted-ci-small ...' }}
+          {{ '  ok' if _task13_ok else 'FAIL' }} Task 13: HostedCluster in osac-student-cluster — \
+          {{ 'exists' if _task13_ok else \
+             'FAILED — cluster may still be provisioning; \
+             check: oc get hostedcluster -n osac-student-cluster (allow several minutes after ordering)' }}
+          {{ '  ok' if _task14_ok else 'FAIL' }} Task 14: Agent bound + NodePool replicas=1 — \
+          {{ 'Agent labeled with clusterorder and NodePool replicas=1' if _task14_ok else \
+             'FAILED — label the Agent with osac.openshift.io/clusterorder=student-cluster \
+             and set NodePool replicas=1' }}
+          {{ '  ok' if _task15_ok else 'FAIL' }} Task 15: HC admin kubeconfig secret — \
+          {{ 'student-cluster-admin-kubeconfig exists' if _task15_ok else \
+             'FAILED — secret not yet created by HyperShift; \
+             wait for cluster API to come up, then check: oc get secret -n osac-student-cluster' }}
+          {{ '  ok' if _task16_ok else 'FAIL' }} Task 16: HC worker node Ready — \
+          {{ 'one Ready node visible via HC kubeconfig' if _task16_ok else \
+             'FAILED — cluster is still provisioning (15-30 min total); \
+             come back later and click Validate again' }}

@@ -1,10 +1,242 @@
 ---
-# Module 1: Exploring the Red Hat Cloud Extensions Platform — validate tasks
-# Generate with: /ftl:rhdp-lab-validator
-- name: Module 01 - Validate placeholder
+- name: Module 01 — Platform Overview Validation
   hosts: localhost
+  connection: local
   gather_facts: false
+  vars:
+    student_user: "{{ user | default('') }}"
+    osac_keycloak_url: "{{ osac_keycloak_url | default('') }}"
   tasks:
-    - name: Placeholder
-      ansible.builtin.debug:
-        msg: "Nothing to validate for Module 1."
+
+    # -------------------------------------------------------
+    # Check 1 — All pods in osac namespace are Running or Succeeded
+    # -------------------------------------------------------
+    - name: Get all pods in osac namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        kind: Pod
+        namespace: osac
+      register: r_osac_pods
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 2 — All ClusterServiceVersions in osac namespace have phase Succeeded
+    # -------------------------------------------------------
+    - name: Get ClusterServiceVersions in osac namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        namespace: osac
+      register: r_csvs
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 3 — Route with name containing 'osac-ui' exists in osac namespace
+    # -------------------------------------------------------
+    - name: Get routes in osac namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: route.openshift.io/v1
+        kind: Route
+        namespace: osac
+      register: r_routes
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 4 — keycloak pods in keycloak namespace are Running
+    # -------------------------------------------------------
+    - name: Get pods in keycloak namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        kind: Pod
+        namespace: keycloak
+      register: r_keycloak_pods
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 5 — Deployment keycloak-service in keycloak namespace has readyReplicas >= 1
+    # -------------------------------------------------------
+    - name: Get keycloak-service deployment
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        kind: Deployment
+        namespace: keycloak
+        name: keycloak-service
+      register: r_keycloak_deploy
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 6 — Endpoints object 'keycloak' in keycloak namespace has non-empty subsets
+    # -------------------------------------------------------
+    - name: Get keycloak endpoints object
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        kind: Endpoints
+        namespace: keycloak
+        name: keycloak
+      register: r_keycloak_ep
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 7 — Keycloak realm API returns realm=osac with non-empty public_key
+    # -------------------------------------------------------
+    - name: Query Keycloak realm API
+      when: osac_keycloak_url | default('') | length > 0
+      ansible.builtin.uri:
+        url: "{{ osac_keycloak_url }}/realms/osac"
+        method: GET
+        validate_certs: false
+        timeout: 10
+      register: r_keycloak_realm
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 8 — At least one Kafka CR in osac-kafka with Ready condition True
+    # -------------------------------------------------------
+    - name: Get Kafka CRs in osac-kafka namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: kafka.strimzi.io/v1beta2
+        kind: Kafka
+        namespace: osac-kafka
+      register: r_kafka
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 9 — At least one Kafka broker pod running in osac-kafka
+    # -------------------------------------------------------
+    - name: Get Kafka broker pods in osac-kafka namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        kind: Pod
+        namespace: osac-kafka
+        label_selectors:
+          - "strimzi.io/kind=Kafka"
+      register: r_kafka_pods
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 10 — At least one KafkaTopic with name prefix 'osac.' or 'osac-' in osac-kafka
+    # -------------------------------------------------------
+    - name: Get KafkaTopics in osac-kafka namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: kafka.strimzi.io/v1beta2
+        kind: KafkaTopic
+        namespace: osac-kafka
+      register: r_kafka_topics
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 11 — At least one KafkaUser exists in osac-kafka
+    # -------------------------------------------------------
+    - name: Get KafkaUsers in osac-kafka namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig | default(omit) }}"
+        api_version: kafka.strimzi.io/v1beta2
+        kind: KafkaUser
+        namespace: osac-kafka
+      register: r_kafka_users
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Build task results
+    # -------------------------------------------------------
+    - name: Build task results
+      ansible.builtin.set_fact:
+        _task1_ok: >-
+          {{ r_osac_pods.resources | default([]) | length > 0 and
+             r_osac_pods.resources |
+               rejectattr('status.phase', 'equalto', 'Running') |
+               rejectattr('status.phase', 'equalto', 'Succeeded') |
+               list | length == 0 }}
+        _task2_ok: >-
+          {{ r_csvs.resources | default([]) | length > 0 and
+             r_csvs.resources |
+               rejectattr('status.phase', 'equalto', 'Succeeded') |
+               list | length == 0 }}
+        _task3_ok: >-
+          {{ r_routes.resources | default([]) |
+             map(attribute='metadata.name') |
+             select('match', 'osac-ui') |
+             list | length > 0 }}
+        _task4_ok: >-
+          {{ r_keycloak_pods.resources | default([]) |
+             selectattr('status.phase', 'equalto', 'Running') |
+             list | length > 0 }}
+        _task5_ok: >-
+          {{ r_keycloak_deploy.resources | default([]) | length > 0 and
+             (r_keycloak_deploy.resources[0].status.readyReplicas | default(0)) | int >= 1 }}
+        _task6_ok: >-
+          {{ r_keycloak_ep.resources | default([]) | length > 0 and
+             (r_keycloak_ep.resources[0].subsets | default([])) | length > 0 }}
+        _task7_ok: >-
+          {{ r_keycloak_realm is defined and
+             r_keycloak_realm is not skipped and
+             r_keycloak_realm is not failed and
+             (r_keycloak_realm.json | default({})).realm | default('') == 'osac' and
+             (r_keycloak_realm.json | default({})).public_key | default('') | length > 0 }}
+        _task8_ok: >-
+          {{ r_kafka.resources | default([]) | length > 0 and
+             r_kafka.resources |
+               map(attribute='status.conditions', default=[]) |
+               flatten |
+               selectattr('type', 'equalto', 'Ready') |
+               selectattr('status', 'equalto', 'True') |
+               list | length > 0 }}
+        _task9_ok: >-
+          {{ r_kafka_pods.resources | default([]) |
+             selectattr('status.phase', 'equalto', 'Running') |
+             list | length > 0 }}
+        _task10_ok: >-
+          {{ r_kafka_topics.resources | default([]) |
+             map(attribute='metadata.name') |
+             select('match', 'osac[.-]') |
+             list | length > 0 }}
+        _task11_ok: >-
+          {{ r_kafka_users.resources | default([]) | length > 0 }}
+
+    # -------------------------------------------------------
+    # Validate all tasks
+    # -------------------------------------------------------
+    - name: Validate all tasks
+      validation_check:
+        check: >-
+          {{ _task1_ok and _task2_ok and _task3_ok and _task4_ok and _task5_ok and
+             _task6_ok and _task7_ok and _task8_ok and _task9_ok and _task10_ok and _task11_ok }}
+        pass_msg: |
+          ✅ Task 1: All pods in osac namespace are Running or Succeeded
+          ✅ Task 2: All ClusterServiceVersions in osac namespace have phase Succeeded
+          ✅ Task 3: Route 'osac-ui' exists in osac namespace
+          ✅ Task 4: Keycloak pods are Running in keycloak namespace
+          ✅ Task 5: Deployment keycloak-service has readyReplicas >= 1
+          ✅ Task 6: Keycloak Endpoints object is populated
+          ✅ Task 7: Keycloak realm API returns realm=osac with public_key
+          ✅ Task 8: Kafka CR is Ready in osac-kafka namespace
+          ✅ Task 9: Kafka broker pod is running in osac-kafka namespace
+          ✅ Task 10: KafkaTopic with 'osac.' or 'osac-' prefix exists in osac-kafka namespace
+          ✅ Task 11: KafkaUser exists in osac-kafka namespace
+        error_msg: |
+          {{ '✅' if _task1_ok else '❌' }} Task 1: osac namespace pods — \
+          {{ 'all Running or Succeeded' if _task1_ok else 'FAILED — pods not healthy; run: oc get pods -n osac' }}
+          {{ '✅' if _task2_ok else '❌' }} Task 2: ClusterServiceVersions — \
+          {{ 'all Succeeded' if _task2_ok else 'FAILED — operators not ready; run: oc get csv -n osac' }}
+          {{ '✅' if _task3_ok else '❌' }} Task 3: osac-ui route — \
+          {{ 'exists' if _task3_ok else 'FAILED — route not found; run: oc get routes -n osac' }}
+          {{ '✅' if _task4_ok else '❌' }} Task 4: Keycloak pods — \
+          {{ 'running' if _task4_ok else 'FAILED — no running pods; run: oc get pods -n keycloak' }}
+          {{ '✅' if _task5_ok else '❌' }} Task 5: keycloak-service deployment — \
+          {{ 'ready' if _task5_ok else 'FAILED — deployment not ready; run: oc get deploy keycloak-service -n keycloak' }}
+          {{ '✅' if _task6_ok else '❌' }} Task 6: Keycloak endpoints — \
+          {{ 'populated' if _task6_ok else 'FAILED — no endpoints; run: oc get endpoints keycloak -n keycloak' }}
+          {{ '✅' if _task7_ok else '❌' }} Task 7: Keycloak realm API — \
+          {{ 'OK' if _task7_ok else 'FAILED — realm endpoint not responding; check Keycloak pod logs' }}
+          {{ '✅' if _task8_ok else '❌' }} Task 8: Kafka CR Ready — \
+          {{ 'Ready' if _task8_ok else 'FAILED — Kafka not ready; run: oc get kafka -n osac-kafka' }}
+          {{ '✅' if _task9_ok else '❌' }} Task 9: Kafka broker pod — \
+          {{ 'running' if _task9_ok else 'FAILED — no broker pods; run: oc get pods -n osac-kafka -l strimzi.io/kind=Kafka' }}
+          {{ '✅' if _task10_ok else '❌' }} Task 10: KafkaTopic with osac. or osac- prefix — \
+          {{ 'exists' if _task10_ok else 'FAILED — no topics found; run: oc get kafkatopics -n osac-kafka' }}
+          {{ '✅' if _task11_ok else '❌' }} Task 11: KafkaUser — \
+          {{ 'exists' if _task11_ok else 'FAILED — no KafkaUsers; run: oc get kafkausers -n osac-kafka' }}

@@ -20,6 +20,7 @@ By the end of this workshop, you'll have the hands-on skills to run Red Hat clou
 * Navigate and understand the Red Hat cloud extensions platform architecture and components → *confidently explain what each service does and how they connect*
 * Create and manage multi-tenant environments → *provide isolated, compliant workload environments for each client agency*
 * Use the `osac` CLI to create catalog items and deploy workloads → *automate tenant service delivery without manual intervention*
+* Provision virtual machines and hosted OpenShift clusters through the service catalog → *deliver VMaaS and CaaS workloads to tenants on demand*
 * Verify platform health and tenant readiness → *ensure every tenant environment meets operational and compliance standards before go-live*
 
 *Technical outcome*: You'll operate a real Red Hat cloud extensions deployment — including the osac-operator, fulfillment service, Keycloak, and Kafka — using the same tools and workflows you'd use in production.
@@ -69,6 +70,7 @@ If Red Hat cloud extensions meets Sovereign Cloud Corp's requirements, here's wh
 
 * *Tenant isolation*: Each government agency runs in a dedicated environment → satisfies data sovereignty and cross-tenant data leakage requirements
 * *Automated provisioning*: Workload requests go through the service catalog → cuts provisioning time from weeks to minutes
+* *Full workload catalog*: Tenants can order VMs (VMaaS) and full hosted OpenShift clusters (CaaS) without filing infrastructure tickets
 
 *Strategic benefits* (ongoing):
 
@@ -88,6 +90,9 @@ If Red Hat cloud extensions meets Sovereign Cloud Corp's requirements, here's wh
 
 *"Do I need to write code to provision workloads, or is there a UI?"*
 → Both options exist. Module 3 covers the `osac` CLI, which is the primary tool for creating catalog items and deploying workloads. The Red Hat cloud extensions UI at `{osac_ui_url}`^ provides a visual view of what's running.
+
+*"What is CaaS and how does it differ from VMaaS?"*
+→ VMaaS provisions individual virtual machines; CaaS provisions full hosted OpenShift clusters using HyperShift Hosted Control Planes. The tenant experience is the same — order through the catalog — but CaaS delivers a complete Kubernetes environment instead of a single VM. Module 4 covers the full CaaS workflow, including the bare metal agent setup required in RHDP lab environments.
 
 *"Where does Kafka fit in?"*
 → Kafka handles event streaming between the fulfillment service and the osac-operator. When a tenant requests a workload through the catalog, Kafka carries that request to the operator for processing. Module 1 explains the full event flow.
