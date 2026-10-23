@@ -178,7 +178,7 @@
         --name {{ bmit_name }}
         --description "RHDP libvirt+sushy BMH"
         --cpu-cores 4
-        --cpu-architecture x86_64
+        --cpu-architecture amd64
         --cpu-threads-per-core 1
         --memory-total-gb 8
         --network-port enp1s0:fabric:Ethernet:10Gbps

@@ -451,7 +451,7 @@ osac --config $HOME/admin \
   --name c1-metal-amd64 \
   --description "RHDP libvirt+sushy BMH" \
   --cpu-cores 4 \
-  --cpu-architecture x86_64 \
+  --cpu-architecture amd64 \
   --cpu-threads-per-core 1 \
   --memory-total-gb 8 \
   --network-port enp1s0:fabric:Ethernet:10Gbps \
@@ -478,7 +478,7 @@ shared  -         c1-metal-amd64  c1-metal-amd64  4      8 GB    -             R
 +
 [NOTE]
 ====
-The `--cpu-architecture` value must be the string `x86_64`, not the enum `ARCHITECTURE_AMD64`. The `--host-label` must match the label applied to the BMH in Exercise 3.
+The `--cpu-architecture` value must be one of `amd64`, `arm64` or `s390x`. The server rejects `x86_64` and the enum form `ARCHITECTURE_AMD64`. The `--host-label` must match the label applied to the BMH in Exercise 3.
 ====
 
 . Validate that the the RHCOS `DiskImage` exists:
@@ -721,15 +721,20 @@ Every step after this one exists only because this lab uses `dns.noop` (no Route
 Your bastion VM has a script, `~/rhdp-caas/caas-wa.sh`, you can run `~/rhdp-caas/caas-wa.sh auto` in a second terminal instead. It detects each stage and applies the stage 1 DNS step and the stage 3-5 steps automatically.
 ====
 
-. Check the tenant's default subnet. The `cudn_net` subnet playbook creates the subnet's namespace and `ClusterUserDefinedNetwork` but does not write the output ConfigMap the operator expects, so the subnet can end up `Failed`. A `BareMetalInstance` cannot be created without a `Ready` subnet:
+. Check that the tenant's default subnet is `Ready`. A `BareMetalInstance` cannot be created without a `Ready` subnet. The `cudn_net` subnet playbook creates the subnet's namespace and `ClusterUserDefinedNetwork` but does not write the output ConfigMap the operator expects. The lab provisioning runs a CronJob, `osac-subnet-fabric-output`, that writes the missing ConfigMap for every subnet within about a minute:
 +
 [source,role=execute]
 ----
-oc get subnet -n osac
+watch -n 10 oc get subnet -n osac
 ----
 +
-If the subnet shows `Failed`, create the missing output ConfigMap. The operator requires every key to be non-empty; the VNI and route values are not used by the CUDN backend:
+Press `Ctrl+C` when the subnet shows `Ready`.
 +
+.If the subnet stays `Failed`, create the ConfigMap by hand (expand)
+[%collapsible]
+====
+The operator requires every key to be present; the VNI and route values are not used by the CUDN backend:
+
 [source,role=execute]
 ----
 SUBNET=$(oc get subnet -n osac -o jsonpath='{.items[0].metadata.name}')
@@ -752,11 +757,10 @@ data:
   dhcp_server_ip: ""
   dhcp_relay_ip: ""
 EOF
-
-watch -n 10 oc get subnet -n osac
 ----
-+
-Press `Ctrl+C` when the subnet shows `Ready` (this should take approximately a minute).
+
+The subnet goes `Ready` within about a minute.
+====
 
 . Wait for MetalLB to assign the hosted cluster's API VIP, then publish `api` and `api-int` in the libvirt DNS on the BMF host. The worker resolves names through libvirt's dnsmasq at `192.168.122.1`, and with `dns.noop` nothing else publishes these records:
 +
