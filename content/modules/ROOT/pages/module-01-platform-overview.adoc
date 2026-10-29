@@ -278,4 +278,4 @@ You have completed the platform orientation for Sovereign Cloud Corp's Red Hat c
 
 **Next steps:**
 
-Module 2 covers tenant management. You will use what you learned here about the Red Hat cloud extensions namespace and Keycloak realm to create and configure multi-tenant environments backed by Ceph storage.
+Module 2 covers tenant management. You will use what you learned here about the Red Hat cloud extensions namespace and Keycloak realm to create and configure multi-tenant environments with federated identity and role-based access control.
