@@ -1,0 +1,89 @@
+= Conclusion and Next Steps
+
+Congratulations! You've completed Introduction to Red Hat cloud extensions.
+
+When you started, Sovereign Cloud Corp had a freshly deployed platform and a mission from leadership: run a sovereign cloud on OpenShift that serves multiple government tenants, provisions workloads through a service catalog, and ties every user back to a trusted identity provider. That mission is now done.
+
+SAI Corp, your first government agency client, has its own isolated tenant. Its employees sign in through their corporate identity provider, and nobody on your team had to hand out a platform password. Alice runs the tenant. Bob can see what's deployed but can't change it. When SAI Corp's teams need a virtual machine or a full OpenShift cluster, they order one from the catalog. They don't file a ticket, and every request flows through the same auditable fulfillment process your compliance team signed off on.
+
+== What you've learned
+
+=== Module 1: Exploring the Red Hat cloud extensions Platform
+
+You started by getting to know the platform before trusting it with tenants.
+
+* Verified that all Red Hat cloud extensions operators, CSVs, and pods are healthy in the `osac` namespace
+* Navigated the Red Hat cloud extensions web UI and found the Tenants, Catalog, Projects, Infrastructure, and Networking sections
+* Examined the `osac` Keycloak realm that governs tenant identity
+* Inspected the Kafka cluster, its topics, and its users to confirm the event backbone is healthy
+
+=== Module 2: Tenant Onboarding and Identity Management
+
+You onboarded SAI Corp and proved that access control holds.
+
+* Created the `sai-corp` tenant and watched the platform provision a Keycloak organization, a namespace, and a break-glass account automatically
+* Set up a corporate identity provider and registered it with Red Hat cloud extensions for federated SSO
+* Onboarded Alice and Bob through device flow login with just-in-time (JIT) user provisioning
+* Assigned tenant-wide authority with a RoleBinding and project-scoped access with a ProjectMembership
+* Confirmed RBAC enforcement: a viewer can list resources but cannot delete them
+
+=== Module 3: Virtual Machine as a Service (VMaaS)
+
+You gave SAI Corp self-service compute.
+
+* Configured a storage backend and the `local` storage tier, and mapped it to a Kubernetes storage class for the tenant
+* Created a disk image and an instance type as platform-level building blocks
+* Published a `ComputeInstanceCatalogItem` backed by the OpenShift Virtualization VM template
+* Deployed a virtual machine from the catalog as Alice, the tenant administrator
+* Verified that Bob can see the VM but cannot create or delete one
+
+=== Module 4: Cluster as a Service (CaaS)
+
+You let SAI Corp order entire OpenShift clusters.
+
+* Validated the Sushy Redfish emulator so Ironic can manage libvirt VMs as if they were physical servers
+* Registered a `BareMetalHost` and watched Metal3 inspect it and make it `available`
+* Published the `BareMetalInstanceType`, `DiskImage`, `ClusterVersion`, and `ClusterCatalogItem` that back the cluster catalog
+* Ordered a hosted OpenShift cluster as Alice using the `osac` CLI
+* Watched a HyperShift hosted control plane come up on the hub, with its worker node running on the bare-metal host
+* Published the hosted cluster's API and console through the hub router and logged in to it
+
+== Key takeaways
+
+* *One platform, three layers*: Every operation in Red Hat cloud extensions flows through identity (Keycloak), orchestration (the `osac` operator and fulfillment service), and messaging (Kafka). When something breaks, start by checking those three.
+* *Tenants are provisioned, not assembled*: One create operation gives a tenant its Keycloak organization, namespace, default network, and emergency access. Your team doesn't have to wire those together by hand for each new client.
+* *Identity stays with the customer*: Federated SSO means tenant users authenticate against their own identity provider. That matters a lot to a government client that has to prove who accessed what.
+* *Platform admins define, tenant admins consume*: You decide which storage, images, sizes, OpenShift versions, and templates exist. Tenants decide what to deploy from that menu. You keep control of what's offered, and tenants get on with their work.
+* *One RBAC model covers everything*: The same RoleBindings and ProjectMemberships that govern projects also govern virtual machines and clusters.
+* *The catalog hides the implementation*: Tenants order by catalog item name. You can change the hardware profile, template, or OpenShift version behind it without changing what tenants see.
+
+[NOTE]
+====
+Some of the steps in Module 4, such as the DNS entries, the `providerID` patch, and publishing routes through the hub, were only needed because this lab uses the `noop` DNS driver and a worker on a private libvirt network. On a platform with a real DNS integration and a routed provisioning network, a cluster order goes from request to `Ready` without manual intervention.
+====
+
+== Next steps
+
+Here are some ways to keep building on what you did today:
+
+* *Add a second tenant*: Onboard another agency with its own identity provider and check that it can't see SAI Corp's projects, VMs, or clusters.
+* *Grow the catalog*: Add more instance types and disk images, and publish catalog items for different VM sizes and operating systems.
+* *Offer more cluster versions*: Publish catalog items that point at different `ClusterVersion` objects, so tenants can choose between OpenShift releases.
+* *Automate onboarding*: Script the tenant, identity provider, RoleBinding, and ProjectMembership steps from Module 2 with the `osac` CLI so a new agency can be onboarded in one run.
+* *Watch the event stream*: Go back to the Kafka topics from Module 1 and look at the events your catalog orders produced.
+
+== References
+
+=== Product documentation
+
+* https://docs.redhat.com/en/documentation/openshift_container_platform[Red Hat OpenShift Container Platform documentation^] — including OpenShift Virtualization, hosted control planes, and bare-metal provisioning
+* https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak[Red Hat build of Keycloak documentation^] — realms, identity brokering, and organizations
+* https://docs.redhat.com/en/documentation/red_hat_streams_for_apache_kafka[Streams for Apache Kafka documentation^] — Kafka clusters, topics, and users on OpenShift
+* https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform[Red Hat Ansible Automation Platform documentation^] — the automation engine behind workload fulfillment
+
+=== Learning resources
+
+* https://developers.redhat.com[Red Hat Developer^] — articles, tutorials, and hands-on learning for OpenShift and related technologies
+* https://docs.redhat.com[Red Hat Documentation^] — the full Red Hat product documentation library
+
+Thank you for taking part in this workshop. Sovereign Cloud Corp's platform is ready for its next tenant.

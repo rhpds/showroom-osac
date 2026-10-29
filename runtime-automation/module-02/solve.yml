@@ -1,5 +1,5 @@
 ---
-# Module 2: Managing Tenants — solve playbook
+# Module 2: Tenant Onboarding and Identity Management — solve playbook
 # Automates all exercises: tenant creation, IdP setup, user onboarding,
 # role assignment, project creation, and RBAC verification.
 - name: Register bastion in inventory
