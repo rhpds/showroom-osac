@@ -5,6 +5,16 @@
 
 toc::[]
 
+[WARNING]
+.Module 2 must be completed first
+====
+You *must* complete xref:module-02-tenant-management.adoc[Module 2: Tenant Onboarding and Identity Management] before you start this module.
+
+This module uses the `sai-corp` tenant and the users Alice and Bob that you created in Module 2. Without them, the exercises in this module fail.
+
+If you skipped Module 2, go back and either complete its exercises or click the *Solve* button at the end of that module.
+====
+
 SAI Corp's tenant is onboarded, users are federated, and role-based access control is enforced. But SAI Corp's teams still cannot do anything with the platform — they need compute. Specifically, they need virtual machines they can provision on demand without filing a ticket.
 
 In this module, you close that gap. As the Sovereign Cloud Corp platform administrator, you configure the storage, disk images, instance types, and catalog items that make self-service VM provisioning possible. Then Alice, SAI Corp's tenant administrator, deploys a virtual machine from the catalog. Finally, you verify that Bob, the project viewer, can see the VM but cannot create or delete one — proving that RBAC extends to workloads.

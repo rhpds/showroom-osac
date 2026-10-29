@@ -5,6 +5,16 @@
 
 toc::[]
 
+[WARNING]
+.Module 2 must be completed first
+====
+You *must* complete xref:module-02-tenant-management.adoc[Module 2: Tenant Onboarding and Identity Management] before you start this module.
+
+This module uses the `sai-corp` tenant and the users Alice and Bob that you created in Module 2. Without them, the exercises in this module fail.
+
+If you skipped Module 2, go back and either complete its exercises or click the *Solve* button at the end of that module.
+====
+
 SAI Corp's teams can now provision virtual machines on demand through the VMaaS catalog. But their platform engineers also need full OpenShift clusters — for CI/CD pipelines, containerized workloads, and isolated test environments — provisioned with the same self-service experience.
 
 In this module, you enable Cluster as a Service (CaaS) for the OSAC platform. As the Sovereign Cloud Corp platform administrator, you will use a pre-configure Sushy emulator on the bare-metal fabric host so Ironic can manage libvirt VMs as if they were physical servers, register a `BareMetalHost` that points at that Redfish endpoint, and publish the catalog objects that let tenants order clusters on demand. Then Alice, SAI Corp's tenant administrator, places a cluster order. The platform orchestrates a HyperShift Hosted Control Plane whose worker node boots directly onto the registered bare-metal host — no additional manual steps required.
