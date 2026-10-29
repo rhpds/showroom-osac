@@ -11,10 +11,10 @@ view_switcher:
 tabs:
 - name: Red Hat cloud extensions
   url: 'https://osac-ui-osac.${DOMAIN}'
-- name: OpenShift Console
-  url: 'https://console-openshift-console.${DOMAIN}'
-- name: Keycloak
-  url: 'https://keycloak-keycloak.${DOMAIN}'
+# - name: OpenShift Console
+#   url: 'https://console-openshift-console.${DOMAIN}'
+# - name: Keycloak
+#   url: 'https://keycloak-keycloak.${DOMAIN}'
 - name: Terminal
   path: /wetty
   port: 443
