@@ -56,9 +56,9 @@ Your access details are provided in the **Credentials** page for reference. They
 === Full Workshop (100 minutes)
 
 * *Module 1*: Exploring the Red Hat cloud extensions Platform (10 minutes)
-* *Module 2*: Managing Tenants (30 minutes)
+* *Module 2*: Tenant Onboarding and Identity Management (30 minutes)
 * *Module 3*: Virtual Machine as a Service — VMaaS (30 minutes)
-* *Module 4*: Cluster as a Service — CAAS (30 minutes)
+* *Module 4*: Cluster as a Service — CaaS (30 minutes)
 
 Each module builds on the previous one. No formal breaks are scheduled — pause between modules as needed.
 

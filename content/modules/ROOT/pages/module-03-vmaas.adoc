@@ -544,7 +544,7 @@ Review what you completed in this module:
 
 == Solve the module
 
-If you want to skip the exercises and see the final state of the tenant, click the *Solve* button below. This will create the `sai-corp` tenant, configure the identity provider, and assign roles and memberships for Alice and Bob.
+If you want to skip the exercises, click the *Solve* button below. This configures storage for the `sai-corp` tenant, publishes the disk image, instance type, and `standard-linux-vm` catalog item, deploys `portal-vm` as Alice, and verifies Bob's viewer restrictions.
 
 ++++
 <div class="solve-button-placeholder" data-module="module-03"></div>

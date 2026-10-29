@@ -1505,7 +1505,7 @@ Review what you completed in this module:
 
 == Solve the module
 
-If you want to skip the exercises and see the final state of the tenant, click the *Solve* button below. This will create the `sai-corp` tenant, configure the identity provider, and assign roles and memberships for Alice and Bob.
+If you want to skip the exercises, click the *Solve* button below. This provisions the bare-metal worker host, publishes the cluster catalog objects, orders a hosted cluster as Alice, and publishes its API and console. The cluster order can take some time to reach Ready.
 
 ++++
 <div class="solve-button-placeholder" data-module="module-04"></div>
