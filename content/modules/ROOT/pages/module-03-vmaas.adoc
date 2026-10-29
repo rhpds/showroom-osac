@@ -60,7 +60,7 @@ Created storage backend '01a0ced0-a5fe-793b-9f6e-061d5f7d16fd'.
 BACKEND_ID=01a0ced0-a5fe-793b-9f6e-061d5f7d16fd
 ----
 
-. Create the storage tier for the tenant `sai-corp` on the storage backendusing the backend UUID:
+. Create the storage tier for the tenant `sai-corp` on the storage backend using the backend UUID:
 +
 [source,role=execute]
 ----

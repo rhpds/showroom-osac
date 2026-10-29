@@ -104,7 +104,7 @@ With the platform confirmed healthy, log in to the Red Hat cloud extensions web 
 
 . In the browser UI, locate and explore the following sections:
 +
-* **Tenants** — list of provisioned tenants. This is the view you land in right after logging in. If you need to go back to the Tenangs view it is under *Administration* in the navigation area on the left. Currently there are only the `shared` and `system` tenants. You will create a new tenant in Module 2.
+* **Tenants** — list of provisioned tenants. This is the view you land in right after logging in. If you need to go back to the Tenants view it is under *Administration* in the navigation area on the left. Currently there are only the `shared` and `system` tenants. You will create a new tenant in Module 2.
 * **Catalog** — available service catalog items. Currently empty.
 * **Projects** - list of projects in the environment. Currently only the `default` project exists. You will create new projects in Module 2.
 * **Infrastructure** — platform configuration and integrations.
@@ -195,7 +195,7 @@ Realm: osac | Public Key available: True
 
 Red Hat cloud extensions uses Kafka as its event backbone. Every catalog request, tenant lifecycle event, and workload status update flows through Kafka. A healthy Kafka cluster means the platform can process requests reliably and at scale.
 
-. List Kafka resources in the `osac` namespace:
+. List Kafka resources in the `osac-kafka` namespace:
 +
 [source,role=execute,subs="attributes+"]
 ----
@@ -266,7 +266,7 @@ You have completed the platform orientation for Sovereign Cloud Corp's Red Hat c
 **What you accomplished:**
 
 * Verified all Red Hat cloud extensions operators, CSVs, and pods are healthy in the `osac` namespace
-* Explored the Red Hat cloud extensions web UI and located the Dashboard, Tenants, Catalog, and Settings sections
+* Explored the Red Hat cloud extensions web UI and located the Tenants, Catalog, Projects, Infrastructure, and Networking sections
 * Confirmed the Keycloak `osac` realm is configured and serving identity tokens
 * Inspected the Kafka cluster, its topics, and its users
 
