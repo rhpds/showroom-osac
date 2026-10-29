@@ -88,7 +88,7 @@ Expected result: All pods `Running` or `Completed`.
 
 With the platform confirmed healthy, log in to the Red Hat cloud extensions web UI. This is the central console that platform engineers and tenant administrators use to manage the environment.
 
-. Switch to the *cloud extensions* tab on the right. Login using the platform admin credentials:
+. Switch to the *Red Hat cloud extensions* tab on the right. Login using the platform admin credentials:
 +
 .*Admin user*
 [source,role=copy,subs="attributes+"]

@@ -12,7 +12,7 @@ In this workshop, you will:
 
 * Navigate and understand the Red Hat cloud extensions platform architecture and components
 * Create and manage multi-tenant environments with storage
-* Use the cloud extensions user interface as well as the `osac` CLI to create catalog items and deploy workloads
+* Use the Red Hat cloud extensions user interface as well as the `osac` CLI to create catalog items and deploy workloads
 * Provision virtual machines on demand through the VMaaS service catalog
 * Order hosted OpenShift clusters using the CaaS catalog
 * Verify platform health and tenant readiness
