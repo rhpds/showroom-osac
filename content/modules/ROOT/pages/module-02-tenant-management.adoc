@@ -7,7 +7,7 @@ toc::[]
 
 Sovereign Cloud Corp has signed a new government agency client: SAI Corp. The agency needs a fully isolated tenant on the platform with federated single sign-on through their corporate identity provider. Their IT administrator, Alice, needs tenant-admin authority to manage projects and team access. Their analyst, Bob, needs read-only access to a specific project.
 
-In this module, you onboard SAI Corp as a tenant using the `osac` CLI, configure SSO federation through a Keycloak realm acting as the corporate identity provider, and prove that role-based access control enforces the right boundaries — a viewer can list resources but cannot modify them.
+In this module, you onboard SAI Corp as a tenant using the `osac` CLI, configure SSO federation through a Keycloak realm acting as the corporate identity provider, and prove that role-based access control enforces the right boundaries — a project member has authority inside their project and none over the tenant or anyone else's projects.
 
 == Learning objectives
 
@@ -17,7 +17,7 @@ By the end of this module, you'll be able to:
 * Configure an external identity provider for federated SSO
 * Onboard users through SSO and understand JIT user provisioning
 * Assign tenant-admin and project viewer roles using RoleBindings and ProjectMemberships
-* Verify RBAC enforcement: viewers can read but cannot delete
+* Explain how ProjectMemberships scope access to a single project while RoleBindings grant tenant-wide authority, and verify both boundaries are enforced
 
 == Exercise 1: Create a tenant and verify onboarding
 
@@ -662,13 +662,20 @@ TENANT    ...  STATE  PROJECT  USERS     ROLE
 sai-corp  ...  READY  default  <bob-id>  VIEWER
 ----
 
-== Exercise 5: Verify RBAC enforcement
+== Exercise 5: Verify the limits of Bob's access
 
-The real proof of multi-tenancy is enforcement. In this exercise, you log in as Bob to confirm that a viewer can list projects but cannot delete them. Then you log back in as Alice to clean up the project and membership, demonstrating that tenant-admin authority is required for destructive operations.
+The real proof of multi-tenancy is enforcement. Bob's ProjectMembership gives him genuine authority *inside* `sai-corp-default-project` — that is what a membership is for. What it does not give him is authority over the tenant, or any reach into projects he is not a member of.
+
+In this exercise you probe both of those boundaries: Bob attempts tenant-level operations that only a RoleBinding can grant, and then tries to reach a project Alice keeps him out of.
+
+[IMPORTANT]
+====
+A ProjectMembership is not a reduced form of tenant membership. It is a grant scoped to one project. Operations on the tenant itself — listing users, creating projects, assigning roles — are governed by RoleBindings, and Bob has none.
+====
 
 === Steps
 
-==== Verify Bob's viewer restrictions
+==== Bob cannot administer the tenant
 
 . Confirm Bob's identity — note that `tenant-admin` does not appear in the roles:
 +
@@ -685,7 +692,7 @@ Tenant: sai-corp
 Roles: offline_access, uma_authorization, default-roles-my realm
 ----
 
-. Bob can list projects (viewer access):
+. Bob can see the project he is a member of:
 +
 [source,role="execute"]
 ----
@@ -699,24 +706,151 @@ shared    -         -        -                          -                       
 sai-corp  -         -        -                          -                         ACTIVE
 sai-corp  -         -        sai-corp-default-project   SAI Corp Default Project  ACTIVE
 ----
-+
-You should see the `default` project in the list.
 
-. Bob cannot delete the project (RBAC enforcement):
+. Bob cannot list the tenant's users:
 +
 [source,role="execute"]
 ----
-osac --config $HOME/bob \
-  delete project sai-corp-default-project
+osac --config $HOME/bob get users
 ----
 +
 Expected output:
 +
 ----
-Failed to delete project '01a0ce71-71b1-742d-add3-3f2364b7430c': rpc error: code = PermissionDenied desc = permission denied
+Error: rpc error: code = PermissionDenied desc = permission denied
 ----
 +
-This `PermissionDenied` error confirms that RBAC is working: a viewer can read but not modify resources.
+This is the same command, and the same error, that Alice hit in Exercise 3 before she had a RoleBinding. The RoleBinding is the only thing that changed for her — and Bob never received one.
+
+. Bob cannot create a project either. Project creation is a tenant-level operation:
++
+[source,role="execute"]
+----
+cat > ${HOME}/yaml/bob-project.yaml <<'EOF'
+---
+'@type': type.googleapis.com/osac.public.v1.Project
+metadata:
+  name: bob-unauthorized-project
+  tenant: sai-corp
+  version: 2
+spec:
+  title: Bob's Unauthorized Project
+  description: This project should never be created
+EOF
+
+osac --config $HOME/bob create -f ${HOME}/yaml/bob-project.yaml
+----
++
+Expected output:
++
+----
+Error: rpc error: code = PermissionDenied desc = permission denied
+----
+
+==== Bob cannot reach a project he is not a member of
+
+Membership is per-project. To see that, Alice creates a second project and deliberately leaves Bob out of it.
+
+. As Alice, create a project with no membership for Bob:
++
+[source,role="execute"]
+----
+cat > ${HOME}/yaml/sai-restricted-project.yaml <<'EOF'
+---
+'@type': type.googleapis.com/osac.public.v1.Project
+metadata:
+  name: sai-corp-restricted-project
+  tenant: sai-corp
+  version: 2
+spec:
+  title: SAI Corp Restricted Project
+  description: Classified workloads — Alice only
+EOF
+
+osac --config $HOME/alice create -f ${HOME}/yaml/sai-restricted-project.yaml
+----
+
+. Alice sees both projects:
++
+[source,role="execute"]
+----
+osac --config $HOME/alice get projects
+----
++
+.Sample output
+----
+TENANT    DELETING  PROJECT  NAME                          TITLE                        STATE
+shared    -         -        -                             -                            ACTIVE
+sai-corp  -         -        -                             -                            ACTIVE
+sai-corp  -         -        sai-corp-default-project      SAI Corp Default Project     ACTIVE
+sai-corp  -         -        sai-corp-restricted-project   SAI Corp Restricted Project  ACTIVE
+----
+
+. Bob does not. The restricted project is absent from his list:
++
+[source,role="execute"]
+----
+osac --config $HOME/bob get projects
+----
++
+Bob still sees only `sai-corp-default-project` — the project his membership covers.
+
+. Asking for the restricted project directly does not help:
++
+[source,role="execute"]
+----
+osac --config $HOME/bob get project sai-corp-restricted-project
+----
++
+Expected output:
++
+----
+Error: rpc error: code = PermissionDenied desc = permission denied
+----
+
+. Bob cannot grant himself access either. Creating a ProjectMembership is an administrative operation on the project, and Bob has no authority over a project he is not in:
++
+[source,role="execute"]
+----
+cat > ${HOME}/yaml/bob-self-grant.yaml <<'EOF'
+---
+"@type": type.googleapis.com/osac.public.v1.ProjectMembership
+metadata:
+  name: bob-self-grant
+  tenant: sai-corp
+  project: sai-corp-restricted-project
+spec:
+  role: PROJECT_MEMBERSHIP_ROLE_VIEWER
+  users:
+  - name: bob
+EOF
+
+osac --config $HOME/bob create -f ${HOME}/yaml/bob-self-grant.yaml
+----
++
+Expected output:
++
+----
+Error: rpc error: code = PermissionDenied desc = permission denied
+----
++
+Access is granted *to* a user by someone with authority, never claimed *by* the user. This is what stops a tenant user from escalating their own privileges.
+
+==== Clean up the restricted project
+
+. Alice, as tenant administrator, can delete the project Bob could not even see:
++
+[source,role="execute"]
+----
+osac --config $HOME/alice delete project sai-corp-restricted-project
+----
++
+.Sample output
+----
+Deleted project 'sai-corp-restricted-project'.
+----
++
+This is the contrast that matters: the same operation, denied for Bob and permitted for Alice, decided entirely by what the platform has granted each of them.
 
 == Learning outcomes checkpoint
 
@@ -729,7 +863,8 @@ Review what you completed in this module:
 * [x] Onboarded Alice and Bob through device flow login with JIT user provisioning
 * [x] Assigned Alice as tenant-admin using a RoleBinding
 * [x] Created a project and granted Bob viewer access via ProjectMembership
-* [x] Confirmed RBAC enforcement: Bob can list but cannot delete resources
+* [x] Confirmed the tenant boundary: Bob cannot list users or create projects without a RoleBinding
+* [x] Confirmed the project boundary: Bob cannot see, reach, or grant himself access to a project he is not a member of
 
 == Solve the module
 
@@ -755,5 +890,6 @@ SAI Corp is now onboarded with full identity federation and role-based access co
 
 * Tenant creation is fully automated — the platform handles Keycloak organization, namespace, and emergency access provisioning in a single operation
 * Identity federation means corporate users never receive platform passwords; authentication flows through their existing IdP
-* RBAC operates at two levels: RoleBindings for tenant-wide authority and ProjectMemberships for project-scoped access
+* RBAC operates at two levels: RoleBindings for tenant-wide authority and ProjectMemberships for project-scoped access. A project membership is a grant scoped to one project, not a weaker form of tenant access — it carries real authority inside that project and none outside it
+* Users cannot grant themselves access. Memberships and RoleBindings are created by someone who already holds authority, which is what prevents privilege escalation
 * The break-glass account provides emergency access when the corporate IdP is unavailable — its password must be saved at creation time

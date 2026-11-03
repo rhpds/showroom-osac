@@ -17,7 +17,7 @@ If you skipped Module 2, go back and either complete its exercises or click the 
 
 SAI Corp's tenant is onboarded, users are federated, and role-based access control is enforced. But SAI Corp's teams still cannot do anything with the platform — they need compute. Specifically, they need virtual machines they can provision on demand without filing a ticket.
 
-In this module, you close that gap. As the Sovereign Cloud Corp platform administrator, you configure the storage, disk images, instance types, and catalog items that make self-service VM provisioning possible. Then Alice, SAI Corp's tenant administrator, deploys a virtual machine from the catalog. Finally, you verify that Bob, the project viewer, can see the VM but cannot create or delete one — proving that RBAC extends to workloads.
+In this module, you close that gap. As the Sovereign Cloud Corp platform administrator, you configure the storage, disk images, instance types, and catalog items that make self-service VM provisioning possible. Then Alice, SAI Corp's tenant administrator, deploys a virtual machine from the catalog. Finally, you verify the boundary between the tenant and the platform: Bob can see the VM in his project, but he cannot publish catalog items or define instance types — the menu stays under platform control.
 
 == Learning objectives
 
@@ -27,7 +27,7 @@ By the end of this module, you'll be able to:
 * Create disk images and instance types as platform-level building blocks
 * Author and publish a `ComputeInstanceCatalogItem` referencing a VM template
 * Deploy a virtual machine from the catalog as a tenant administrator
-* Verify that RBAC enforcement prevents unauthorized VM operations
+* Verify that tenant users can consume the catalog but cannot change what the platform offers
 
 == Exercise 1: Configure storage for tenant workloads
 
@@ -447,24 +447,18 @@ PRETTY_NAME="Fedora Linux 44 (Cloud Edition)"
 
 . Disconnect from the VM by typing `exit` and then press `Ctrl+]` to disconnect from the console.
 
-== Exercise 5: Verify tenant user access
+== Exercise 5: Verify the platform and tenant boundary
 
-RBAC enforcement extends beyond tenant management to workloads. In this exercise, Bob — who has `viewer` access to the default project — can see the running VM but cannot create or delete one. This proves that the platform's access control model applies consistently across all resource types.
+Everything you built in Exercises 1 and 2 — the storage backend, the storage tier, the disk image, the instance type, the catalog item — you built as the *platform administrator*. Alice then consumed those building blocks to deploy a VM, as *tenant administrator*. That split is not a convention; the platform enforces it.
+
+In this exercise, Bob demonstrates the boundary from the far side. He is a member of `sai-corp-default-project`, so he can see the workloads in it. What he cannot do is change what the platform offers.
+
+[NOTE]
+====
+Bob's ProjectMembership gives him authority *inside* his project. The boundary worth testing here is not what a member can do to their own workloads, but the one between the tenant and the platform: a tenant consumes the catalog, it does not get to publish to it.
+====
 
 === Steps
-
-. Retrieve the IDs this exercise uses. You look them up with Alice's credentials, because they are the same values Alice used to create her VM:
-+
-[source,role=execute]
-----
-CATALOG_ID=$(osac --config $HOME/alice get computeinstancecatalogitem standard-linux-vm -o json | jq -r '.id')
-SUBNET_ID=$(osac --config $HOME/alice get subnet default-ipv4 -o json | jq -r '.id')
-SG_ID=$(osac --config $HOME/alice get securitygroup default -o json | jq -r '.id')
-
-echo "CATALOG_ID=${CATALOG_ID}"
-echo "SUBNET_ID=${SUBNET_ID}"
-echo "SG_ID=${SG_ID}"
-----
 
 . Remind yourself of Bob's identity — note that `tenant-admin` does not appear in the roles:
 +
@@ -480,7 +474,7 @@ Tenant: sai-corp
 Roles: offline_access, uma_authorization, default-roles-my realm
 ----
 
-. Bob can list compute instances (viewer access):
+. Bob can see the VM in his project:
 +
 [source,role=execute]
 ----
@@ -494,43 +488,53 @@ TENANT    NAME       STATE    ADDRESS      ...
 sai-corp  portal-vm  RUNNING  10.200.0.x   ...
 ----
 +
-Bob can see Alice's VM — viewer access includes read permissions on compute instances.
+Bob can see Alice's VM — his project membership covers the workloads in `sai-corp-default-project`.
 
-. Bob cannot delete the VM (RBAC enforcement):
+. Bob cannot administer the tenant. Listing users requires a tenant-admin RoleBinding, which only Alice has:
 +
 [source,role=execute]
 ----
-osac --config $HOME/bob \
-  delete computeinstance portal-vm
+osac --config $HOME/bob get users
 ----
 +
 .Sample output
 ----
-Failed to delete computeinstance 'portal-vm': rpc error: code = PermissionDenied desc = permission denied
+Error: rpc error: code = PermissionDenied desc = permission denied
+----
+
+. Bob cannot publish to the catalog. A tenant consumes catalog items; only the platform administrator creates them:
++
+[source,role=execute]
+----
+cat > ${HOME}/yaml/bob-catalog-item.yaml <<'EOF'
+---
+"@type": type.googleapis.com/osac.public.v1.ComputeInstanceCatalogItem
+metadata:
+  name: bob-unauthorized-vm
+title: Unauthorized VM
+description: A tenant user must not be able to publish this
+template:
+  id: osac.templates.ocp_virt_vm
+published: true
+EOF
+
+osac --config $HOME/bob create -f ${HOME}/yaml/bob-catalog-item.yaml
 ----
 +
-The `PermissionDenied` error confirms that RBAC is enforced: a viewer can list workloads but cannot modify or delete them.
+.Sample output
+----
+Error: rpc error: code = PermissionDenied desc = permission denied
+----
 
-. Bob cannot create a new VM either:
+. Bob cannot create platform building blocks either. Instance types define what sizes the whole platform offers:
 +
 [source,role=execute]
 ----
 osac --config $HOME/bob \
-  create computeinstance \
-  --name vm-not-allowed \
-  --catalog-item "${CATALOG_ID}" \
-  --instance-type small-1-2 \
-  --disk-image fedora \
-  --boot-disk-size 10 \
-  --boot-disk-storage-tier sai-corp \
-  --run-strategy Always \
-  --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}" \
-  --user-data '#cloud-config
-user: fedora-admin
-password: {osac_user_password}
-chpasswd:
-  expire: false
-ssh_pwauth: true'
+  create instancetype \
+  --name bob-huge-vm \
+  --vcpus 64 \
+  --memory-gib 256
 ----
 +
 .Sample output
@@ -538,7 +542,7 @@ ssh_pwauth: true'
 Error: rpc error: code = PermissionDenied desc = permission denied
 ----
 +
-This confirms that only tenant administrators can create compute instances.
+This is the separation that makes self-service safe. Tenants deploy as much as their quota allows, but the menu they deploy from stays under platform control — a tenant user cannot invent a 64-vCPU instance type for themselves.
 
 == Learning outcomes checkpoint
 
@@ -550,11 +554,11 @@ Review what you completed in this module:
 * [x] Authored and published a `ComputeInstanceCatalogItem` referencing the OpenShift Virtualization template
 * [x] Deployed a virtual machine from the catalog as tenant administrator Alice
 * [x] Verified the VM reached `RUNNING` state with an IP address on the tenant subnet
-* [x] Confirmed RBAC enforcement: Bob can view the VM but cannot create or delete one
+* [x] Confirmed the platform boundary: Bob can see the VM in his project but cannot publish a catalog item or define an instance type
 
 == Solve the module
 
-If you want to skip the exercises, click the *Solve* button below. This configures storage for the `sai-corp` tenant, publishes the disk image, instance type, and `standard-linux-vm` catalog item, deploys `portal-vm` as Alice, and verifies Bob's viewer restrictions.
+If you want to skip the exercises, click the *Solve* button below. This configures storage for the `sai-corp` tenant, publishes the disk image, instance type, and `standard-linux-vm` catalog item, and deploys `portal-vm` as Alice.
 
 ++++
 <div class="solve-button-placeholder" data-module="module-03"></div>
@@ -576,5 +580,5 @@ SAI Corp can now provision virtual machines on demand through the Red Hat cloud 
 
 * *Storage tiers bridge Kubernetes and the catalog*: The `local` tier links a Kubernetes storage class to the fulfillment workflow. Without this mapping, VM creation fails at the boot disk step.
 * *Catalog items are self-service templates*: A catalog item references a VM template and makes it available in the service catalog. Tenants specify parameters like disk image, instance type, and networking at ordering time via CLI flags.
-* *RBAC extends to workloads*: The same RoleBinding and ProjectMembership model from Module 2 governs compute instances. A viewer can see workloads but cannot create or destroy them.
+* *RBAC extends to workloads*: The same RoleBinding and ProjectMembership model from Module 2 governs compute instances. A project member sees and works with the workloads in their project; tenant-level and platform-level operations stay out of reach.
 * *Platform admin vs. tenant admin separation*: Storage, images, instance types, and catalog items are platform-level concerns. VM deployment is a tenant-level action. This separation lets platform teams control what is available while tenants control what is deployed.

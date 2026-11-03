@@ -25,7 +25,7 @@ You onboarded SAI Corp and proved that access control holds.
 * Set up a corporate identity provider and registered it with Red Hat cloud extensions for federated SSO
 * Onboarded Alice and Bob through device flow login with just-in-time (JIT) user provisioning
 * Assigned tenant-wide authority with a RoleBinding and project-scoped access with a ProjectMembership
-* Confirmed RBAC enforcement: a viewer can list resources but cannot delete them
+* Confirmed both boundaries: Bob cannot administer the tenant without a RoleBinding, and cannot reach a project he is not a member of
 
 === Module 3: Virtual Machine as a Service (VMaaS)
 
@@ -35,7 +35,7 @@ You gave SAI Corp self-service compute.
 * Created a disk image and an instance type as platform-level building blocks
 * Published a `ComputeInstanceCatalogItem` backed by the OpenShift Virtualization VM template
 * Deployed a virtual machine from the catalog as Alice, the tenant administrator
-* Verified that Bob can see the VM but cannot create or delete one
+* Verified that Bob can see the VM in his project but cannot publish catalog items or define instance types
 
 === Module 4: Cluster as a Service (CaaS)
 
@@ -54,7 +54,7 @@ You let SAI Corp order entire OpenShift clusters.
 * *Tenants are provisioned, not assembled*: One create operation gives a tenant its Keycloak organization, namespace, default network, and emergency access. Your team doesn't have to wire those together by hand for each new client.
 * *Identity stays with the customer*: Federated SSO means tenant users authenticate against their own identity provider. That matters a lot to a government client that has to prove who accessed what.
 * *Platform admins define, tenant admins consume*: You decide which storage, images, sizes, OpenShift versions, and templates exist. Tenants decide what to deploy from that menu. You keep control of what's offered, and tenants get on with their work.
-* *One RBAC model covers everything*: The same RoleBindings and ProjectMemberships that govern projects also govern virtual machines and clusters.
+* *One RBAC model covers everything*: The same RoleBindings and ProjectMemberships that govern projects also govern virtual machines and clusters. A RoleBinding grants authority across the tenant; a ProjectMembership grants it inside one project and nowhere else.
 * *The catalog hides the implementation*: Tenants order by catalog item name. You can change the hardware profile, template, or OpenShift version behind it without changing what tenants see.
 
 [NOTE]

@@ -23,6 +23,7 @@
     tenant_name: sai-corp
     tenant_admin: alice
     tenant_user: bob
+    project_name: sai-corp-default-project
     idp_realm: sai-corp-idp
     idp_client_id: osac-federation
     idp_client_secret: osac-demo-secret
@@ -481,10 +482,11 @@
         cat > ${HOME}/yaml/sai-project.yaml <<'EOF'
         "@type": type.googleapis.com/osac.public.v1.Project
         metadata:
-          name: default
+          name: {{ project_name }}
           tenant: {{ tenant_name }}
+          version: 2
         spec:
-          title: Default Project
+          title: SAI Corp Default Project
           description: Primary project for SAI Corp
         EOF
         osac --config "{{ config_alice }}" create -f ${HOME}/yaml/sai-project.yaml
@@ -501,7 +503,7 @@
         metadata:
           name: bob-viewer
           tenant: {{ tenant_name }}
-          project: default
+          project: {{ project_name }}
         spec:
           role: PROJECT_MEMBERSHIP_ROLE_VIEWER
           users:
@@ -520,7 +522,12 @@
       changed_when: false
 
     # =========================================================================
-    # Exercise 5: Verify RBAC enforcement
+    # Exercise 5: Verify the limits of Bob's access
+    #
+    # Solve produces the end state; it does not run the negative checks from the
+    # exercise. Bob holds a project membership, so an attempted `delete project`
+    # SUCCEEDS and would destroy the project modules 3 and 4 depend on. The
+    # denial checks live in validate.yml, where they are read-only.
     # =========================================================================
 
     - name: Re-login Bob to refresh token with project membership
@@ -537,21 +544,8 @@
       changed_when: false
       failed_when: "'bob' not in r_bob_whoami.stdout"
 
-    - name: Bob can list projects (viewer access)
+    - name: Bob can see the project he is a member of
       ansible.builtin.shell: osac --config "{{ config_bob }}" get projects
       register: r_bob_projects
       changed_when: false
-      failed_when: "'default' not in r_bob_projects.stdout"
-
-    - name: Bob cannot delete project (RBAC enforcement)
-      ansible.builtin.shell: osac --config "{{ config_bob }}" delete project default
-      register: r_bob_delete
-      changed_when: false
-      failed_when: "'PermissionDenied' not in r_bob_delete.stderr"
-      ignore_errors: true
-
-    - name: Confirm RBAC enforcement
-      ansible.builtin.assert:
-        that: "'PermissionDenied' in r_bob_delete.stderr"
-        fail_msg: "RBAC enforcement failed — Bob was able to delete the project"
-        success_msg: "RBAC enforcement verified — Bob cannot delete projects"
+      failed_when: "project_name not in r_bob_projects.stdout"

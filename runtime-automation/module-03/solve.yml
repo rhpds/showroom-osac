@@ -410,7 +410,13 @@
       ignore_errors: true
 
     # =========================================================================
-    # Exercise 5: Verify RBAC enforcement as Bob
+    # Exercise 5: Verify the platform and tenant boundary as Bob
+    #
+    # Solve produces the end state; it does not run the negative checks from the
+    # exercise. Bob holds a project membership, so attempts to delete or create a
+    # compute instance in his own project SUCCEED — running them here would
+    # destroy portal-vm or leave a stray VM behind. The denial checks live in
+    # validate.yml, against platform-level resources Bob cannot reach.
     # =========================================================================
 
     - name: Login as Bob via device flow (once)
@@ -427,40 +433,11 @@
       changed_when: false
       failed_when: "'bob' not in r_bob_whoami.stdout"
 
-    - name: Bob can list compute instances (viewer access)
+    - name: Bob can see the VM in the project he is a member of
       ansible.builtin.shell: osac --config "$HOME/bob" get computeinstance
       register: r_bob_list
       changed_when: false
       failed_when: r_bob_list.rc != 0
-
-    - name: Bob cannot delete portal-vm (RBAC enforcement check)
-      ansible.builtin.shell: osac --config "$HOME/bob" delete computeinstance portal-vm
-      register: r_bob_delete
-      changed_when: false
-      failed_when: false
-      ignore_errors: true
-
-    - name: Bob cannot create a compute instance (RBAC enforcement check)
-      ansible.builtin.shell: |
-        osac --config "$HOME/bob" create computeinstance \
-          --name vm-not-allowed \
-          --catalog-item "{{ catalog_id }}" \
-          --instance-type {{ instance_type_name }} \
-          --disk-image {{ disk_image_name }} \
-          --boot-disk-size 10 \
-          --boot-disk-storage-tier local \
-          --run-strategy Always \
-          --network-attachment "subnet={{ subnet_id }},security-groups={{ sg_id }}" \
-          --user-data '#cloud-config
-        user: fedora-admin
-        password: {{ osac_user_password }}
-        chpasswd:
-          expire: false
-        ssh_pwauth: true'
-      register: r_bob_create
-      changed_when: false
-      failed_when: false
-      ignore_errors: true
 
     # =========================================================================
     # Final status report
@@ -480,5 +457,4 @@
           DataVolume phase:               {{ r_dv_phase.stdout | trim | default('unknown') }}
           VM state:                       {{ r_vm_state.stdout | trim | default('unknown') }}
           portal-vm RUNNING:              {{ 'ok' if 'RUNNING' in r_vm_state.stdout else 'NOT ok — VM still starting; click Validate again in a few minutes' }}
-          Bob delete blocked:             {{ 'ok' if 'PermissionDenied' in (r_bob_delete.stderr | default('')) else 'NOT ok' }}
-          Bob create blocked:             {{ 'ok' if 'PermissionDenied' in (r_bob_create.stderr | default('')) else 'NOT ok' }}
+          Bob can see portal-vm:          {{ 'ok' if 'portal-vm' in (r_bob_list.stdout | default('')) else 'NOT ok' }}

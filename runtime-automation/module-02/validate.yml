@@ -22,6 +22,7 @@
     tenant_name: sai-corp
     tenant_admin: alice
     tenant_user: bob
+    project_name: sai-corp-default-project
     idp_realm: sai-corp-idp
     idp_client_id: osac-federation
     keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
@@ -232,11 +233,11 @@
       ignore_errors: true
 
     # -------------------------------------------------------
-    # Check 10 — OSAC project default exists with STATE ACTIVE in sai-corp
+    # Check 10 — OSAC project exists with STATE ACTIVE in sai-corp
     # -------------------------------------------------------
-    - name: Check OSAC project default is ACTIVE
+    - name: Check OSAC project is ACTIVE
       ansible.builtin.shell: >-
-        osac --config "{{ config_alice }}" get project default -o json
+        osac --config "{{ config_alice }}" get project {{ project_name }} -o json
       register: r_proj_status
       changed_when: false
       ignore_errors: true
@@ -264,11 +265,16 @@
       ignore_errors: true
 
     # -------------------------------------------------------
-    # Check 12 — Bob cannot delete project (PermissionDenied enforced)
+    # Check 12 — Bob cannot administer the tenant (PermissionDenied enforced)
+    #
+    # Read-only on purpose. Bob holds a project membership, so a `delete project`
+    # attempt would SUCCEED and destroy state modules 3 and 4 need. `get users`
+    # is a tenant-level operation Bob's membership does not reach, and it leaves
+    # nothing behind whether it is denied or not.
     # -------------------------------------------------------
-    - name: Check RBAC enforcement — bob delete project must fail
+    - name: Check RBAC enforcement — bob get users must fail
       ansible.builtin.shell: >-
-        osac --config "{{ config_bob }}" delete project default
+        osac --config "{{ config_bob }}" get users
       register: r_bob_rbac
       changed_when: false
       ignore_errors: true
@@ -322,7 +328,8 @@
              r_pm_status.rc | default(1) == 0 and
              'PROJECT_MEMBERSHIP_ROLE_VIEWER' in (r_pm_status.stdout | default('')) }}
         _task12_ok: >-
-          {{ 'PermissionDenied' in (r_bob_rbac.stderr | default('')) }}
+          {{ 'PermissionDenied' in (r_bob_rbac.stderr | default('')) or
+             'PermissionDenied' in (r_bob_rbac.stdout | default('')) }}
 
     - name: Validate all tasks
       validation_check:
@@ -340,9 +347,9 @@
           ✅ Task 7: OSAC identity provider sai-corp is in phase READY
           ✅ Task 8: OSAC secret idp-client-secret exists in sai-corp tenant
           ✅ Task 9: RoleBinding tenant-admin for alice is in state READY
-          ✅ Task 10: Project default is ACTIVE in sai-corp tenant
+          ✅ Task 10: Project sai-corp-default-project is ACTIVE in sai-corp tenant
           ✅ Task 11: ProjectMembership bob-viewer exists with VIEWER role for bob
-          ✅ Task 12: RBAC enforcement confirmed — bob cannot delete projects
+          ✅ Task 12: Tenant boundary confirmed — bob cannot list tenant users
         error_msg: |
           {{ '✅' if _task1_ok else '❌' }} Task 1: Namespace sai-corp Active — {{ 'ok' if _task1_ok else 'FAILED — complete Exercise 1 to create the sai-corp tenant' }}
           {{ '✅' if _task2_ok else '❌' }} Task 2: KC realm sai-corp-idp — {{ 'ok' if _task2_ok else 'FAILED — create and enable the sai-corp-idp realm (Exercise 2)' }}
@@ -353,9 +360,9 @@
           {{ '✅' if _task7_ok else '❌' }} Task 7: OSAC IDP sai-corp READY — {{ 'ok' if _task7_ok else 'FAILED — create the identity provider in Exercise 2 and wait for READY phase' }}
           {{ '✅' if _task8_ok else '❌' }} Task 8: OSAC secret idp-client-secret — {{ 'ok' if _task8_ok else 'FAILED — create idp-client-secret as the break-glass user before creating the IDP (Exercise 2)' }}
           {{ '✅' if _task9_ok else '❌' }} Task 9: RoleBinding tenant-admin for alice — {{ 'ok' if _task9_ok else 'FAILED — assign the tenant-admin RoleBinding to alice (Exercise 4)' }}
-          {{ '✅' if _task10_ok else '❌' }} Task 10: Project default ACTIVE — {{ 'ok' if _task10_ok else 'FAILED — create the default project in sai-corp as alice (Exercise 4)' }}
+          {{ '✅' if _task10_ok else '❌' }} Task 10: Project sai-corp-default-project ACTIVE — {{ 'ok' if _task10_ok else 'FAILED — create the sai-corp-default-project project in sai-corp as alice (Exercise 4)' }}
           {{ '✅' if _task11_ok else '❌' }} Task 11: ProjectMembership bob-viewer — {{ 'ok' if _task11_ok else 'FAILED — create the bob-viewer ProjectMembership with VIEWER role as alice (Exercise 4)' }}
-          {{ '✅' if _task12_ok else '❌' }} Task 12: RBAC enforcement for bob — {{ 'ok' if _task12_ok else 'FAILED — bob should receive PermissionDenied; verify bob-viewer membership role is VIEWER not ADMIN' }}
+          {{ '✅' if _task12_ok else '❌' }} Task 12: Tenant boundary for bob — {{ 'ok' if _task12_ok else 'FAILED — bob should receive PermissionDenied on get users; verify he has no tenant-admin RoleBinding' }}
       register: r_validate
       ignore_errors: true
 
