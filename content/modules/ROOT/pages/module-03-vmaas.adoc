@@ -301,7 +301,7 @@ osac --config $HOME/alice create computeinstance \
   --instance-type small-1-2 \
   --disk-image fedora \
   --boot-disk-size 10 \
-  --boot-disk-storage-tier sai-corp \
+  --boot-disk-storage-tier local \
   --run-strategy Always \
   --network-attachment "subnet=${SUBNET_ID},security-groups=${SG_ID}" \
   --user-data '#cloud-config
@@ -317,63 +317,6 @@ ssh_pwauth: true'
 Created compute instance '01a0d377-5991-7e0e-8b3a-5135683208ec'.
 ----
 
-. The VM will initially fail to import the disk image because CDI tries to pull from quay.io inside the pod network, which does not have external access on this cluster. This is a known issue. You need to fix this using the *OpenShift Cluster Administrator* to fix the DataVolume import method.
-
-. Identify the VM and DataVolume names. The platform generates internal names that differ from the name you specified:
-+
-[source,role=execute]
-----
-VM_NS=$(oc get vm -A --no-headers | grep -v NAME | grep subnet | awk '{print $1}')
-VM_NAME=$(oc get vm -A --no-headers | grep -v NAME | grep subnet | awk '{print $2}')
-DV_NAME=$(oc get dv -n "${VM_NS}" --no-headers | awk '{print $1}')
-
-echo "VM_NS=${VM_NS}"
-echo "VM_NAME=${VM_NAME}"
-echo "DV_NAME=${DV_NAME}"
-----
-+
-[WARNING]
-====
-If the values are empty, the VM has not finished provisioning. Wait a few seconds and try the command again.
-====
-
-. Halt the VM, delete the stuck DataVolume, and recreate it with `pullMethod: node` so the image is pulled through the node's network instead:
-+
-[source,role=execute]
-----
-oc patch vm "${VM_NAME}" -n "${VM_NS}" --type=merge \
-  -p '{"spec":{"runStrategy":"Halted"}}'
-
-sleep 5
-
-oc delete dv "${DV_NAME}" -n "${VM_NS}" --wait=true --timeout=180s
-
-oc get pvc -n "${VM_NS}" --no-headers | awk '/prime-/{print $1}' \
-  | xargs -r -n1 oc delete pvc -n "${VM_NS}" --wait=false
-
-cat <<EOF | oc apply -f -
----
-apiVersion: cdi.kubevirt.io/v1beta1
-kind: DataVolume
-metadata:
-  name: ${DV_NAME}
-  namespace: ${VM_NS}
-  annotations:
-    cdi.kubevirt.io/storage.bind.immediate.requested: "true"
-spec:
-  source:
-    registry:
-      url: docker://quay.io/containerdisks/fedora:latest
-      pullMethod: node
-  pvc:
-    accessModes: [ReadWriteOnce]
-    resources:
-      requests:
-        storage: 10Gi
-    storageClassName: lvms-vg1
-EOF
-----
-
 . Watch the DataVolume until it reaches `Succeeded`:
 +
 [source,role=execute]
@@ -382,14 +325,6 @@ oc get dv "${DV_NAME}" -n "${VM_NS}" -w
 ----
 +
 Press `Ctrl+C` when the status shows `Succeeded`.
-
-. Restart the VM:
-+
-[source,role=execute]
-----
-oc patch vm "${VM_NAME}" -n "${VM_NS}" --type=merge \
-  -p '{"spec":{"runStrategy":"Always"}}'
-----
 
 . Check the VM status:
 +
@@ -436,12 +371,12 @@ cat /etc/os-release
 .Sample output
 ----
 NAME="Fedora Linux"
-VERSION="44 (Cloud Edition)"
+VERSION="45 (Cloud Edition)"
 RELEASE_TYPE=stable
 ID=fedora
-VERSION_ID=44
+VERSION_ID=45
 VERSION_CODENAME=""
-PRETTY_NAME="Fedora Linux 44 (Cloud Edition)"
+PRETTY_NAME="Fedora Linux 45 (Cloud Edition)"
 ...
 ----
 

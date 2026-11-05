@@ -131,11 +131,10 @@ oc get secret osac-inventory-config -n osac \
 ----
 name: metal3-inventory
 type: metal3
+hostClass: "metal3"
 options:
   metal3:
-    namespace: osac
-hostClass: metal3
-networkClass: ""
+    namespace: "host-inventory"
 ----
 +
 Expect `type: metal3` and `namespace: osac`.
@@ -384,10 +383,10 @@ oc get mc | grep osac-guest-route
 .Sample output
 ----
 99-master-osac-guest-route                                                                    3.4.0             5m
-99-worker-osac-guest-route                                                                    3.4.
+99-worker-osac-guest-route                                                                    3.4.0             5m
 ----
 
-Check the route on the hub:
+. Check the route on the hub:
 +
 [source,role=execute]
 ----
@@ -404,8 +403,8 @@ done
 192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.20 uid 0
 192.168.122.10 via 10.10.10.2 dev br-ex src 10.10.10.21 uid 0
 ----
-+
-Check the firewall rule on the BMF host:
+
+. Check the firewall rule on the BMF host:
 +
 [source,role=execute]
 ----
@@ -422,8 +421,8 @@ BMF OK
 ====
 These commands do not survive a reboot of the BMF host or a hub node.
 
-Add the route on every hub node. Ironic runs in the host-network `metal3` pod on a control-plane node, and the hub routers run on the workers:
-
+. Add the route on every hub node. Ironic runs in the host-network `metal3` pod on a control-plane node, and the hub routers run on the workers:
++
 [source,role=execute]
 ----
 for NODE in $(oc get nodes -o name); do
@@ -431,8 +430,8 @@ for NODE in $(oc get nodes -o name); do
 done
 ----
 
-On the BMF host, allow the hub to reach the guests:
-
+. On the BMF host, allow the hub to reach the guests:
++
 [source,role=execute]
 ----
 sudo ssh 10.10.10.2 bash -s <<'EOF'
