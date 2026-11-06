@@ -126,7 +126,7 @@ osac --config $HOME/admin \
 +
 [source,role=execute]
 ----
-osac --config $HOME/admin get diskimage
+osac --config $HOME/admin get diskimage fedora
 ----
 +
 .Sample output

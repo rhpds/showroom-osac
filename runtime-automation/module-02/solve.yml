@@ -56,9 +56,11 @@
         mode: '0755'
       changed_when: false
 
-    - name: Login as platform admin (public API)
+    # The module logs the admin config in to the private API and leaves it there.
+    # Later modules rely on that — a public session cannot read storage tiers.
+    - name: Login as platform admin (private API)
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}" login --insecure
+        osac --config "{{ config_admin }}" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ osac_admin_user }}
@@ -87,9 +89,9 @@
         - r_tenant.rc != 0
         - "'already exists' not in r_tenant.stderr"
 
-    - name: Restore admin public API session
+    - name: Restore admin private API session as the admin user
       ansible.builtin.shell: >-
-        osac --config "{{ config_admin }}" login --insecure
+        osac --config "{{ config_admin }}" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ osac_admin_user }}

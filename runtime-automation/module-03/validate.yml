@@ -22,7 +22,7 @@
     # -------------------------------------------------------
     - name: Login as platform admin
       ansible.builtin.shell: >-
-        osac --config "$HOME/admin" login --insecure
+        osac --config "$HOME/admin" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ osac_admin_user }}

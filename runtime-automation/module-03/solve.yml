@@ -44,23 +44,16 @@
     # Exercise 1: Review the platform storage configuration (read-only)
     # =========================================================================
 
-    - name: Login as platform admin
+    # Private API, same as the module: reading storage tiers and publishing
+    # catalog objects are private-API operations.
+    - name: Login as platform admin (private API)
       ansible.builtin.shell: >-
-        osac --config "$HOME/admin" login --insecure
+        osac --config "$HOME/admin" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
         --user={{ osac_admin_user }}
         --password={{ osac_admin_password }}
         {{ fulfillment_api_url }}
-      changed_when: false
-
-    # Module 2 leaves the admin config logged in to the private API; match that here
-    # so the platform-admin calls below behave the same as they do in the module.
-    - name: Login to the private API as platform admin
-      ansible.builtin.shell: >-
-        osac --config "$HOME/admin" login --insecure --private
-        --token-script "oc create token admin -n {{ osac_namespace }}"
-        --address "{{ fulfillment_api_url }}"
       changed_when: false
 
     # Storage backend, tier, and the per-tenant storage class are provisioned by the
