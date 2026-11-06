@@ -709,7 +709,7 @@ In this lab the subnet settles on `ProvisioningDisabled` and stays there — the
 .If the subnet shows `Failed`, create the fabric-output ConfigMap by hand (expand)
 [%collapsible]
 ====
-`Failed` is a different matter — that one does block provisioning. The `cudn_net` subnet playbook creates the subnet's namespace and `ClusterUserDefinedNetwork` but does not write the output ConfigMap the operator expects. The lab provisioning runs a CronJob, `osac-subnet-fabric-output`, that writes the missing ConfigMap for every subnet within about a minute; if it has not, apply it yourself.
+`Failed` is a different matter — that one does block provisioning. It means the subnet's fabric-output ConfigMap is missing: the subnet's namespace and `ClusterUserDefinedNetwork` are created, but nothing writes the output ConfigMap the operator expects. The lab provisioning runs a CronJob, `osac-subnet-fabric-output`, that writes the missing ConfigMap for every subnet within about a minute; if it has not, apply it yourself.
 
 The operator requires every key to be present; the VNI and route values are not used by the CUDN backend:
 

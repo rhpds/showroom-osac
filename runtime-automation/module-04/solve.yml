@@ -258,7 +258,7 @@
         hcp_ns: "osac-{{ r_order_name.stdout | trim }}"
         domain: "{{ r_order_name.stdout | trim }}.{{ r_hosted_base.stdout | trim }}"
 
-    - name: Check the tenant subnet (cudn_net output ConfigMap workaround)
+    - name: Check the tenant subnet (fabric-output ConfigMap workaround)
       ansible.builtin.shell: oc get subnet -n osac -o jsonpath='{range .items[*]}{.metadata.name}={.status.phase}{"\n"}{end}'
       register: r_subnets
       changed_when: false
