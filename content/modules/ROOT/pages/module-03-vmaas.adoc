@@ -308,14 +308,14 @@ ssh_pwauth: true'
 Created compute instance '01a0d377-5991-7e0e-8b3a-5135683208ec'.
 ----
 
-. Watch the DataVolume until it reaches `Succeeded`:
+. The boot disk is imported into a DataVolume in the tenant's `sai-corp` namespace. Watch it until it reaches `Succeeded`:
 +
 [source,role=execute]
 ----
-oc get dv "${DV_NAME}" -n "${VM_NS}" -w
+oc get dv -n sai-corp -w
 ----
 +
-Press `Ctrl+C` when the status shows `Succeeded`.
+Press `Ctrl+C` when the phase shows `Succeeded`.
 
 . Check the VM status:
 +
