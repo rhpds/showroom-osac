@@ -31,7 +31,7 @@ You onboarded SAI Corp and proved that access control holds.
 
 You gave SAI Corp self-service compute.
 
-* Configured a storage backend and the `local` storage tier, and mapped it to a Kubernetes storage class for the tenant
+* Reviewed the platform-provisioned storage: the `local` backend and tier, and the `osac-sai-corp-local` storage class created with the tenant
 * Created a disk image and an instance type as platform-level building blocks
 * Published a `ComputeInstanceCatalogItem` backed by the OpenShift Virtualization VM template
 * Deployed a virtual machine from the catalog as Alice, the tenant administrator

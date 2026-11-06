@@ -41,7 +41,7 @@
       changed_when: false
 
     # =========================================================================
-    # Exercise 1: Configure storage for tenant workloads
+    # Exercise 1: Review the platform storage configuration (read-only)
     # =========================================================================
 
     - name: Login as platform admin
@@ -54,57 +54,17 @@
         {{ fulfillment_api_url }}
       changed_when: false
 
-    - name: Login to private API for storage operations
+    # Module 2 leaves the admin config logged in to the private API; match that here
+    # so the platform-admin calls below behave the same as they do in the module.
+    - name: Login to the private API as platform admin
       ansible.builtin.shell: >-
         osac --config "$HOME/admin" login --insecure --private
         --token-script "oc create token admin -n {{ osac_namespace }}"
         --address "{{ fulfillment_api_url }}"
       changed_when: false
 
-    - name: Create or get storage backend (lvms)
-      ansible.builtin.shell: |
-        # Check for existing backend first — avoid creating duplicates
-        ID=$(osac --config "$HOME/admin" get storagebackend 2>/dev/null \
-          | grep -i 'local' \
-          | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
-        if [ -z "${ID}" ]; then
-          OUTPUT=$(osac --config "$HOME/admin" create storagebackend \
-            --name local --provider lvms --endpoint n/a --username n/a --password n/a 2>&1)
-          ID=$(echo "${OUTPUT}" | grep -o "'[^']*'" | grep -oE '[0-9a-f-]{36}' | head -1)
-        fi
-        if [ -z "${ID}" ]; then
-          echo "ERROR: could not get or create storage backend" >&2
-          exit 1
-        fi
-        echo "${ID}"
-      register: r_backend_id
-      changed_when: false
-      failed_when: r_backend_id.stdout | trim | length < 10
-
-    - name: Set backend ID fact
-      ansible.builtin.set_fact:
-        backend_id: "{{ r_backend_id.stdout | trim }}"
-
-    - name: Create storage tier for sai-corp tenant
-      ansible.builtin.shell: >-
-        osac --config "$HOME/admin" create storagetier
-        --name local
-        --backend-id "{{ backend_id }}"
-        --protocol BLOCK
-      register: r_storagetier
-      changed_when: "'Created storage tier' in r_storagetier.stdout"
-      failed_when:
-        - r_storagetier.rc != 0
-        - "'already exists' not in r_storagetier.stderr"
-
-    - name: Label lvms-vg1 storage class for sai-corp tenant
-      ansible.builtin.shell: >-
-        oc label sc {{ storage_class_name }}
-        osac.openshift.io/tenant=sai-corp
-        osac.openshift.io/storage-tier=local
-        --overwrite
-      changed_when: true
-
+    # Storage backend, tier, and the per-tenant storage class are provisioned by the
+    # platform — nothing to create here, only wait until the tenant picks them up.
     - name: Wait for tenant sai-corp to show Ready with local storage tier
       ansible.builtin.shell: |
         oc get tenant sai-corp -n {{ osac_namespace }} \
