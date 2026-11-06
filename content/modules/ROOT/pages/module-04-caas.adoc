@@ -62,43 +62,6 @@ oc get secret pull-secret -n openshift-config \
 test -s "${HOME}/pull-secret-cluster.json" && echo "Pull secret OK"
 ----
 
-. Log in to the OSAC private API as the cloud administrator:
-+
-[source,role=execute,subs="attributes+"]
-----
-osac --config $HOME/admin \
-  login --insecure --private \
-  --issuer="https://keycloak-keycloak.{openshift_cluster_ingress_domain}/realms/osac" \
-  --flow=password \
-  --user={osac_admin_user} \
-  --password={osac_admin_password} \
-  {osac_fulfillment_internal_api_url}
-
-osac --config $HOME/admin whoami
-----
-+
-[NOTE]
-====
-The `--private` flag connects to the internal fulfillment API, which exposes cloud-admin-only resources such as `BareMetalInstanceType` and `ClusterVersion`. The tenant public API does not expose these endpoints.
-====
-
-. Confirm the current service state — CaaS and BMaaS should both be enabled:
-+
-[source,role=execute]
-----
-helm get values osac -n osac 2>/dev/null | grep -A2 'bmaas:\|caas:\|vmaas:'
-----
-+
-.Sample output
-----
-bmaas:
-  enabled: true
-caas:
-  enabled: true
-vmaas:
-  enabled: true
-----
-
 == Exercise 2: Configure platform networking
 
 In your environment the Metal3 operator has already been patched to watch for `BareMetalHosts` objects in all namespaces.
@@ -134,7 +97,7 @@ type: metal3
 hostClass: "metal3"
 options:
   metal3:
-    namespace: "host-inventory"
+    namespace: "osac"
 ----
 +
 Expect `type: metal3` and `namespace: osac`.
@@ -162,11 +125,11 @@ osac --config $HOME/admin get networkclass
 +
 .Sample output
 ----
-PROJECT  DELETING  ID                                    NAME      TITLE                FABRIC-MANAGER  K8S-MANAGER
--        -         01a15f7d-5772-7cdf-af88-8b77302834da  k8s-only  K8s-only networking  cudn_net        k8s_only
+PROJECT  DELETING  ID                                    NAME    TITLE              FABRIC-MANAGER  K8S-MANAGER
+-        -         01a1acda-6cbd-7591-b990-2244f1e6aea3  netris  OSAC NetworkClass  netris          cudn_evpn
 ----
 +
-`FABRIC-MANAGER` must show `cudn_net`. If it is empty, ask your instructor; the lab provisioning did not complete.
+`FABRIC-MANAGER` must show `netris` and K8S-MANAGER must show `cudn_evpn`. If it is empty, ask your instructor; the lab provisioning did not complete.
 
 == Exercise 3: Provision a bare-metal worker host
 
@@ -187,7 +150,7 @@ sudo ssh 10.10.10.2
 ----
 virt-install --name virtual-bmh-1 \
   --memory 8192 --vcpus 4 \
-  --disk size=120,format=qcow2,bus=virtio,pool=default \
+  --disk size=60,format=qcow2,bus=virtio,pool=default \
   --network network=default,mac=52:54:00:ca:aa:01 \
   --boot loader=/usr/share/edk2/ovmf/OVMF_CODE.fd,loader_ro=yes,loader_type=pflash,nvram_template=/usr/share/edk2/ovmf/OVMF_VARS.fd \
   --os-variant rhel9-unknown \
@@ -372,8 +335,8 @@ If inspection already timed out (`ERROR=inspection error`), do *not* `virsh dest
 * on the BMF host, firewall rules that let the hub reach the guests on ports `80`, `443`, and `9999`, plus NAT for the guests' own outbound traffic. The libvirt network runs in `open` forward mode, so libvirt adds no firewall rules of its own.
 +
 Without this path, the `BareMetalHost` stays in `provisioning` while Ironic logs `ConnectTimeout` to port `9999`, and eventually fails.
-
-. Check that the MachineConfig exists on the hub cluster:
++
+Check that the MachineConfig exists on the hub cluster:
 +
 [source,role=execute]
 ----
@@ -386,7 +349,7 @@ oc get mc | grep osac-guest-route
 99-worker-osac-guest-route                                                                    3.4.0             5m
 ----
 
-. Check the route on the hub:
+. Check the route on the hub worker nodes:
 +
 [source,role=execute]
 ----
@@ -495,7 +458,7 @@ The `--cpu-architecture` value must be one of `amd64`, `arm64` or `s390x`. The s
 [source,role=execute]
 ----
 osac --config $HOME/admin \
-  get diskimage
+  get diskimage rhcos-4-22
 ----
 +
 .Sample output
@@ -726,22 +689,28 @@ The order goes through these stages. The steps below tell you what to do at each
 [NOTE]
 ====
 Every step after this one exists only because this lab uses `dns.noop` (no Route53) and a worker on a private libvirt network. On a platform with real DNS and a routed provisioning network, the order goes from stage 1 to stage 6 with no intervention.
-
-Your bastion VM has a script, `~/rhdp-caas/caas-wa.sh`, you can run `~/rhdp-caas/caas-wa.sh auto` in a second terminal instead. It detects each stage and applies the stage 1 DNS step and the stage 3-5 steps automatically.
 ====
 
-. Check that the tenant's default subnet is `Ready`. A `BareMetalInstance` cannot be created without a `Ready` subnet. The `cudn_net` subnet playbook creates the subnet's namespace and `ClusterUserDefinedNetwork` but does not write the output ConfigMap the operator expects. The lab provisioning runs a CronJob, `osac-subnet-fabric-output`, that writes the missing ConfigMap for every subnet within about a minute:
+. Check the tenant's default subnet:
 +
 [source,role=execute]
 ----
-watch -n 10 oc get subnet -n osac
+oc get subnet -n osac
 ----
 +
-Press `Ctrl+C` when the subnet shows `Ready`.
+.Sample output
+----
+NAME           VIRTUALNETWORK                         IPV4CIDR        READY                  AGE
+subnet-cmth7   01a1af73-fe10-7b36-99f1-ff3806f2d067   10.200.0.0/20   ProvisioningDisabled   4h10m
+----
 +
-.If the subnet stays `Failed`, create the ConfigMap by hand (expand)
+In this lab the subnet settles on `ProvisioningDisabled` and stays there — the fabric integration that would drive it to `Ready` is not part of this environment. That is expected and does not block the order: the `ClusterUserDefinedNetwork` behind the subnet is already in place, and the `BareMetalInstance` provisions against it. The tenant-facing view agrees — this is the same subnet Alice saw as `READY` in Module 3 through `osac get subnet`.
++
+.If the subnet shows `Failed`, create the fabric-output ConfigMap by hand (expand)
 [%collapsible]
 ====
+`Failed` is a different matter — that one does block provisioning. The `cudn_net` subnet playbook creates the subnet's namespace and `ClusterUserDefinedNetwork` but does not write the output ConfigMap the operator expects. The lab provisioning runs a CronJob, `osac-subnet-fabric-output`, that writes the missing ConfigMap for every subnet within about a minute; if it has not, apply it yourself.
+
 The operator requires every key to be present; the VNI and route values are not used by the CUDN backend:
 
 [source,role=execute]
@@ -768,7 +737,7 @@ data:
 EOF
 ----
 
-The subnet goes `Ready` within about a minute.
+The subnet leaves `Failed` within about a minute.
 ====
 
 . Wait for MetalLB to assign the hosted cluster's API VIP, then publish `api` and `api-int` in the libvirt DNS on the BMF host. The worker resolves names through libvirt's dnsmasq at `192.168.122.1`, and with `dns.noop` nothing else publishes these records:
