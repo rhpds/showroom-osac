@@ -252,26 +252,32 @@
         - r_vm_create.rc != 0
         - "'already exists' not in r_vm_create.stderr"
 
-    - name: Discover VM namespace and name (retry until provisioned)
-      ansible.builtin.shell: |
-        VM_NS=$(oc get vm -A --sort-by=.metadata.creationTimestamp --no-headers 2>/dev/null | grep subnet | tail -1 | awk '{print $1}')
-        VM_NAME=$(oc get vm -A --sort-by=.metadata.creationTimestamp --no-headers 2>/dev/null | grep subnet | tail -1 | awk '{print $2}')
-        if [ -z "${VM_NS}" ] || [ -z "${VM_NAME}" ]; then
-          echo "VM not yet provisioned" >&2
-          exit 1
-        fi
-        echo "VM_NS=${VM_NS}"
-        echo "VM_NAME=${VM_NAME}"
+    # The KubeVirt VM gets a generated name (vm-xxxxx) in the tenant namespace;
+    # the only stable link back to portal-vm is the compute instance UUID label.
+    - name: Get portal-vm compute instance ID
+      ansible.builtin.shell: >-
+        osac --config "$HOME/alice" get computeinstance portal-vm -o json | jq -r '.id'
+      register: r_vm_id
+      retries: 12
+      delay: 10
+      until: r_vm_id.stdout | trim | length > 10
+      changed_when: false
+
+    - name: Discover VM name (retry until provisioned)
+      ansible.builtin.shell: >-
+        oc get vm -n {{ tenant_name }}
+        -l osac.openshift.io/compute-instance-id={{ r_vm_id.stdout | trim }}
+        --no-headers -o custom-columns=NAME:.metadata.name
       register: r_vm_discovery
       retries: 12
       delay: 10
-      until: r_vm_discovery.rc == 0
+      until: r_vm_discovery.stdout | trim | length > 0
       changed_when: false
 
     - name: Set VM namespace and name facts
       ansible.builtin.set_fact:
-        vm_ns: "{{ r_vm_discovery.stdout | regex_search('VM_NS=(.+)', '\\1') | first }}"
-        vm_name: "{{ r_vm_discovery.stdout | regex_search('VM_NAME=(.+)', '\\1') | first }}"
+        vm_ns: "{{ tenant_name }}"
+        vm_name: "{{ r_vm_discovery.stdout | trim }}"
 
     - name: Discover DataVolume name
       ansible.builtin.shell: >-
