@@ -252,22 +252,13 @@
         - r_vm_create.rc != 0
         - "'already exists' not in r_vm_create.stderr"
 
-    # The KubeVirt VM gets a generated name (vm-xxxxx) in the tenant namespace;
-    # the only stable link back to portal-vm is the compute instance UUID label.
-    - name: Get portal-vm compute instance ID
-      ansible.builtin.shell: >-
-        osac --config "$HOME/alice" get computeinstance portal-vm -o json | jq -r '.id'
-      register: r_vm_id
-      retries: 12
-      delay: 10
-      until: r_vm_id.stdout | trim | length > 10
-      changed_when: false
-
+    # The KubeVirt VM gets a generated name (vm-xxxxx); portal-vm's friendly name
+    # lives only in the fulfillment API, not on the CR. The tenant namespace holds
+    # just this one VM, so take the newest one there.
     - name: Discover VM name (retry until provisioned)
       ansible.builtin.shell: >-
-        oc get vm -n {{ tenant_name }}
-        -l osac.openshift.io/compute-instance-id={{ r_vm_id.stdout | trim }}
-        --no-headers -o custom-columns=NAME:.metadata.name
+        oc get vm -n {{ tenant_name }} --sort-by=.metadata.creationTimestamp
+        --no-headers -o custom-columns=NAME:.metadata.name | tail -1
       register: r_vm_discovery
       retries: 12
       delay: 10
