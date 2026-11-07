@@ -126,14 +126,8 @@
     # Check 7 — VirtualMachine resource is Running on the cluster
     # -------------------------------------------------------
     - name: Check VirtualMachine Running status in OCP
-      ansible.builtin.shell: |
-        oc get vm -A -o json |
-        python3 -c "
-        import json,sys
-        vms=json.load(sys.stdin).get('items',[])
-        running=[v for v in vms if v.get('status',{}).get('printableStatus','')=='Running']
-        print('OK' if running else 'NONE')
-        "
+      ansible.builtin.shell: >-
+        oc get vm -n {{ tenant_name }} -o jsonpath='{.items[*].status.printableStatus}'
       environment:
         KUBECONFIG: "{{ k8s_kubeconfig }}"
       register: r_vm_k8s
@@ -144,14 +138,8 @@
     # Check 8 — DataVolume for portal-vm has Succeeded
     # -------------------------------------------------------
     - name: Check DataVolume Succeeded phase in OCP
-      ansible.builtin.shell: |
-        oc get dv -A -o json |
-        python3 -c "
-        import json,sys
-        dvs=json.load(sys.stdin).get('items',[])
-        succeeded=[d for d in dvs if d.get('status',{}).get('phase','')=='Succeeded']
-        print('OK' if succeeded else 'NONE')
-        "
+      ansible.builtin.shell: >-
+        oc get dv -n {{ tenant_name }} -o jsonpath='{.items[*].status.phase}'
       environment:
         KUBECONFIG: "{{ k8s_kubeconfig }}"
       register: r_dv
@@ -219,9 +207,9 @@
           {{ r_vm_osac.rc | default(1) == 0 and
              'RUNNING' in (r_vm_osac.stdout | default('')) }}
         _task7_ok: >-
-          {{ 'OK' in (r_vm_k8s.stdout | default('')) }}
+          {{ 'Running' in (r_vm_k8s.stdout | default('')) }}
         _task8_ok: >-
-          {{ 'OK' in (r_dv.stdout | default('')) }}
+          {{ 'Succeeded' in (r_dv.stdout | default('')) }}
         _task9_ok: >-
           {{ r_bob_list.rc | default(1) == 0 and
              'portal-vm' in (r_bob_list.stdout | default('')) }}
@@ -262,11 +250,11 @@
           {{ '✅' if _task5_ok else '❌' }} Task 5: Networking READY — \
           {{ 'ok' if _task5_ok else 'FAILED — log in as Alice and check: osac --config $HOME/alice get virtualnetwork; osac --config $HOME/alice get subnet default-ipv4; wait for READY' }}
           {{ '✅' if _task6_ok else '❌' }} Task 6: portal-vm RUNNING — \
-          {{ 'ok' if _task6_ok else 'FAILED — VM still starting; DataVolume import can take 5-10 minutes — click Validate again shortly, or run Solve to apply the DataVolume pullMethod fix' }}
+          {{ 'ok' if _task6_ok else 'FAILED — VM still starting; DataVolume import can take 5-10 minutes — click Validate again shortly' }}
           {{ '✅' if _task7_ok else '❌' }} Task 7: VirtualMachine Running on cluster — \
-          {{ 'ok' if _task7_ok else 'FAILED — check: oc get vm -A; if the VM is Stopped, run Solve to apply the DataVolume fix' }}
+          {{ 'ok' if _task7_ok else 'FAILED — check: oc get vm -n sai-corp; the VM starts once its boot disk DataVolume has imported' }}
           {{ '✅' if _task8_ok else '❌' }} Task 8: DataVolume Succeeded — \
-          {{ 'ok' if _task8_ok else 'FAILED — DataVolume still importing; wait 5-10 minutes and click Validate again; if stuck, run Solve to apply the pullMethod=node fix' }}
+          {{ 'ok' if _task8_ok else 'FAILED — DataVolume still importing; wait 5-10 minutes and click Validate again; check: oc get dv -n sai-corp' }}
           {{ '✅' if _task9_ok else '❌' }} Task 9: Bob can list compute instances — \
           {{ 'ok' if _task9_ok else 'FAILED — ensure Bob has a VIEWER ProjectMembership in sai-corp; check as Alice: osac --config $HOME/alice get projectmembership' }}
           {{ '✅' if _task10_ok else '❌' }} Task 10: Bob cannot list tenant users — \
