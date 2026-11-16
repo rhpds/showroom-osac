@@ -364,8 +364,11 @@ When the instructions below ask for a new *incognito/private* browser window, th
 osac --config $HOME/alice \
   login --insecure \
   --address {osac_fulfillment_internal_api_url} \
+  --scopes organization:sai-corp \
   --flow device
 ----
++
+The organization scope identifies SAI Corp before Alice has a local account, so Keycloak can display its federated SSO provider.
 +
 The CLI displays a URL and a one-time code. Complete the login in your browser (not the Showroom interface):
 +
@@ -436,6 +439,7 @@ Error: rpc error: code = PermissionDenied desc = permission denied
 osac --config $HOME/bob \
   login --insecure \
   --address {osac_fulfillment_internal_api_url} \
+  --scopes organization:sai-corp \
   --flow device
 ----
 +

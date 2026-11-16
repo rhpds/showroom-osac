@@ -20,6 +20,7 @@
   hosts: bastion
   gather_facts: false
   vars:
+    tenant_name: sai-corp
     keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
     fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
     device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
@@ -208,7 +209,7 @@
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "alice" "{{ osac_user_password }}"
-        "$HOME/alice"
+        "$HOME/alice" "{{ tenant_name }}"
       changed_when: false
 
     - name: Create Alice's pull secret

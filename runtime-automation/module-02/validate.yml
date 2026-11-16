@@ -228,7 +228,7 @@
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "{{ tenant_admin }}" "{{ osac_user_password }}"
-        "{{ config_alice }}"
+        "{{ config_alice }}" "{{ tenant_name }}"
       changed_when: false
       ignore_errors: true
 
@@ -260,7 +260,7 @@
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "{{ tenant_user }}" "{{ osac_user_password }}"
-        "{{ config_bob }}"
+        "{{ config_bob }}" "{{ tenant_name }}"
       changed_when: false
       ignore_errors: true
 

@@ -155,7 +155,7 @@
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "alice" "{{ osac_user_password }}"
-        "$HOME/alice"
+        "$HOME/alice" "{{ tenant_name }}"
       changed_when: false
 
     - name: Verify Alice identity and tenant-admin role
@@ -289,7 +289,7 @@
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
         "bob" "{{ osac_user_password }}"
-        "$HOME/bob"
+        "$HOME/bob" "{{ tenant_name }}"
       changed_when: false
 
     - name: Verify Bob identity (no tenant-admin)
