@@ -1,0 +1,46 @@
+---
+# EDITOR changes the same public API field students edit interactively.
+- name: Set instance run strategy to {{ power_strategy }} as Alice
+  ansible.builtin.shell: |
+    set -euo pipefail
+    editor=$(mktemp)
+    trap 'rm -f "$editor"' EXIT
+    cat > "$editor" <<'PY'
+    #!/usr/bin/python3
+    import json
+    import sys
+    path = sys.argv[1]
+    with open(path) as stream:
+        instance = json.load(stream)
+    instance['spec']['run_strategy'] = 'BARE_METAL_INSTANCE_RUN_STRATEGY_{{ power_strategy }}'
+    with open(path, 'w') as stream:
+        json.dump(instance, stream)
+    PY
+    chmod 700 "$editor"
+    EDITOR="$editor" osac --config {{ config_alice | quote }} edit baremetalinstance {{ bmaas_instance_name | quote }} -o json
+  args:
+    executable: /bin/bash
+  register: r_power
+  changed_when: "'No changes' not in r_power.stdout"
+
+- name: Wait for BMH power to match {{ power_strategy }}
+  ansible.builtin.command: oc get bmh {{ bmaas_vm_name }} -n {{ osac_namespace }} -o json
+  register: r_power_host
+  changed_when: false
+  until:
+    - (r_power_host.stdout | from_json).spec.online == (power_strategy == 'ALWAYS')
+    - (r_power_host.stdout | from_json).status.poweredOn == (power_strategy == 'ALWAYS')
+    - (r_power_host.stdout | from_json).status.provisioning.state == 'provisioned'
+  retries: 40
+  delay: 10
+
+- name: Wait for instance state to reflect {{ power_strategy }}
+  ansible.builtin.command: >-
+    osac --config {{ config_alice }} get baremetalinstance {{ bmaas_instance_name }} -o json
+  register: r_power_instance
+  changed_when: false
+  until: >-
+    (r_power_instance.stdout | from_json).get('status', {}).get('state', '') ==
+    ('BARE_METAL_INSTANCE_STATE_RUNNING' if power_strategy == 'ALWAYS' else 'BARE_METAL_INSTANCE_STATE_STOPPED')
+  retries: 30
+  delay: 10

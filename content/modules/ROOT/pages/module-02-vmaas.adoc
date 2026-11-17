@@ -1,4 +1,4 @@
-= Module 3: Virtual Machine as a Service (VMaaS)
+= Module 2: Virtual Machine as a Service (VMaaS)
 :source-highlighter: rouge
 :toc: macro
 :toclevels: 2
@@ -6,13 +6,13 @@
 toc::[]
 
 [WARNING]
-.Module 2 must be completed first
+.Module 1 must be completed first
 ====
-You *must* complete xref:module-02-tenant-management.adoc[Module 2: Tenant Onboarding and Identity Management] before you start this module.
+You *must* complete xref:module-01-tenant-management.adoc[Module 1: Tenant Onboarding and Identity Management] before you start this module.
 
-This module uses the `sai-corp` tenant and the users Alice and Bob that you created in Module 2. Without them, the exercises in this module fail.
+This module uses the `sai-corp` tenant and the users Alice and Bob that you created in Module 1. Without them, the exercises in this module fail.
 
-If you skipped Module 2, go back and either complete its exercises or click the *Solve* button at the end of that module.
+If you skipped Module 1, go back and either complete its exercises or click the *Solve* button at the end of that module.
 ====
 
 SAI Corp's tenant is onboarded, users are federated, and role-based access control is enforced. But SAI Corp's teams still cannot do anything with the platform — they need compute. Specifically, they need virtual machines they can provision on demand without filing a ticket.
@@ -33,7 +33,7 @@ By the end of this module, you'll be able to:
 
 Before any tenant can deploy a virtual machine, the platform needs a storage tier. The VM creation workflow in Red Hat cloud extensions requests a tier *by name* when it provisions a boot disk.
 
-You do not have to build that tier. Red Hat cloud extensions configures its storage when the platform is deployed, and it creates a dedicated Kubernetes storage class for every tenant you onboard — including one for `sai-corp`, created the moment you created the tenant in Module 2. In this exercise you inspect what already exists, so you recognize the pieces when Alice orders a VM against them in Exercise 4.
+You do not have to build that tier. Red Hat cloud extensions configures its storage when the platform is deployed, and it creates a dedicated Kubernetes storage class for every tenant you onboard — including one for `sai-corp`, created the moment you created the tenant in Module 1. In this exercise you inspect what already exists, so you recognize the pieces when Alice orders a VM against them in Exercise 4.
 
 === Steps
 
@@ -61,7 +61,7 @@ osac-system-local                                     topolvm.io                
 The classes that matter here are the three with the `osac-` prefix. Red Hat cloud extensions creates one per tenant, named `osac-<tenant>-<tier>`:
 +
 * `osac-shared-local` and `osac-system-local` were created with the platform, for the built-in `shared` and `system` tenants.
-* `osac-sai-corp-local` was created automatically when you created the `sai-corp` tenant in Module 2 — you never asked for it.
+* `osac-sai-corp-local` was created automatically when you created the `sai-corp` tenant in Module 1 — you never asked for it.
 +
 All three use the `topolvm.io` provisioner, the same LVM storage that backs the cluster default `lvms-vg1`. The `ocs-external-storagecluster-*` classes belong to this cluster's external Ceph storage and are not used by Red Hat cloud extensions.
 
@@ -97,7 +97,7 @@ A *storage tier* is the service-level name a tenant orders against: `local`, blo
 +
 [NOTE]
 ====
-`get storagebackend` and `get storagetier` are platform-administrator operations on the internal fulfillment API. They work here because `$HOME/admin` logged in with `--private` in Module 2.
+`get storagebackend` and `get storagetier` are platform-administrator operations on the internal fulfillment API. They work here because `$HOME/admin` logged in with `--private` in Module 1.
 ====
 +
 [HINT]
@@ -315,7 +315,7 @@ Created compute instance '01a0d377-5991-7e0e-8b3a-5135683208ec'.
 oc get dv -n sai-corp -w
 ----
 +
-Press `Ctrl+C` when the phase shows `Succeeded`.
+Press kbd:[Ctrl+C] when the phase shows `Succeeded`.
 
 . Check the VM status:
 +
@@ -342,7 +342,7 @@ oc get vm,vmi -A --no-headers
 +
 The `VirtualMachine` and `VirtualMachineInstance` objects should show `Running`.
 
-. Access the VM serial console (you may need to press `Enter` to see the login prompt):
+. Access the VM serial console (you may need to press kbd:[Enter] to see the login prompt):
 +
 [source,role=execute]
 ----
@@ -371,7 +371,7 @@ PRETTY_NAME="Fedora Linux 45 (Cloud Edition)"
 ...
 ----
 
-. Disconnect from the VM by typing `exit` and then press `Ctrl+]` to disconnect from the console.
+. Disconnect from the VM by typing `exit` and then press kbd:[Ctrl+\]] to disconnect from the console.
 
 == Exercise 5: Verify the platform and tenant boundary
 
@@ -486,16 +486,14 @@ Review what you completed in this module:
 If you want to skip the exercises, click the *Solve* button below. This publishes the disk image, instance type, and `standard-linux-vm` catalog item, and deploys `portal-vm` as Alice.
 
 ++++
-<div class="solve-button-placeholder" data-module="module-03"></div>
+<div class="solve-button-placeholder" data-module="module-02"></div>
 ++++
 
-////
 == Validate your work
 
 ++++
-<div class="validate-button-placeholder" data-module="module-03"></div>
+<div class="validate-button-placeholder" data-module="module-02"></div>
 ++++
-////
 
 == Module summary
 
@@ -505,5 +503,5 @@ SAI Corp can now provision virtual machines on demand through the Red Hat cloud 
 
 * *Storage tiers bridge Kubernetes and the catalog*: The `local` tier links a Kubernetes storage class to the fulfillment workflow. The platform provisions the tier and a per-tenant `osac-<tenant>-local` storage class for you, and the catalog orders boot disks against the tier by name.
 * *Catalog items are self-service templates*: A catalog item references a VM template and makes it available in the service catalog. Tenants specify parameters like disk image, instance type, and networking at ordering time via CLI flags.
-* *RBAC extends to workloads*: The same RoleBinding and ProjectMembership model from Module 2 governs compute instances. A project member sees and works with the workloads in their project; tenant-level and platform-level operations stay out of reach.
+* *RBAC extends to workloads*: The same RoleBinding and ProjectMembership model from Module 1 governs compute instances. A project member sees and works with the workloads in their project; tenant-level and platform-level operations stay out of reach.
 * *Platform admin vs. tenant admin separation*: Storage, images, instance types, and catalog items are platform-level concerns. VM deployment is a tenant-level action. This separation lets platform teams control what is available while tenants control what is deployed.

@@ -10,12 +10,14 @@ This isn't just another cloud deployment. Your government clients need to know t
 
 In this workshop, you will:
 
-* Navigate and understand the Red Hat cloud extensions platform architecture and components
 * Create and manage multi-tenant environments with storage
 * Use the Red Hat cloud extensions user interface as well as the `osac` CLI to create catalog items and deploy workloads
 * Provision virtual machines on demand through the VMaaS service catalog
 * Order hosted OpenShift clusters using the CaaS catalog
-* Verify platform health and tenant readiness
+* Order dedicated servers through the BMaaS catalog and manage their lifecycle
+* Verify tenant readiness and workload access
+
+Optional Module 5 lets you explore the platform architecture, inspect Keycloak and Kafka, and verify platform health. You can complete the entire core workshop without it.
 
 == Who this is for
 
@@ -53,13 +55,19 @@ Your access details are provided in the **Credentials** page for reference. They
 
 == Timing and Schedule
 
-=== Full Workshop (100 minutes)
+=== Core workshop (120 minutes, plus provisioning waits)
 
-* *Module 1*: Exploring the Red Hat cloud extensions Platform (10 minutes)
-* *Module 2*: Tenant Onboarding and Identity Management (30 minutes)
-* *Module 3*: Virtual Machine as a Service — VMaaS (30 minutes)
-* *Module 4*: Cluster as a Service — CaaS (30 minutes)
+* *Module 1*: Tenant Onboarding and Identity Management (30 minutes)
+* *Module 2*: Virtual Machine as a Service — VMaaS (30 minutes)
+* *Module 3*: Cluster as a Service — CaaS (30 minutes)
+* *Module 4*: Bare Metal as a Service — BMaaS (30 minutes)
 
-Each module builds on the previous one. No formal breaks are scheduled — pause between modules as needed.
+Start with xref:module-01-tenant-management.adoc[Module 1: Tenant Onboarding and Identity Management]. Modules 2–4 use the tenant and users created there. Module 4 uses separate bare-metal capacity and does not require a CaaS cluster from Module 3.
 
-Work at your own pace. If time is short, focus on Modules 1 and 2 for the core platform concepts. Module 3 and 4 require Module 2 (they use the tenant and users created there).
+Work at your own pace and pause between modules as needed. Allow additional time for inspection, image downloads, and provisioning in Modules 3 and 4.
+
+=== Optional platform exploration (10 minutes)
+
+* *Module 5*: xref:module-05-platform-overview.adoc[Exploring the Red Hat cloud extensions Platform]
+
+After the core modules, you can inspect the services behind the workflows or go directly to the xref:conclusion.adoc[Conclusion and Next Steps]. Module 5 is fully optional and is not a prerequisite for any other module. Completing it brings the workshop to 130 minutes, plus provisioning waits.

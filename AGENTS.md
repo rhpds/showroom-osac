@@ -2,7 +2,7 @@
 
 This repo is a Red Hat Demo Platform (RHDP) Showroom lab for **Red Hat cloud extensions (OSAC)**. It contains:
 
-- `content/` — Antora AsciiDoc lab modules (4 modules, platform overview through CaaS)
+- `content/` — Antora AsciiDoc lab modules (4 core modules, tenant onboarding through BMaaS, followed by optional platform exploration)
 - `runtime-automation/` — Ansible solve/validate playbooks for student E2E automation
 - `site.yml` / `ui-config.yml` — Antora and Showroom configuration
 

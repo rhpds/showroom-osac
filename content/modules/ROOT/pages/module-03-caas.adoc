@@ -1,4 +1,4 @@
-= Module 4: Cluster as a Service (CaaS)
+= Module 3: Cluster as a Service (CaaS)
 :source-highlighter: rouge
 :toc: macro
 :toclevels: 2
@@ -6,13 +6,13 @@
 toc::[]
 
 [WARNING]
-.Module 2 must be completed first
+.Module 1 must be completed first
 ====
-You *must* complete xref:module-02-tenant-management.adoc[Module 2: Tenant Onboarding and Identity Management] before you start this module.
+You *must* complete xref:module-01-tenant-management.adoc[Module 1: Tenant Onboarding and Identity Management] before you start this module.
 
-This module uses the `sai-corp` tenant and the users Alice and Bob that you created in Module 2. Without them, the exercises in this module fail.
+This module uses the `sai-corp` tenant and the users Alice and Bob that you created in Module 1. Without them, the exercises in this module fail.
 
-If you skipped Module 2, go back and either complete its exercises or click the *Solve* button at the end of that module.
+If you skipped Module 1, go back and either complete its exercises or click the *Solve* button at the end of that module.
 ====
 
 SAI Corp's teams can now provision virtual machines on demand through the VMaaS catalog. But their platform engineers also need full OpenShift clusters — for CI/CD pipelines, containerized workloads, and isolated test environments — provisioned with the same self-service experience.
@@ -310,7 +310,7 @@ NAME            STATUS   STATE       HOST-TYPE
 virtual-bmh-1   OK       available   <none>
 ----
 +
-Press `Ctrl+C` when `STATE=available`. The `BareMetalHost` must reach `available` before you proceed.
+Press kbd:[Ctrl+C] when `STATE=available`. The `BareMetalHost` must reach `available` before you proceed.
 +
 [NOTE]
 ====
@@ -704,7 +704,7 @@ NAME           VIRTUALNETWORK                         IPV4CIDR        READY     
 subnet-cmth7   01a1af73-fe10-7b36-99f1-ff3806f2d067   10.200.0.0/20   ProvisioningDisabled   4h10m
 ----
 +
-In this lab the subnet settles on `ProvisioningDisabled` and stays there — the fabric integration that would drive it to `Ready` is not part of this environment. That is expected and does not block the order: the `ClusterUserDefinedNetwork` behind the subnet is already in place, and the `BareMetalInstance` provisions against it. The tenant-facing view agrees — this is the same subnet Alice saw as `READY` in Module 3 through `osac get subnet`.
+In this lab the subnet settles on `ProvisioningDisabled` and stays there — the fabric integration that would drive it to `Ready` is not part of this environment. That is expected and does not block the order: the `ClusterUserDefinedNetwork` behind the subnet is already in place, and the `BareMetalInstance` provisions against it. The tenant-facing view agrees — this is the same subnet Alice saw as `READY` in Module 2 through `osac get subnet`.
 +
 .If the subnet shows `Failed`, create the fabric-output ConfigMap by hand (expand)
 [%collapsible]
@@ -782,7 +782,7 @@ NAME                                                                           P
 baremetalinstance.osac.openshift.io/bmi-01a15ee2-6fa6-7143-b255-f6d0acab0642   Ready   osac.templates.bm_host_provisioning   metal3      osac/virtual-bmh-1
 ----
 +
-Press `Ctrl+C` when the bare metal host shows `provisioned` and the bare metal instance shows `Ready`. Reaching `provisioned` confirms that Ironic reached the IPA agent on port `9999` (Exercise 3). Do *not* `virsh destroy` the VM and do *not* place a second order while the host is `provisioning`.
+Press kbd:[Ctrl+C] when the bare metal host shows `provisioned` and the bare metal instance shows `Ready`. Reaching `provisioned` confirms that Ironic reached the IPA agent on port `9999` (Exercise 3). Do *not* `virsh destroy` the VM and do *not* place a second order while the host is `provisioning`.
 
 . Record the worker's guest IP; the next steps use it:
 +
@@ -835,7 +835,7 @@ Wait until the agent appears:
 watch -n 15 "oc get bmh virtual-bmh-1 -n osac; oc get agent -n osac"
 ----
 +
-Press `Ctrl+C` as soon as the agent is listed. Its `STAGE` is still empty at this point.
+Press kbd:[Ctrl+C] as soon as the agent is listed. Its `STAGE` is still empty at this point.
 
 . Check why the agent cannot start installing. With `dns.noop`, nothing publishes DNS records for the hosted cluster, so the agent's DNS validations fail and it reports `insufficient`:
 +
@@ -929,7 +929,7 @@ NAME                                   CLUSTER       APPROVED   ROLE     STAGE
 b0dc76ad-3be1-4fc3-9611-20bac4b6bb95   order-4shw4   true       worker   Done
 ----
 +
-The first stage should be `Writing image to disk`. *It takes a few minutes for this stage to appear*. Keep waiting for the agent to progress through each stage. Press `Ctrl+C` when the `STAGE` shows `Done`. This usually takes 10-15 minutes.
+The first stage should be `Writing image to disk`. *It takes a few minutes for this stage to appear*. Keep waiting for the agent to progress through each stage. Press kbd:[Ctrl+C] when the `STAGE` shows `Done`. This usually takes 10-15 minutes.
 
 . Connect to the hosted cluster. Its admin kubeconfig is stored as a secret in the hosted control plane namespace on the hub. Extract it to `/tmp/${ORDER}`:
 +
@@ -978,7 +978,7 @@ NAME                STATUS   ROLES    AGE   VERSION
 52-54-00-ca-aa-01   Ready    worker   5m    v1.35.5
 ----
 +
-Press `Ctrl+C` when the node shows `Ready`.
+Press kbd:[Ctrl+C] when the node shows `Ready`.
 
 . Link the node to the hub's record of the machine. The worker is running, but the order does not count it yet. Check the hub:
 +
@@ -1091,7 +1091,7 @@ guest_oc delete pod -n openshift-console-operator --all
 ----
 ====
 +
-Press `Ctrl+C` when the order shows `Ready`. End to end, provisioning typically takes 30-45 minutes.
+Press kbd:[Ctrl+C] when the order shows `Ready`. End to end, provisioning typically takes 30-45 minutes.
 
 . Verify the cluster from the platform side side:
 +
@@ -1416,7 +1416,7 @@ oc patch hostedcluster ${ORDER} -n ${HCP_NS} --type merge -p \
 watch -n 10 "oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get route -n openshift-console; oc --kubeconfig=/tmp/${ORDER}/kubeconfig --server=https://${VIP}:6443 --insecure-skip-tls-verify get co console"
 ----
 +
-Press `Ctrl+C` when a `console-custom` route shows the new hostname and the `console` operator is `Available`. This takes 1-3 minutes: the hosted control plane first copies the setting into the hosted cluster, then the console operator updates the route and checks it.
+Press kbd:[Ctrl+C] when a `console-custom` route shows the new hostname and the `console` operator is `Available`. This takes 1-3 minutes: the hosted control plane first copies the setting into the hosted cluster, then the console operator updates the route and checks it.
 
 . Give the hosted cluster's OAuth server the same trusted certificate. When you log in, the console sends the browser to the hosted cluster's OAuth server, which HyperShift publishes as a `passthrough` route on the hub (`oauth-<hcp-namespace>.apps...`). By default that server presents a certificate from the hosted cluster's internal CA, so the browser warns and `oc login` refuses it. The hub wildcard certificate also covers the OAuth hostname, so add it as a named serving certificate. HyperShift hands named certificates to both the API server and the OAuth server, and picks the right one by hostname:
 +
@@ -1486,16 +1486,14 @@ Review what you completed in this module:
 If you want to skip the exercises, click the *Solve* button below. This provisions the bare-metal worker host, publishes the cluster catalog objects, orders a hosted cluster as Alice, and publishes its API and console. The cluster order can take some time to reach Ready.
 
 ++++
-<div class="solve-button-placeholder" data-module="module-04"></div>
+<div class="solve-button-placeholder" data-module="module-03"></div>
 ++++
 
-////
 == Validate your work
 
 ++++
-<div class="validate-button-placeholder" data-module="module-04"></div>
+<div class="validate-button-placeholder" data-module="module-03"></div>
 ++++
-////
 
 == Module summary
 

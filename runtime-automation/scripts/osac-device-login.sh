@@ -3,26 +3,39 @@
 # Starts osac login --flow device in background, completes the browser
 # flow programmatically, and waits for the login to finish.
 #
-# Usage: osac-device-login.sh <keycloak_url> <api_url> <username> <password> [<config_path>]
+# Usage: osac-device-login.sh <keycloak_url> <api_url> <username> <password> [<config_path>] [<organization>]
 #   config_path  optional path for osac --config (e.g. $HOME/alice)
+#   organization optional tenant alias for first-time federated login
 set -euo pipefail
 
-KC_URL="${1:?Usage: $0 <keycloak_url> <api_url> <username> <password> [<config_path>]}"
+KC_URL="${1:?Usage: $0 <keycloak_url> <api_url> <username> <password> [<config_path>] [<organization>]}"
 API_URL="${2:?}"
 USERNAME="${3:?}"
 PASSWORD="${4:?}"
 CONFIG_PATH="${5:-}"
+ORGANIZATION="${6:-}"
 
-CONFIG_OPT=""
+OSAC=(osac)
 if [ -n "${CONFIG_PATH}" ]; then
-  CONFIG_OPT="--config ${CONFIG_PATH}"
+  OSAC+=(--config "${CONFIG_PATH}")
+fi
+LOGIN_ARGS=(login --insecure --address "${API_URL}" --flow device)
+if [ -n "${ORGANIZATION}" ]; then
+  LOGIN_ARGS+=(--scopes "organization:${ORGANIZATION}")
 fi
 
 LOGIN_LOG=$(mktemp)
 COOKIE_JAR=$(mktemp)
 RESP_FILE=$(mktemp)
 HDR_FILE=$(mktemp)
-trap "rm -f ${LOGIN_LOG} ${COOKIE_JAR} ${RESP_FILE} ${HDR_FILE}" EXIT
+cleanup() {
+  if [ -n "${OSAC_PID:-}" ]; then
+    kill "${OSAC_PID}" 2>/dev/null || true
+    wait "${OSAC_PID}" 2>/dev/null || true
+  fi
+  rm -f "${LOGIN_LOG}" "${COOKIE_JAR}" "${RESP_FILE}" "${HDR_FILE}"
+}
+trap cleanup EXIT
 
 py_extract() {
   python3 -c "
@@ -43,10 +56,8 @@ fixurl() {
 }
 
 # Start osac login in background
-# shellcheck disable=SC2086
-osac ${CONFIG_OPT} logout 2>/dev/null || true
-# shellcheck disable=SC2086
-osac ${CONFIG_OPT} login --insecure --address "${API_URL}" --flow device > "${LOGIN_LOG}" 2>&1 &
+"${OSAC[@]}" logout 2>/dev/null || true
+"${OSAC[@]}" "${LOGIN_ARGS[@]}" > "${LOGIN_LOG}" 2>&1 &
 OSAC_PID=$!
 
 # Wait for user code to appear
@@ -57,7 +68,7 @@ for i in $(seq 1 30); do
   sleep 0.5
 done
 
-USER_CODE=$(grep -oE '[A-Z]{4}-[A-Z]{4}' "${LOGIN_LOG}" | head -1)
+USER_CODE=$(grep -oE '[A-Z]{4}-[A-Z]{4}' "${LOGIN_LOG}" | head -1 || true)
 if [ -z "${USER_CODE}" ]; then
   >&2 echo "ERROR: Failed to get user code from osac login"
   kill ${OSAC_PID} 2>/dev/null || true
@@ -74,7 +85,7 @@ LOGIN_ACTION=$(cat "${RESP_FILE}" | py_extract 'action="([^"]+)"')
 # Submit username
 curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   -D "${HDR_FILE}" -o "${RESP_FILE}" \
-  -X POST "${LOGIN_ACTION}" -d "username=${USERNAME}"
+  -X POST "${LOGIN_ACTION}" --data-urlencode "username=${USERNAME}"
 
 HTTP_CODE=$(grep "^HTTP" "${HDR_FILE}" | tail -1 | awk '{print $2}')
 
@@ -85,6 +96,10 @@ if [ "${HTTP_CODE}" = "303" ] || [ "${HTTP_CODE}" = "302" ]; then
   REDIRECT=$(fixurl "$(get_redirect)")
 else
   BROKER_LINK=$(cat "${RESP_FILE}" | py_extract 'href="([^"]*broker/[^"]+/login[^"]*)"')
+  if [ -z "${BROKER_LINK}" ]; then
+    >&2 echo "ERROR: No IdP broker link found. Pass the tenant alias as the sixth argument."
+    exit 1
+  fi
   REDIRECT=$(fixurl "${BROKER_LINK}")
   >&2 echo "Clicking IdP broker link."
 fi
@@ -98,7 +113,8 @@ IDP_ACTION=$(cat "${RESP_FILE}" | py_extract 'action="([^"]+)"')
 curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   -D "${HDR_FILE}" -o /dev/null \
   -X POST "${IDP_ACTION}" \
-  -d "username=${USERNAME}&password=${PASSWORD}&credentialId="
+  --data-urlencode "username=${USERNAME}" \
+  --data-urlencode "password=${PASSWORD}" --data-urlencode "credentialId="
 
 # Follow broker callback → consent page
 REDIRECT=$(fixurl "$(get_redirect)")
@@ -112,7 +128,7 @@ HIDDEN_CODE=$(cat "${RESP_FILE}" | py_extract 'name="code"\s+value="([^"]+)"')
 CONSENT_ACTION=$(fixurl "${CONSENT_ACTION}")
 
 curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
-  -X POST "${CONSENT_ACTION}" -d "code=${HIDDEN_CODE}&accept=Yes" -o /dev/null
+  -X POST "${CONSENT_ACTION}" --data-urlencode "code=${HIDDEN_CODE}" --data-urlencode "accept=Yes" -o /dev/null
 >&2 echo "Consent approved."
 
 # Wait for osac login to finish

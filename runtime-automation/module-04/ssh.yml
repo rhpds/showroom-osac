@@ -1,0 +1,38 @@
+---
+- name: Get provisioned host for guest access
+  ansible.builtin.command: oc get bmh {{ bmaas_vm_name }} -n {{ osac_namespace }} -o json
+  register: r_host
+  changed_when: false
+
+- name: Select guest IPv4 address for the boot NIC
+  ansible.builtin.set_fact:
+    bmaas_guest_ip: >-
+      {{ (r_host.stdout | from_json).status.hardware.nics
+         | selectattr('mac', 'equalto', bmaas_vm_mac) | selectattr('ip', 'defined')
+         | rejectattr('ip', 'search', ':') | map(attribute='ip') | first | default('') }}
+
+- name: Verify SSH through the BMF host
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ bastion_home }}/.ssh/id_ed25519"
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - -o
+      - StrictHostKeyChecking=accept-new
+      - -o
+      - UserKnownHostsFile={{ bastion_home }}/.ssh/bmaas-{{ (r_instance.stdout | from_json).id }}-known-hosts
+      - -o
+      - ConnectTimeout=10
+      - -o
+      - "ProxyCommand=sudo ssh -W %h:%p root@{{ bmf }}"
+      - core@{{ bmaas_guest_ip }}
+      - cat /etc/os-release
+  register: r_ssh
+  changed_when: false
+  until: r_ssh.rc == 0 and 'Red Hat Enterprise Linux CoreOS' in r_ssh.stdout
+  retries: 24
+  delay: 10

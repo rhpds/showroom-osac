@@ -1,261 +1,347 @@
 ---
-# Module 3: Virtual Machine as a Service — validate playbook
-- name: Module 03 - Virtual Machine as a Service Validation
-  hosts: localhost
-  connection: local
+# Validate the Metal3/libvirt workflow used by this lab.
+- import_playbook: ../bastion.yml
+- name: Module 03 - Cluster Service Validation
+  hosts: bastion
   gather_facts: false
+  vars_files:
+  - ../vars.yml
   vars:
-    student_user: "{{ user | default('') }}"
-    osac_namespace: osac
-    tenant_name: sai-corp
-    disk_image_name: fedora
-    instance_type_name: small-1-2
-    catalog_item_name: standard-linux-vm
-    keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
-    fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
-    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
-
+    student_user: '{{ user | default('''') }}'
+  environment:
+    KUBECONFIG: '{{ bastion_kubeconfig }}'
   tasks:
+  - name: Copy device login script to bastion
+    ansible.builtin.copy:
+      src: '{{ device_login_script_src }}'
+      dest: '{{ device_login_script }}'
+      mode: '0755'
+    changed_when: false
+  - name: Login as platform admin
+    ansible.builtin.command:
+      argv:
+      - osac
+      - --config
+      - '{{ config_admin }}'
+      - login
+      - --insecure
+      - --private
+      - --issuer={{ keycloak_url }}/realms/osac
+      - --flow=password
+      - --user={{ osac_admin_user }}
+      - --password={{ osac_admin_password }}
+      - '{{ fulfillment_api_url }}'
+    changed_when: false
+    no_log: true
+  - name: Login as Alice via device flow
+    ansible.builtin.command:
+      argv:
+      - '{{ device_login_script }}'
+      - '{{ keycloak_url }}'
+      - '{{ fulfillment_api_url }}'
+      - '{{ tenant_admin }}'
+      - '{{ osac_user_password }}'
+      - '{{ config_alice }}'
+      - '{{ tenant_name }}'
+    changed_when: false
+    no_log: true
+  - name: Get cluster fulfillment configuration
+    ansible.builtin.command: oc get cm cluster-fulfillment-ig -n {{ osac_namespace }} -o json
+    register: r_config
+    changed_when: false
+    failed_when: false
+  - name: Read config result
+    vars:
+      query_result: '{{ (r_config.stdout | from_json) if r_config.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      config: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get guest route MachineConfigs
+    ansible.builtin.command: oc get machineconfigs -o json
+    register: r_machineconfigs
+    changed_when: false
+    failed_when: false
+  - name: Read machineconfigs result
+    vars:
+      query_result: '{{ (r_machineconfigs.stdout | from_json) if r_machineconfigs.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      machineconfigs: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get MachineConfigPools
+    ansible.builtin.command: oc get machineconfigpools -o json
+    register: r_pools
+    changed_when: false
+    failed_when: false
+  - name: Read pools result
+    vars:
+      query_result: '{{ (r_pools.stdout | from_json) if r_pools.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      pools: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get Metal3 provisioning configuration
+    ansible.builtin.command: oc get provisioning provisioning-configuration -o json
+    register: r_provisioning
+    changed_when: false
+    failed_when: false
+  - name: Read provisioning result
+    vars:
+      query_result: '{{ (r_provisioning.stdout | from_json) if r_provisioning.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      provisioning: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get lab BareMetalHost
+    ansible.builtin.command: oc get bmh {{ vm_name }} -n {{ osac_namespace }} -o json
+    register: r_bmh
+    changed_when: false
+    failed_when: false
+  - name: Read bmh result
+    vars:
+      query_result: '{{ (r_bmh.stdout | from_json) if r_bmh.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      bmh: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get bare-metal instance type
+    ansible.builtin.command: osac --config {{ config_admin }} get baremetalinstancetype {{ bmit_name }} -o json
+    register: r_bmit
+    changed_when: false
+    failed_when: false
+  - name: Read bmit result
+    vars:
+      query_result: '{{ (r_bmit.stdout | from_json) if r_bmit.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      bmit: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get platform RHCOS image
+    ansible.builtin.command: osac --config {{ config_admin }} get diskimage rhcos-4-22 -o json
+    register: r_diskimage
+    changed_when: false
+    failed_when: false
+  - name: Read diskimage result
+    vars:
+      query_result: '{{ (r_diskimage.stdout | from_json) if r_diskimage.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      diskimage: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get cluster versions
+    ansible.builtin.command: osac --config {{ config_admin }} get clusterversion -o json
+    register: r_versions
+    changed_when: false
+    failed_when: false
+  - name: Read versions result
+    vars:
+      query_result: '{{ (r_versions.stdout | from_json) if r_versions.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      versions: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get published cluster catalog item
+    ansible.builtin.command: osac --config {{ config_admin }} get clustercatalogitem {{ catalog_item }} -o json
+    register: r_catalog
+    changed_when: false
+    failed_when: false
+  - name: Read catalog result
+    vars:
+      query_result: '{{ (r_catalog.stdout | from_json) if r_catalog.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      catalog: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get Alice cluster
+    ansible.builtin.command: osac --config {{ config_alice }} get cluster {{ cluster_name }} -o json
+    register: r_cluster
+    changed_when: false
+    failed_when: false
+  - name: Read cluster result
+    vars:
+      query_result: '{{ (r_cluster.stdout | from_json) if r_cluster.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      cluster: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Find ClusterOrder by OSAC cluster ID
+    ansible.builtin.command: oc get clusterorder -n {{ osac_namespace }} -l osac.openshift.io/clusterorder-uuid={{
+      cluster.id | default("missing") }} -o json
+    register: r_orders
+    changed_when: false
+    failed_when: false
+  - name: Read orders result
+    vars:
+      query_result: '{{ (r_orders.stdout | from_json) if r_orders.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      orders: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Select the generated order
+    ansible.builtin.set_fact:
+      order: '{{ (orders.get(''items'', []) | first) | default({}) }}'
+  - name: Derive hosted cluster and Agent names
+    ansible.builtin.set_fact:
+      order_name: '{{ order.get(''metadata'', {}).get(''name'', '''') }}'
+      agent_name: '{{ bmh.get(''spec'', {}).get(''bmc'', {}).get(''address'', '''').split(''/'') | last }}'
+  - name: Derive hosted cluster namespace
+    ansible.builtin.set_fact:
+      hcp_ns: osac-{{ order_name }}
+  - name: Get HostedCluster
+    ansible.builtin.command: oc get hostedcluster {{ order_name }} -n {{ hcp_ns }} -o json
+    register: r_hosted
+    changed_when: false
+    failed_when: false
+    when: order_name | length > 0
+  - name: Read hosted result
+    vars:
+      query_result: '{{ (r_hosted.stdout | from_json) if r_hosted.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      hosted: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get NodePools
+    ansible.builtin.command: oc get nodepool -n {{ hcp_ns }} -o json
+    register: r_nodepools
+    changed_when: false
+    failed_when: false
+    when: order_name | length > 0
+  - name: Read nodepools result
+    vars:
+      query_result: '{{ (r_nodepools.stdout | from_json) if r_nodepools.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      nodepools: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get the worker Agent
+    ansible.builtin.command: oc get agent {{ agent_name }} -n {{ osac_namespace }} -o json
+    register: r_agent
+    changed_when: false
+    failed_when: false
+    when: agent_name | length > 0
+  - name: Read agent result
+    vars:
+      query_result: '{{ (r_agent.stdout | from_json) if r_agent.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      agent: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get hosted API service
+    ansible.builtin.command: oc get svc kube-apiserver -n {{ hcp_ns }}-{{ order_name }} -o json
+    register: r_api_service
+    changed_when: false
+    failed_when: false
+    when: order_name | length > 0
+  - name: Read api_service result
+    vars:
+      query_result: '{{ (r_api_service.stdout | from_json) if r_api_service.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      api_service: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get hosted admin kubeconfig
+    ansible.builtin.command: oc get secret {{ order_name }}-admin-kubeconfig -n {{ hcp_ns }} -o json
+    register: r_admin_secret
+    changed_when: false
+    failed_when: false
+    when: order_name | length > 0
+    no_log: true
+  - name: Read admin_secret result
+    vars:
+      query_result: '{{ (r_admin_secret.stdout | from_json) if r_admin_secret.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      admin_secret: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+    no_log: true
+  - name: Read API VIP
+    ansible.builtin.set_fact:
+      api_vip: '{{ (api_service.get(''status'', {}).get(''loadBalancer'', {}).get(''ingress'', []) | first | default({})).get(''ip'',
+        '''') }}'
+  - name: Create hosted kubeconfig directory
+    ansible.builtin.file:
+      path: /tmp/{{ order_name }}
+      state: directory
+      mode: '0700'
+    when: admin_secret.get('data', {}).get('kubeconfig', '') | length > 0
+    changed_when: false
+  - name: Save hosted admin kubeconfig on bastion
+    ansible.builtin.copy:
+      content: '{{ admin_secret.get(''data'', {}).get(''kubeconfig'', '''') | b64decode }}'
+      dest: /tmp/{{ order_name }}/kubeconfig
+      mode: '0600'
+    when: admin_secret.get('data', {}).get('kubeconfig', '') | length > 0
+    no_log: true
+    changed_when: false
+  - name: Get hosted worker nodes
+    ansible.builtin.command: oc --kubeconfig=/tmp/{{ order_name }}/kubeconfig --server=https://{{ api_vip }}:6443
+      --insecure-skip-tls-verify get nodes -o json
+    register: r_nodes
+    changed_when: false
+    failed_when: false
+    when: api_vip | length > 0 and admin_secret.get('data', {}).get('kubeconfig', '') | length > 0
+  - name: Read nodes result
+    vars:
+      query_result: '{{ (r_nodes.stdout | from_json) if r_nodes.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      nodes: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get published API route
+    ansible.builtin.command: oc get route api-{{ order_name }} -n osac-hosted-access -o json
+    register: r_api_route
+    changed_when: false
+    failed_when: false
+    when: order_name | length > 0
+  - name: Read api_route result
+    vars:
+      query_result: '{{ (r_api_route.stdout | from_json) if r_api_route.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      api_route: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Get published console route
+    ansible.builtin.command: oc get route console-{{ order_name }} -n osac-hosted-access -o json
+    register: r_console_route
+    changed_when: false
+    failed_when: false
+    when: order_name | length > 0
+  - name: Read console_route result
+    vars:
+      query_result: '{{ (r_console_route.stdout | from_json) if r_console_route.rc | default(1) == 0 else {} }}'
+    ansible.builtin.set_fact:
+      console_route: '{{ query_result if query_result is mapping else (query_result | first | default({})) }}'
+  - name: Check console over trusted TLS
+    ansible.builtin.uri:
+      url: https://{{ console_route.get('spec', {}).get('host', '') }}/
+      validate_certs: true
+      timeout: 20
+    when: console_route.get('spec', {}).get('host', '') | length > 0
+    register: r_console
+    failed_when: false
+  - name: Build task results
+    ansible.builtin.set_fact:
+      module03_checks:
+        Cluster fulfillment uses dns.noop and a hosted base domain: '{{ config.get(''data'', {}).get(''DNS_CLASS'',
+          '''') == ''dns.noop.dns'' and config.get(''data'', {}).get(''HOSTED_CLUSTER_BASE_DOMAIN'', '''') | length
+          > 0 }}'
+        Master and worker guest routes are installed and pools are Updated: '{{ machineconfigs.get(''items'', [])
+          | map(attribute=''metadata.name'') | intersect([''99-master-osac-guest-route'', ''99-worker-osac-guest-route''])
+          | length == 2 and pools.get(''items'', []) | selectattr(''metadata.name'', ''in'', [''master'', ''worker''])
+          | map(attribute=''status.conditions'') | flatten | selectattr(''type'', ''equalto'', ''Updated'') | selectattr(''status'',
+          ''equalto'', ''True'') | list | length == 2 }}'
+        Metal3 watches all namespaces: '{{ provisioning.get(''spec'', {}).get(''watchAllNamespaces'', false) | bool
+          }}'
+        Lab BareMetalHost is provisioned through Redfish: '{{ bmh.get(''status'', {}).get(''provisioning'', {}).get(''state'',
+          '''') == ''provisioned'' and bmh.get(''spec'', {}).get(''bootMACAddress'', '''') == vm_mac and ''redfish-virtualmedia''
+          in bmh.get(''spec'', {}).get(''bmc'', {}).get(''address'', '''') }}'
+        Bare-metal instance type is registered: '{{ r_bmit.rc == 0 and bmit.get(''metadata'', {}).get(''name'',
+          '''') == bmit_name }}'
+        Platform RHCOS disk image is AVAILABLE: '{{ r_diskimage.rc == 0 and ''AVAILABLE'' in diskimage.get(''spec'',
+          {}).get(''lifecycle'', '''') }}'
+        OpenShift version is registered: '{{ r_versions.rc == 0 and ocp_version in r_versions.stdout }}'
+        Hosted cluster catalog item is published: '{{ r_catalog.rc == 0 and catalog.get(''published'', false) |
+          bool }}'
+        Alice cluster and its matching ClusterOrder are Ready: '{{ r_cluster.rc == 0 and ''READY'' in cluster.get(''status'',
+          {}).get(''state'', '''') and order.get(''status'', {}).get(''phase'', '''') == ''Ready'' }}'
+        HostedCluster is Available: '{{ hosted.get(''status'', {}).get(''conditions'', []) | selectattr(''type'',
+          ''equalto'', ''Available'') | selectattr(''status'', ''equalto'', ''True'') | list | length > 0 }}'
+        Worker Agent completed installation: '{{ agent.get(''status'', {}).get(''progress'', {}).get(''currentStage'',
+          '''') == ''Done'' }}'
+        Hosted NodePool requests one worker: '{{ nodepools.get(''items'', []) | selectattr(''spec.clusterName'',
+          ''equalto'', order_name) | selectattr(''spec.replicas'', ''equalto'', 1) | list | length > 0 }}'
+        Hosted admin kubeconfig is available: '{{ admin_secret.get(''data'', {}).get(''kubeconfig'', '''') | length
+          > 0 }}'
+        Hosted cluster has a Ready worker: '{{ nodes.get(''items'', []) | map(attribute=''status.conditions'', default=[])
+          | flatten | selectattr(''type'', ''equalto'', ''Ready'') | selectattr(''status'', ''equalto'', ''True'')
+          | list | length > 0 }}'
+        Hosted API route is admitted: '{{ api_route.get(''status'', {}).get(''ingress'', []) | map(attribute=''conditions'',
+          default=[]) | flatten | selectattr(''type'', ''equalto'', ''Admitted'') | selectattr(''status'', ''equalto'',
+          ''True'') | list | length > 0 }}'
+        Hosted console is reachable with trusted TLS: '{{ r_console.status | default(0) == 200 }}'
+  - name: Validate all tasks
+    delegate_to: localhost
+    validation_check:
+      check: '{{ module03_checks.values() | reject(''equalto'', true) | list | length == 0 }}'
+      pass_msg: 'All Module 03 checks passed: Metal3 host, catalog, hosted cluster, worker, and public access.'
+      error_msg: '{% for name, passed in module03_checks.items() %}
 
-    # -------------------------------------------------------
-    # Pre-flight — Login as platform admin
-    # -------------------------------------------------------
-    - name: Login as platform admin
-      ansible.builtin.shell: >-
-        osac --config "$HOME/admin" login --insecure --private
-        --issuer="{{ keycloak_url }}/realms/osac"
-        --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
-        {{ fulfillment_api_url }}
-      changed_when: false
-      ignore_errors: true
+        {{ ''ok'' if passed else ''FAIL'' }}: {{ name }}
 
-    # -------------------------------------------------------
-    # Check 1 — Tenant sai-corp CR is Ready with local storage tier
-    # (storage backend, tier, and the per-tenant storage class are provisioned
-    #  by the platform — the tenant CR is where that shows up)
-    # -------------------------------------------------------
-    - name: Check Tenant sai-corp CR phase and storage tiers
-      ansible.builtin.shell: >-
-        oc get tenant {{ tenant_name }} -n {{ osac_namespace }}
-        -o jsonpath='{.status.phase} {.status.storageClasses}'
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
-      register: r_tenant
-      changed_when: false
-      ignore_errors: true
+        {% endfor %}
 
-    # -------------------------------------------------------
-    # Check 2 — Disk image 'fedora' is AVAILABLE
-    # -------------------------------------------------------
-    - name: Check disk image fedora is AVAILABLE
-      ansible.builtin.shell: >-
-        osac --config "$HOME/admin" get diskimage {{ disk_image_name }} -o json
-      register: r_diskimage
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Check 3 — Instance type 'small-1-2' is ACTIVE
-    # -------------------------------------------------------
-    - name: Check instance type small-1-2 is ACTIVE
-      ansible.builtin.shell: >-
-        osac --config "$HOME/admin" get instancetype {{ instance_type_name }} -o json
-      register: r_instancetype
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Check 4 — Catalog item 'standard-linux-vm' is published
-    # -------------------------------------------------------
-    - name: Check catalog item standard-linux-vm is published
-      ansible.builtin.shell: |
-        osac --config "$HOME/admin" get computeinstancecatalogitem {{ catalog_item_name }} -o json |
-        python3 -c "import json,sys; d=json.load(sys.stdin); print('OK' if d.get('published') else 'FAIL')"
-      register: r_catalog
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Pre-flight — Login as Alice for networking and VM checks (once)
-    # -------------------------------------------------------
-    - name: Login as Alice via device flow (once, idempotent)
-      ansible.builtin.shell: >-
-        {{ device_login_script }}
-        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "alice" "{{ osac_user_password }}"
-        "$HOME/alice"
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Check 5 — Virtual network, subnet, and security group are READY
-    # -------------------------------------------------------
-    - name: Check virtual network READY state
-      ansible.builtin.shell: osac --config "$HOME/alice" get virtualnetwork
-      register: r_vnet
-      changed_when: false
-      ignore_errors: true
-
-    - name: Check subnet default-ipv4 READY state
-      ansible.builtin.shell: >-
-        osac --config "$HOME/alice" get subnet default-ipv4 -o json
-      register: r_subnet
-      changed_when: false
-      ignore_errors: true
-
-    - name: Check security group default READY state
-      ansible.builtin.shell: >-
-        osac --config "$HOME/alice" get securitygroup default -o json
-      register: r_sg
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Check 6 — portal-vm compute instance is RUNNING
-    # -------------------------------------------------------
-    - name: Check portal-vm compute instance state
-      ansible.builtin.shell: >-
-        osac --config "$HOME/alice" get computeinstance portal-vm -o json
-      register: r_vm_osac
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Check 7 — VirtualMachine resource is Running on the cluster
-    # -------------------------------------------------------
-    - name: Check VirtualMachine Running status in OCP
-      ansible.builtin.shell: >-
-        oc get vm -n {{ tenant_name }} -o jsonpath='{.items[*].status.printableStatus}'
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
-      register: r_vm_k8s
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Check 8 — DataVolume for portal-vm has Succeeded
-    # -------------------------------------------------------
-    - name: Check DataVolume Succeeded phase in OCP
-      ansible.builtin.shell: >-
-        oc get dv -n {{ tenant_name }} -o jsonpath='{.items[*].status.phase}'
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
-      register: r_dv
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Pre-flight — Login as Bob for RBAC verification (once)
-    # -------------------------------------------------------
-    - name: Login as Bob via device flow (once, idempotent)
-      ansible.builtin.shell: >-
-        {{ device_login_script }}
-        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "bob" "{{ osac_user_password }}"
-        "$HOME/bob"
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Check 9 — Bob (viewer) can list compute instances and see portal-vm
-    # -------------------------------------------------------
-    - name: Check Bob can list compute instances
-      ansible.builtin.shell: osac --config "$HOME/bob" get computeinstance
-      register: r_bob_list
-      changed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Check 10 — Bob cannot administer the tenant (PermissionDenied)
-    #
-    # Read-only on purpose. Bob's project membership gives him authority over
-    # workloads inside his project, so delete/create attempts against portal-vm
-    # SUCCEED — they would destroy state module 4 needs or leave a stray VM.
-    # `get users` is a tenant-level operation his membership does not reach.
-    # -------------------------------------------------------
-    - name: Check Bob cannot list tenant users
-      ansible.builtin.shell: osac --config "$HOME/bob" get users
-      register: r_bob_users
-      changed_when: false
-      failed_when: false
-      ignore_errors: true
-
-    # -------------------------------------------------------
-    # Build task results
-    # -------------------------------------------------------
-    - name: Build task results
-      ansible.builtin.set_fact:
-        _task1_ok: >-
-          {{ r_tenant.rc | default(1) == 0 and
-             'Ready' in (r_tenant.stdout | default('')) and
-             'local' in (r_tenant.stdout | default('')) }}
-        _task2_ok: >-
-          {{ r_diskimage.rc | default(1) == 0 and
-             'AVAILABLE' in (r_diskimage.stdout | default('')) }}
-        _task3_ok: >-
-          {{ r_instancetype.rc | default(1) == 0 and
-             'ACTIVE' in (r_instancetype.stdout | default('')) }}
-        _task4_ok: >-
-          {{ 'OK' in (r_catalog.stdout | default('')) }}
-        _task5_ok: >-
-          {{ r_vnet.rc | default(1) == 0 and 'READY' in (r_vnet.stdout | default('')) and
-             r_subnet.rc | default(1) == 0 and 'READY' in (r_subnet.stdout | default('')) and
-             r_sg.rc | default(1) == 0 and 'READY' in (r_sg.stdout | default('')) }}
-        _task6_ok: >-
-          {{ r_vm_osac.rc | default(1) == 0 and
-             'RUNNING' in (r_vm_osac.stdout | default('')) }}
-        _task7_ok: >-
-          {{ 'Running' in (r_vm_k8s.stdout | default('')) }}
-        _task8_ok: >-
-          {{ 'Succeeded' in (r_dv.stdout | default('')) }}
-        _task9_ok: >-
-          {{ r_bob_list.rc | default(1) == 0 and
-             'portal-vm' in (r_bob_list.stdout | default('')) }}
-        _task10_ok: >-
-          {{ 'PermissionDenied' in (r_bob_users.stderr | default('')) or
-             'PermissionDenied' in (r_bob_users.stdout | default('')) }}
-
-    # -------------------------------------------------------
-    # Validate all tasks
-    # -------------------------------------------------------
-    - name: Validate all tasks
-      validation_check:
-        check: >-
-          {{ _task1_ok and
-             _task2_ok and _task3_ok and _task4_ok and _task5_ok and
-             _task6_ok and _task7_ok and _task8_ok and _task9_ok and
-             _task10_ok }}
-        pass_msg: |
-          ✅ Task 1: Tenant sai-corp CR is Ready with the platform-provisioned local storage tier
-          ✅ Task 2: Disk image 'fedora' is AVAILABLE
-          ✅ Task 3: Instance type 'small-1-2' is ACTIVE
-          ✅ Task 4: Catalog item 'standard-linux-vm' is published
-          ✅ Task 5: Virtual network, subnet default-ipv4, and security group default are all READY
-          ✅ Task 6: portal-vm compute instance is RUNNING
-          ✅ Task 7: VirtualMachine resource is Running on the cluster
-          ✅ Task 8: DataVolume for portal-vm has Succeeded
-          ✅ Task 9: Bob can list compute instances and see portal-vm in his project
-          ✅ Task 10: Bob cannot list tenant users — PermissionDenied enforced
-        error_msg: |
-          {{ '✅' if _task1_ok else '❌' }} Task 1: Tenant sai-corp Ready with local tier — \
-          {{ 'ok' if _task1_ok else 'FAILED — the platform provisions this; check: oc get tenant sai-corp -n osac -o yaml and oc get sc | grep osac-sai-corp' }}
-          {{ '✅' if _task2_ok else '❌' }} Task 2: Disk image 'fedora' AVAILABLE — \
-          {{ 'ok' if _task2_ok else 'FAILED — image still importing or not created; check: osac --config $HOME/admin get diskimage fedora' }}
-          {{ '✅' if _task3_ok else '❌' }} Task 3: Instance type 'small-1-2' ACTIVE — \
-          {{ 'ok' if _task3_ok else 'FAILED — create it: osac --config $HOME/admin create instancetype --name small-1-2 --vcpus 1 --memory-gib 2' }}
-          {{ '✅' if _task4_ok else '❌' }} Task 4: Catalog item 'standard-linux-vm' published — \
-          {{ 'ok' if _task4_ok else 'FAILED — create and publish: osac --config $HOME/admin create -f ~/yaml/standard-linux-vm.yaml' }}
-          {{ '✅' if _task5_ok else '❌' }} Task 5: Networking READY — \
-          {{ 'ok' if _task5_ok else 'FAILED — log in as Alice and check: osac --config $HOME/alice get virtualnetwork; osac --config $HOME/alice get subnet default-ipv4; wait for READY' }}
-          {{ '✅' if _task6_ok else '❌' }} Task 6: portal-vm RUNNING — \
-          {{ 'ok' if _task6_ok else 'FAILED — VM still starting; DataVolume import can take 5-10 minutes — click Validate again shortly' }}
-          {{ '✅' if _task7_ok else '❌' }} Task 7: VirtualMachine Running on cluster — \
-          {{ 'ok' if _task7_ok else 'FAILED — check: oc get vm -n sai-corp; the VM starts once its boot disk DataVolume has imported' }}
-          {{ '✅' if _task8_ok else '❌' }} Task 8: DataVolume Succeeded — \
-          {{ 'ok' if _task8_ok else 'FAILED — DataVolume still importing; wait 5-10 minutes and click Validate again; check: oc get dv -n sai-corp' }}
-          {{ '✅' if _task9_ok else '❌' }} Task 9: Bob can list compute instances — \
-          {{ 'ok' if _task9_ok else 'FAILED — ensure Bob has a VIEWER ProjectMembership in sai-corp; check as Alice: osac --config $HOME/alice get projectmembership' }}
-          {{ '✅' if _task10_ok else '❌' }} Task 10: Bob cannot list tenant users — \
-          {{ 'ok' if _task10_ok else 'FAILED — Bob should receive PermissionDenied on get users; verify he has no tenant-admin RoleBinding' }}
+        '
+    register: r_validate
+    ignore_errors: true
+  - name: Show validation results
+    ansible.builtin.debug:
+      msg: '{{ r_validate.msg }}'
+  - name: Fail if validation did not pass
+    ansible.builtin.fail:
+      msg: One or more validation checks failed — see results above
+    when: r_validate.failed | default(false)

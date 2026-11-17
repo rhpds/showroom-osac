@@ -1,23 +1,16 @@
 = Conclusion and Next Steps
 
-Congratulations! You've completed Introduction to Red Hat cloud extensions.
+Congratulations! You've completed the four core modules of Introduction to Red Hat cloud extensions.
 
 When you started, Sovereign Cloud Corp had a freshly deployed platform and a mission from leadership: run a sovereign cloud on OpenShift that serves multiple government tenants, provisions workloads through a service catalog, and ties every user back to a trusted identity provider. That mission is now done.
 
-SAI Corp, your first government agency client, has its own isolated tenant. Its employees sign in through their corporate identity provider, and nobody on your team had to hand out a platform password. Alice runs the tenant. Bob can see what's deployed but can't change it. When SAI Corp's teams need a virtual machine or a full OpenShift cluster, they order one from the catalog. They don't file a ticket, and every request flows through the same auditable fulfillment process your compliance team signed off on.
+SAI Corp, your first government agency client, has its own isolated tenant. Its employees sign in through their corporate identity provider, and nobody on your team had to hand out a platform password. Alice runs the tenant. Bob can see what's deployed but can't change it. When SAI Corp's teams need a virtual machine, a full OpenShift cluster, or a dedicated server, they order one from the catalog. They don't file a ticket, and every request flows through the same auditable fulfillment process your compliance team signed off on.
+
+Platform exploration in Module 5 is fully optional. If you skipped it, your core workshop is still complete. You can visit xref:module-05-platform-overview.adoc[Module 5] whenever you want a closer look at platform health and architecture.
 
 == What you've learned
 
-=== Module 1: Exploring the Red Hat cloud extensions Platform
-
-You started by getting to know the platform before trusting it with tenants.
-
-* Verified that all Red Hat cloud extensions operators, CSVs, and pods are healthy in the `osac` namespace
-* Navigated the Red Hat cloud extensions web UI and found the Tenants, Catalog, Projects, Infrastructure, and Networking sections
-* Examined the `osac` Keycloak realm that governs tenant identity
-* Inspected the Kafka cluster, its topics, and its users to confirm the event backbone is healthy
-
-=== Module 2: Tenant Onboarding and Identity Management
+=== Module 1: Tenant Onboarding and Identity Management
 
 You onboarded SAI Corp and proved that access control holds.
 
@@ -27,7 +20,7 @@ You onboarded SAI Corp and proved that access control holds.
 * Assigned tenant-wide authority with a RoleBinding and project-scoped access with a ProjectMembership
 * Confirmed both boundaries: Bob cannot administer the tenant without a RoleBinding, and cannot reach a project he is not a member of
 
-=== Module 3: Virtual Machine as a Service (VMaaS)
+=== Module 2: Virtual Machine as a Service (VMaaS)
 
 You gave SAI Corp self-service compute.
 
@@ -37,7 +30,7 @@ You gave SAI Corp self-service compute.
 * Deployed a virtual machine from the catalog as Alice, the tenant administrator
 * Verified that Bob can see the VM in his project but cannot publish catalog items or define instance types
 
-=== Module 4: Cluster as a Service (CaaS)
+=== Module 3: Cluster as a Service (CaaS)
 
 You let SAI Corp order entire OpenShift clusters.
 
@@ -48,18 +41,38 @@ You let SAI Corp order entire OpenShift clusters.
 * Watched a HyperShift hosted control plane come up on the hub, with its worker node running on the bare-metal host
 * Published the hosted cluster's API and console through the hub router and logged in to it
 
+=== Module 4: Bare Metal as a Service (BMaaS)
+
+You gave SAI Corp control over a dedicated server's lifecycle.
+
+* Registered separate BMaaS capacity and used a hardware selector to keep it separate from CaaS workers
+* Published a `BareMetalInstanceCatalogItem` and reused the shared RHCOS image
+* Ordered a standalone server as Alice and traced its API ID to the hub instance and claimed host
+* Connected to RHCOS using Alice's SSH key through the BMF host
+* Halted and restarted the server through the tenant API, checking both requested and actual power
+* Optionally released the instance and verified that its host returned to available inventory
+
+=== Optional Module 5: Exploring the Red Hat cloud extensions Platform
+
+If you chose the optional exploration, you examined the services behind the core workflows:
+
+* Verified that all Red Hat cloud extensions operators, CSVs, and pods are healthy in the `osac` namespace
+* Navigated the Red Hat cloud extensions web UI and found the Tenants, Catalog, Projects, Infrastructure, and Networking sections
+* Examined the `osac` Keycloak realm that governs tenant identity
+* Inspected the Kafka cluster, its topics, and its users to confirm the event backbone is healthy
+
 == Key takeaways
 
 * *One platform, three layers*: Every operation in Red Hat cloud extensions flows through identity (Keycloak), orchestration (the `osac` operator and fulfillment service), and messaging (Kafka). When something breaks, start by checking those three.
 * *Tenants are provisioned, not assembled*: One create operation gives a tenant its Keycloak organization, namespace, default network, and emergency access. Your team doesn't have to wire those together by hand for each new client.
 * *Identity stays with the customer*: Federated SSO means tenant users authenticate against their own identity provider. That matters a lot to a government client that has to prove who accessed what.
 * *Platform admins define, tenant admins consume*: You decide which storage, images, sizes, OpenShift versions, and templates exist. Tenants decide what to deploy from that menu. You keep control of what's offered, and tenants get on with their work.
-* *One RBAC model covers everything*: The same RoleBindings and ProjectMemberships that govern projects also govern virtual machines and clusters. A RoleBinding grants authority across the tenant; a ProjectMembership grants it inside one project and nowhere else.
+* *One RBAC model covers everything*: The same RoleBindings and ProjectMemberships that govern projects also govern virtual machines, clusters, and bare-metal instances. A RoleBinding grants authority across the tenant; a ProjectMembership grants it inside one project and nowhere else.
 * *The catalog hides the implementation*: Tenants order by catalog item name. You can change the hardware profile, template, or OpenShift version behind it without changing what tenants see.
 
 [NOTE]
 ====
-Some of the steps in Module 4, such as the DNS entries, the `providerID` patch, and publishing routes through the hub, were only needed because this lab uses the `noop` DNS driver and a worker on a private libvirt network. On a platform with a real DNS integration and a routed provisioning network, a cluster order goes from request to `Ready` without manual intervention.
+Some of the steps in Module 3, such as the DNS entries, the `providerID` patch, and publishing routes through the hub, were only needed because this lab uses the `noop` DNS driver and a worker on a private libvirt network. On a platform with a real DNS integration and a routed provisioning network, a cluster order goes from request to `Ready` without manual intervention.
 ====
 
 == Next steps
@@ -69,8 +82,8 @@ Here are some ways to keep building on what you did today:
 * *Add a second tenant*: Onboard another agency with its own identity provider and check that it can't see SAI Corp's projects, VMs, or clusters.
 * *Grow the catalog*: Add more instance types and disk images, and publish catalog items for different VM sizes and operating systems.
 * *Offer more cluster versions*: Publish catalog items that point at different `ClusterVersion` objects, so tenants can choose between OpenShift releases.
-* *Automate onboarding*: Script the tenant, identity provider, RoleBinding, and ProjectMembership steps from Module 2 with the `osac` CLI so a new agency can be onboarded in one run.
-* *Watch the event stream*: Go back to the Kafka topics from Module 1 and look at the events your catalog orders produced.
+* *Automate onboarding*: Script the tenant, identity provider, RoleBinding, and ProjectMembership steps from Module 1 with the `osac` CLI so a new agency can be onboarded in one run.
+* *Watch the event stream*: Use xref:module-05-platform-overview.adoc[optional Module 5] to inspect Kafka topics, then explore the events your catalog orders produced.
 
 == References
 

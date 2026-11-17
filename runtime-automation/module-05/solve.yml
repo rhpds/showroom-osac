@@ -1,0 +1,10 @@
+---
+# Optional Module 5: Exploring the Red Hat cloud extensions Platform — solve tasks
+# Generate with: /ftl:rhdp-lab-validator
+- name: Optional Module 05 - Platform exploration solve placeholder
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Placeholder
+      ansible.builtin.debug:
+        msg: "Optional Module 5 is read-only. Follow the exploration exercises or run its validator."
