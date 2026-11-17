@@ -1489,13 +1489,11 @@ If you want to skip the exercises, click the *Solve* button below. This provisio
 <div class="solve-button-placeholder" data-module="module-04"></div>
 ++++
 
-////
 == Validate your work
 
 ++++
 <div class="validate-button-placeholder" data-module="module-04"></div>
 ++++
-////
 
 == Module summary
 
