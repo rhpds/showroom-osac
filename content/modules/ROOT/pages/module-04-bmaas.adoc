@@ -212,6 +212,12 @@ spec:
 EOF
 ----
 +
+.Sample output
+----
+secret/virtual-bmh-2-bmc-secret created
+baremetalhost.metal3.io/virtual-bmh-2 created
+----
++
 The `bmaas` label reserves this capacity for the instance type you will define next. The host belongs in `osac`, where the lab's Metal3 inventory looks for it.
 +
 [NOTE]
@@ -226,7 +232,7 @@ This simulated host uses `automatedCleaningMode: disabled` to avoid an extra IPA
 oc get bmh virtual-bmh-2 -n osac -w
 ----
 +
-Press kbd:[Ctrl+C] once the host reaches `available`. Inspection can take several minutes.
+Press kbd:[Ctrl+C] once the host reaches `available`. Inspection can take several minutes. The host progresses from `inspecting` -> `preparing` -> `available`.
 
 . Confirm the host is healthy and unclaimed:
 +
@@ -272,6 +278,11 @@ osac --config "$HOME/admin" create baremetalinstancetype \
   --host-label osac.openshift.io/host-type=bmaas
 ----
 +
+.Sample output
+----
+Created bare metal instance type 'c1-bmaas-amd64'.
+----
++
 The selector must match the new host's `bmaas` label. This separate profile keeps a BMaaS order from claiming free CaaS inventory with `host-type=default`.
 
 . Check the shared RHCOS image:
@@ -281,7 +292,27 @@ The selector must match the new host's `bmaas` label. This separate profile keep
 osac --config "$HOME/admin" get diskimage rhcos-4-22 -o yaml
 ----
 +
-The lab normally provides this image. If it is absent, create it once:
+.Sample output
+----
+'@type': type.googleapis.com/osac.private.v1.DiskImage
+id: 01a1e9d4-98e6-739f-bbcb-582bc7201e82
+metadata:
+  creation_timestamp: "2026-11-17T14:06:26.532027Z"
+  creator: system
+  name: rhcos-4-22
+  tenant: shared
+spec:
+  architecture:
+    - ARCHITECTURE_AMD64
+  guest_os_family: GUEST_OS_FAMILY_LINUX
+  lifecycle: DISK_IMAGE_LIFECYCLE_AVAILABLE
+  source_ref: oci://quay.io/osac-project/rhcos:4.22.0
+  source_type: SOURCE_TYPE_REGISTRY
+----
++
+Before ordering, check that its lifecycle is `DISK_IMAGE_LIFECYCLE_AVAILABLE`.
++
+The lab normally provides this image. *If it is absent*, create it once:
 +
 [source,role=execute]
 ----
@@ -292,13 +323,21 @@ osac --config "$HOME/admin" create diskimage \
   --architecture amd64
 ----
 +
-Before ordering, check that its lifecycle is `DISK_IMAGE_LIFECYCLE_AVAILABLE`. Reuse the image if it already exists from Module 3.
+.Sample output
+----
+Created disk image 'rhcos-4-22'.
+----
 
 . List the BMaaS catalog:
 +
 [source,role=execute]
 ----
 osac --config "$HOME/admin" get baremetalinstancecatalogitems
+----
++
+.Sample output
+----
+There are no objects matching the given criteria.
 ----
 +
 If `demo-bm-default` is absent, publish it:
@@ -311,8 +350,36 @@ osac --config "$HOME/admin" create baremetalinstancecatalogitem \
   --description "Metal3-managed dedicated server" \
   --template osac.templates.bm_host_provisioning \
   --published
+----
++
+.Sample output
+----
+Created bare metal instance catalog item '01a1e9ee-a6a9-7075-86ce-1596244fc270'.
+----
 
+. Validate that the catalog item is published and references the correct template:
++
+[source,role=execute]
+----
 osac --config "$HOME/admin" get baremetalinstancecatalogitem demo-bm-default -o yaml
+----
++
+.Sample output
+----
+'@type': type.googleapis.com/osac.private.v1.BareMetalInstanceCatalogItem
+description: Metal3-managed dedicated server
+id: 01a1e9ee-a6a9-7075-86ce-1596244fc270
+metadata:
+  creation_timestamp: "2026-11-17T14:34:53.987963Z"
+  creator: wkadmin
+  name: demo-bm-default
+  tenant: shared
+published: true
+template:
+  id: osac.templates.bm_host_provisioning
+  name: bm-host-provisioning
+  shared: true
+title: Demo Bare Metal Host
 ----
 +
 Check that `published: true` and the template references `osac.templates.bm_host_provisioning`.
@@ -342,13 +409,19 @@ osac --config "$HOME/alice" login --insecure --flow=device \
   "{osac_fulfillment_internal_api_url}"
 ----
 +
-Open the verification URL, enter the displayed code, and sign in through SAI Corp's identity provider as `alice`, using the user password `{osac_user_password}`. Then run `whoami` again to verify the tenant and role.
+Open the verification URL *in a private browser window*, enter the displayed code, and sign in through SAI Corp's identity provider as `alice`, using the user password `{osac_user_password}`. Then run `whoami` again to verify the tenant and role.
 
 . Confirm that Alice can see the offering:
 +
 [source,role=execute]
 ----
 osac --config "$HOME/alice" get baremetalinstancecatalogitems
+----
++
+.Sample output
+----
+TENANT  DELETING  ID                                    NAME             TITLE                 PUBLISHED
+shared  -         01a1e9ee-a6a9-7075-86ce-1596244fc270  demo-bm-default  Demo Bare Metal Host  true
 ----
 
 . Generate an SSH key if needed and check for an existing order:
@@ -360,6 +433,11 @@ cat ~/.ssh/id_ed25519.pub
 osac --config "$HOME/alice" get baremetalinstance sai-corp-bm-1 -o yaml
 ----
 +
+.Sample output
+----
+[]
+----
++
 If the instance already exists from your run, observe it instead of submitting another order.
 
 . Check how your CLI accepts an SSH key:
@@ -369,11 +447,23 @@ If the instance already exists from your run, observe it instead of submitting a
 osac create baremetalinstance --help | sed -n '/--ssh-key/,+3p'
 ----
 +
+.Sample output
+----
+--ssh-key NAME or name=<name>[,project=<project>] - Name of a registered SSH public-key Secret. A bare name selects the tenant's default project. Immutable after creation.
+
+--user-data DATA - User data passed to the OS at first boot (e.g. cloud-init). Maximum 64 KB. Immutable after creation.
+----
++
 The current CLI expects a registered `ssh-public-key` Secret. Look for an existing registration:
 +
 [source,role=execute]
 ----
 osac --config "$HOME/alice" get secret bmaas-ssh-key -o yaml
+----
++
+.Sample output
+----
+[]
 ----
 +
 If it is absent, register *only the public key* in Alice's tenant:
@@ -385,17 +475,17 @@ osac --config "$HOME/alice" create secret \
   --from-file=public_key="$HOME/.ssh/id_ed25519.pub"
 ----
 +
+.Sample output
+----
+Created secret 'bmaas-ssh-key' (ID: 01a1e9f1-9bba-75a8-9095-3b65e7cf189d).
+----
++
 Select the registered key for the order:
 +
 [source,role=execute]
 ----
 export BM_SSH_KEY=bmaas-ssh-key
 ----
-+
-[NOTE]
-====
-Older lab builds, including CLI `0.0.125`, accept inline public key text instead. If your help output describes `--ssh-key` as public key text rather than a Secret reference, skip the Secret registration and run `export BM_SSH_KEY="$(cat ~/.ssh/id_ed25519.pub)"`. The solve playbook detects the deployed interface automatically.
-====
 
 . Create an Ignition configuration for the RHCOS `core` account:
 +
@@ -412,6 +502,28 @@ config = {
 }
 (Path.home() / 'bmaas-ignition.json').write_text(json.dumps(config))
 PY
+
+cat "$HOME/bmaas-ignition.json" | jq 
+----
++
+.Sample output
+[source,json]
+----
+{
+  "ignition": {
+    "version": "3.4.0"
+  },
+  "passwd": {
+    "users": [
+      {
+        "name": "core",
+        "sshAuthorizedKeys": [
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINMZXEdg3A9lGfigORVZ/RvnJ25CWbIzT8x90mOqIBLr lab-user@bastion"
+        ]
+      }
+    ]
+  }
+}
 ----
 +
 RHCOS applies account configuration through *Ignition*. The BMaaS template puts the selected SSH key in Metal3 metadata, which alone does not configure RHCOS's `core` account. Passing this Ignition document as user data makes guest access part of the order.
@@ -431,7 +543,7 @@ osac --config "$HOME/alice" create baremetalinstance \
   --run-strategy Always
 ----
 +
-The explicit `instance_type.shared=true` identifies a platform-provided hardware profile; it also avoids the shared instance type error in affected CLI versions.
+The explicit `instance_type.shared=true` identifies a platform-provided hardware profile.
 
 . Watch the tenant instance and the underlying host:
 +
@@ -439,6 +551,16 @@ The explicit `instance_type.shared=true` identifies a platform-provided hardware
 ----
 osac --config "$HOME/alice" get baremetalinstances
 oc get bmh virtual-bmh-2 -n osac
+----
++
+.Sample output
+----
+TENANT    DELETING  ID                                    NAME           CATALOG ITEM     DISK IMAGE  STATE         INTERNAL IP
+sai-corp  -         01a1e9f3-4f4a-7546-b6a4-41a0a4998c8c  sai-corp-bm-1  demo-bm-default  rhcos-4-22  PROVISIONING  -
+
+
+NAME            STATE          CONSUMER                               ONLINE   ERROR   AGE
+virtual-bmh-2   provisioning   efecd512-78b1-4927-8939-6b1d81047308   true             22m
 ----
 +
 Repeat these commands until provisioning completes. The expected progression is:
@@ -451,7 +573,7 @@ Repeat these commands until provisioning completes. The expected progression is:
 |Host consumer |Empty → a reference to the claiming hub instance
 |===
 +
-Allow 10–30 minutes for inspection and provisioning, depending on image downloads. A successful order has a `RUNNING` tenant instance and a `provisioned` host with `ONLINE=true` and no error.
+Allow up to 10 minutes for inspection and provisioning, depending on image downloads. A successful order has a `RUNNING` tenant instance and a `provisioned` host with `ONLINE=true` and no error.
 +
 [WARNING]
 ====
@@ -464,7 +586,12 @@ Once the `BareMetalHost` is registered, let Metal3 manage the VM. Using `virsh d
 ----
 BMI_ID=$(osac --config "$HOME/alice" get baremetalinstance sai-corp-bm-1 -o json | jq -r '.id')
 oc get baremetalinstance -n osac \
-  -l "osac.openshift.io/baremetalinstance-uuid=${BMI_ID}" -o yaml
+  -l "osac.openshift.io/baremetalinstance-uuid=${BMI_ID}" -o yaml | grep externalHostID
+----
++
+.Sample output
+----
+    externalHostID: osac/virtual-bmh-2
 ----
 +
 Its `spec.externalHostID` should be `osac/virtual-bmh-2`. The BMH's consumer name corresponds to this hub object's Kubernetes *UID*, which differs from Alice's public API ID.
@@ -478,6 +605,11 @@ GUEST_IP=$(oc get bmh virtual-bmh-2 -n osac -o json | \
 echo "$GUEST_IP"
 ----
 +
+.Sample output
+----
+192.168.122.208
+----
++
 The OSAC list can leave `INTERNAL IP` empty on this simulated network. BMH inspection records the NIC address. If needed, check the current DHCP lease with `sudo ssh 10.10.10.2 virsh net-dhcp-leases default` and match the MAC.
 
 . Connect through the BMF host, which can reach the private libvirt network:
@@ -487,7 +619,20 @@ The OSAC list can leave `INTERNAL IP` empty on this simulated network. BMH inspe
 ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=accept-new \
   -o 'ProxyCommand=sudo ssh -W %h:%p root@10.10.10.2' \
-  core@"$GUEST_IP" 'hostname; cat /etc/os-release'
+  core@"$GUEST_IP" 'hostname; cat /etc/os-release | head -7'
+----
++
+.Sample output
+----
+Warning: Permanently added '192.168.122.208' (ED25519) to the list of known hosts.
+localhost.localdomain
+NAME="Red Hat Enterprise Linux CoreOS"
+VERSION="9.8.20260428-0 (Plow)"
+ID="rhel"
+ID_LIKE="fedora"
+VERSION_ID="9.8"
+PLATFORM_ID="platform:el9"
+PRETTY_NAME="Red Hat Enterprise Linux CoreOS 9.8.20260428-0 (Plow)"
 ----
 +
 Expect Red Hat Enterprise Linux CoreOS. This confirms the server booted its installed OS and accepted the key Alice supplied.
@@ -497,6 +642,10 @@ Expect Red Hat Enterprise Linux CoreOS. This confirms the server booted its inst
 *Role: Alice, SAI Corp tenant administrator*
 
 === Steps
+
+Currently there are no commands to start/stop/etc. a BareMetal Instance through the hub API. Instead, you edit the instance's `spec.run_strategy` field. 
+
+You could however use the web interface to change the run strategy, but this exercise demonstrates the same effect through the CLI.
 
 . Open the instance in your editor:
 +
@@ -513,7 +662,7 @@ spec:
   run_strategy: BARE_METAL_INSTANCE_RUN_STRATEGY_HALTED
 ----
 +
-Keep the remaining fields in the editor. There is no `--run-strategy` option on `osac edit`.
+Keep the remaining fields in the editor. Then exit the editor by pressing kbd:[Esc] or kbd:[:wq]. The hub API updates the instance and instructs Metal3 to halt the host.
 
 . Check the requested strategy and the actual host power:
 +
@@ -521,13 +670,21 @@ Keep the remaining fields in the editor. There is no `--run-strategy` option on 
 ----
 osac --config "$HOME/alice" get baremetalinstance sai-corp-bm-1 -o yaml | \
   grep -E 'run_strategy|state:'
+
 oc get bmh virtual-bmh-2 -n osac \
   -o jsonpath='online={.spec.online} poweredOn={.status.poweredOn}{"\n"}'
 ----
 +
+.Sample output
+----
+  run_strategy: BARE_METAL_INSTANCE_RUN_STRATEGY_HALTED
+  state: BARE_METAL_INSTANCE_STATE_STOPPED
+online=false poweredOn=false
+----
++
 Wait for both `online=false` and `poweredOn=false`, and for the instance to report `STOPPED` (`BARE_METAL_INSTANCE_STATE_STOPPED` in YAML). The host remains allocated and `provisioned`; halting does not release its disk or consumer.
 
-. Edit the instance again, restoring:
+. Edit the instance again, starting it again:
 +
 [source,yaml]
 ----
@@ -540,7 +697,46 @@ spec:
 osac --config "$HOME/alice" edit baremetalinstance sai-corp-bm-1
 ----
 
-. Repeat the power checks until `online=true`, `poweredOn=true`, and the instance is `RUNNING`. Repeat the SSH command from Exercise 4 to confirm the guest is accessible again.
+. Repeat the power checks until `online=true`, `poweredOn=true`, and the instance is `RUNNING`.
++
+[source,role=execute]
+----
+osac --config "$HOME/alice" get baremetalinstance sai-corp-bm-1 -o yaml | \
+  grep -E 'run_strategy|state:'
+
+oc get bmh virtual-bmh-2 -n osac \
+  -o jsonpath='online={.spec.online} poweredOn={.status.poweredOn}{"\n"}'
+----
++
+.Sample output
+----
+  run_strategy: BARE_METAL_INSTANCE_RUN_STRATEGY_ALWAYS
+  state: BARE_METAL_INSTANCE_STATE_RUNNING
+online=true poweredOn=true
+----
+
+. Repeat the SSH command to confirm the guest is accessible again.
++
+[source,role=execute]
+----
+ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=accept-new \
+  -o 'ProxyCommand=sudo ssh -W %h:%p root@10.10.10.2' \
+  core@"$GUEST_IP" 'hostname; cat /etc/os-release | head -7'
+----
++
+.Sample output
+----
+Warning: Permanently added '192.168.122.208' (ED25519) to the list of known hosts.
+localhost.localdomain
+NAME="Red Hat Enterprise Linux CoreOS"
+VERSION="9.8.20260428-0 (Plow)"
+ID="rhel"
+ID_LIKE="fedora"
+VERSION_ID="9.8"
+PLATFORM_ID="platform:el9"
+PRETTY_NAME="Red Hat Enterprise Linux CoreOS 9.8.20260428-0 (Plow)"
+----
 
 == Solve the module
 
@@ -593,33 +789,6 @@ Expect `virtual-bmh-2` to be `OK` / `available` with no consumer or error, and A
 The host can reach `available` before deletion finalizers clear its consumer. Wait for *both* the empty consumer and the absent tenant instance before placing another order.
 +
 The normal *Validate* button expects a running server and will fail after release. To return to that state, repeat the order and power exercises or click *Solve*. In a manual automation run, use `-e bmaas_expected_state=released` with the Module 4 validator to check the released state instead.
-
-== Troubleshooting
-
-[cols="1,2",options="header"]
-|===
-|Symptom |Check
-|BMaaS API or catalog is unavailable
-|Verify the BMaaS feature is enabled and `osac.templates.bm_host_provisioning` exists. Use the internal fulfillment API URL from the lab credentials.
-|`instance_type must set shared=true`
-|Use the explicit `--set instance_type.name=c1-bmaas-amd64` and `--set instance_type.shared=true` arguments from Exercise 4.
-|`SSH key Secret was not found or is not visible`
-|Register the key as Alice with type `ssh-public-key` and data key `public_key`, then pass its Secret name. The current CLI does not accept inline key text in `--ssh-key`.
-|No eligible host is allocated
-|Check that `virtual-bmh-2` is healthy, `available`, unclaimed, and labeled `host-type=bmaas`; the instance type must select the same label. Do not change CaaS host labels to satisfy the order.
-|Inspection fails with a UEFI or `InvalidAttributeError` message
-|Check the VM XML for `OVMF_CODE.fd`, without Secure Boot. Do not redefine a host owned by a live workload. Ask your instructor before changing an enrolled VM's firmware.
-|Host stays in `inspecting`
-|Check Sushy reachability, guest access to Ironic on `10.10.10.100:6385`, the IPA rootfs path on port `6180`, and outbound image access. See the networking checks in xref:module-03-caas.adoc[Module 3].
-|Host stays in `provisioning`
-|Check the hub route to `192.168.122.0/24` through the BMF host and the Ironic-to-IPA return path on TCP `9999`. Do not destroy the VM or submit duplicate orders.
-|SSH times out
-|Wait for actual power-on and guest boot. Check the boot NIC's current DHCP lease and use the BMF proxy command; the guest network is private.
-|SSH returns `Permission denied` for `core`
-|Check that the order included the Ignition user data from Exercise 4. The selected SSH key in Metal3 metadata alone does not configure RHCOS. User data is immutable: release your own instance and place a corrected order rather than editing the provisioned disk.
-|SSH reports a changed host key after reprovisioning
-|Verify that the IP and MAC belong to your reinstalled host. Remove that verified IP's stale entry with `ssh-keygen -R "$GUEST_IP"`, then reconnect and accept its new key.
-|===
 
 == Module summary
 
