@@ -227,6 +227,20 @@
         --source-type registry --source-ref oci://quay.io/osac-project/rhcos:4.22.0 --architecture amd64
       changed_when: true
 
+    - name: Wait for the shared RHCOS image to be available before ordering
+      ansible.builtin.command: >-
+        osac --config {{ config_admin }} get diskimage {{ bmaas_disk_image }} -o json
+      register: r_ready_image
+      changed_when: false
+      vars:
+        result: "{{ r_ready_image.stdout | from_json }}"
+        image: "{{ result if result is mapping else (result | first | default({})) }}"
+      until:
+        - image.get('metadata', {}).get('tenant', '') == 'shared'
+        - image.get('spec', {}).get('lifecycle', '') == 'DISK_IMAGE_LIFECYCLE_AVAILABLE'
+      retries: 30
+      delay: 10
+
     - name: Read BMaaS catalog item
       ansible.builtin.command: >-
         osac --config {{ config_admin }} get baremetalinstancecatalogitem {{ bmaas_catalog_item }} -o json

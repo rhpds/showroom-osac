@@ -86,6 +86,12 @@
              | selectattr('mac', 'equalto', bmaas_vm_mac) | selectattr('ip', 'defined')
              | rejectattr('ip', 'search', ':') | map(attribute='ip') | first | default('') }}
 
+    - name: Read the public key used for guest access
+      when: bmaas_expected_state == 'running'
+      ansible.builtin.slurp:
+        src: "{{ bastion_home }}/.ssh/id_ed25519.pub"
+      register: r_guest_key
+
     - name: Check guest access through BMF
       when:
         - bmaas_expected_state == 'running'
@@ -142,6 +148,12 @@
       vars:
         instance: "{{ bmaas_objects.instance }}"
         hub: "{{ bmaas_hubs | first | default({}) }}"
+        guest_public_key: "{{ r_guest_key.content | b64decode | trim }}"
+        ignition: "{{ instance.get('spec', {}).get('user_data_source', {}).get('inline', '{}') | from_json }}"
+        core_keys: >-
+          {{ ignition.get('passwd', {}).get('users', [])
+             | selectattr('name', 'defined') | selectattr('name', 'equalto', 'core')
+             | map(attribute='sshAuthorizedKeys', default=[]) | flatten }}
       ansible.builtin.set_fact:
         module04_checks: >-
           {{ module04_checks | combine({
@@ -159,9 +171,9 @@
               (bmaas_hubs | length == 1 and
                hub.get('spec', {}).get('externalHostID', '') == osac_namespace ~ '/' ~ bmaas_vm_name and
                hub.get('metadata', {}).get('annotations', {}).get('osac.openshift.io/tenant', '') == tenant_name),
-            'Order includes the expected registered SSH key or a legacy public key':
-              (instance.get('spec', {}).get('ssh_key', {}).get('name', '') == bmaas_ssh_key_secret or
-               instance.get('spec', {}).get('ssh_public_key', '') | length > 0),
+            'RHCOS Ignition configures core with the bastion public key':
+              (ignition.get('ignition', {}).get('version', '') == '3.4.0' and
+               guest_public_key | length > 0 and guest_public_key in core_keys),
             'RHCOS first-boot user data is attached to the host':
               (bmaas_host.get('spec', {}).get('userData', {}).get('name', '') | length > 0),
             'Provisioned host is claimed by that hub instance UID':

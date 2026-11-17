@@ -84,6 +84,9 @@ the CLI configs. It verifies current power and ownership, while the solver
 also waits for both lifecycle transitions. A validation snapshot does not
 prove a previous power cycle. Module 4 uses built-in Ansible assertions and
 reports each failed check without requiring the `validation_check` plugin.
+For RHCOS, it checks that Ignition configures `core` with the bastion public
+key and verifies SSH with that key. User data can supply authentication
+without a separate SSH-key reference in the instance API response.
 
 BMaaS standalone verification (2026-11-17, RHDP `cluster-ndhm9`, CLI
 `0.0.134`) passed real host inspection, provisioning, SSH before and after

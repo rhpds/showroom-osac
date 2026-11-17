@@ -90,13 +90,13 @@ watchAllNamespaces=true
 [source,role=execute]
 ----
 oc get bmh -n osac \
-  -o custom-columns=NAME:.metadata.name,STATUS:.status.operationalStatus,STATE:.status.provisioning.state,HOST-TYPE:.metadata.labels.osac\.openshift\.io/host-type,CONSUMER:.spec.consumerRef.name,ONLINE:.spec.online,ERROR:.status.errorMessage
+  -o 'custom-columns=NAME:.metadata.name,STATUS:.status.operationalStatus,STATE:.status.provisioning.state,HOST-TYPE:.metadata.labels.osac\.openshift\.io/host-type,CONSUMER:.spec.consumerRef.name,ONLINE:.spec.online,ERROR:.status.errorMessage'
 ----
 +
 .Sample output (if you completed Module 3)
 ----
 NAME            STATUS   STATE         HOST-TYPE   CONSUMER                               ONLINE   ERROR
-virtual-bmh-1   OK       provisioned   <none>      b387efac-f0fe-448e-991d-169642212c7a   true     
+virtual-bmh-1   OK       provisioned   default     b387efac-f0fe-448e-991d-169642212c7a   true
 ----
 +
 If you completed Module 3, `virtual-bmh-1` is already provisioned for CaaS. Leave its consumer, labels, and power settings intact. This module uses a different VM, MAC address, and host selector:
@@ -154,7 +154,7 @@ virt-install --name virtual-bmh-2 \
 .Sample output
 ----
 Starting install...
-Allocating 'virtual-bmh-3.qcow2'                                                                                  |  60 GB  00:00:00     
+Allocating 'virtual-bmh-2.qcow2'                                                                                  |  60 GB  00:00:00
 Creating domain...                                                                                                |         00:00:00     
 Domain creation completed.
 ----
@@ -662,7 +662,7 @@ spec:
   run_strategy: BARE_METAL_INSTANCE_RUN_STRATEGY_HALTED
 ----
 +
-Keep the remaining fields in the editor. Then exit the editor by pressing kbd:[Esc] or kbd:[:wq]. The hub API updates the instance and instructs Metal3 to halt the host.
+Keep the remaining fields in the editor. In `vi`, press kbd:[Esc], type `:wq`, then press kbd:[Enter] to save and exit. The hub API updates the instance and instructs Metal3 to halt the host.
 
 . Check the requested strategy and the actual host power:
 +
