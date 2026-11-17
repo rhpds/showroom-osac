@@ -1,615 +1,376 @@
 ---
-# Module 4: Cluster as a Service (CaaS) - solve playbook
-# Runs the module steps on the bastion as lab-user: worker BMH on the BMF host,
-# catalog objects, Alice's cluster order with the dns.noop workarounds, and
-# public access to the hosted cluster's API and console (Exercise 6).
 - import_playbook: ../bastion.yml
 
-- name: Module 04 - Cluster as a Service Solve
+- name: Module 04 - Bare Metal as a Service Solve
   hosts: bastion
   gather_facts: false
   vars_files:
     - ../vars.yml
-  vars:
-    # guest_ssh as in the lab's ~/.bashrc helper; the guest IP is passed in GUEST_IP
-    guest_ssh: >-
-      ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no
-      -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
-      -o 'ProxyCommand=sudo ssh -W %h:%p root@{{ bmf }}' core@${GUEST_IP}
   environment:
     KUBECONFIG: "{{ bastion_kubeconfig }}"
-
+    NO_COLOR: '1'
   tasks:
+    - name: Authenticate platform administrator and Alice
+      ansible.builtin.import_tasks: auth.yml
 
-    # =========================================================================
-    # Exercise 1: Set up the lab environment
-    # =========================================================================
-
-    - name: Copy device login script to bastion
-      ansible.builtin.copy:
-        src: "{{ device_login_script_src }}"
-        dest: "{{ device_login_script }}"
-        mode: '0755'
-
-    - name: Generate SSH key pair if missing
-      ansible.builtin.shell: test -f ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+    - name: Check that the BMaaS template is available
+      ansible.builtin.command: >-
+        osac --config {{ config_admin }} get baremetalinstancetemplate {{ bmaas_template }} -o json
+      register: r_template
       changed_when: false
+      failed_when: r_template.rc != 0 or bmaas_template not in r_template.stdout
 
-    - name: Extract the cluster pull secret
-      ansible.builtin.shell: >-
-        oc get secret pull-secret -n openshift-config
-        -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "$HOME/pull-secret-cluster.json"
-        && test -s "$HOME/pull-secret-cluster.json"
-      changed_when: false
-
-    - name: Login as cloud administrator (private API)
-      no_log: true
-      ansible.builtin.shell: >-
-        osac --config "$HOME/admin" login --insecure --private
-        --flow=password
-        --user={{ osac_admin_user | quote }}
-        --password={{ osac_admin_password | quote }}
-        --issuer="{{ keycloak_url }}/realms/osac"
-        {{ fulfillment_api_url }}
-      changed_when: false
-
-    # =========================================================================
-    # Exercise 2: Configure platform networking
-    # =========================================================================
-
-    - name: Let Metal3 watch BareMetalHosts in all namespaces
-      ansible.builtin.shell: >-
-        oc patch provisioning provisioning-configuration --type merge
-        -p '{"spec":{"watchAllNamespaces": true}}'
+    - name: Check Metal3 namespace scope
+      ansible.builtin.command: >-
+        oc get provisioning provisioning-configuration -o jsonpath={.spec.watchAllNamespaces}
       register: r_watch
-      changed_when: "'no change' not in r_watch.stdout"
-
-    - name: Wait for the Metal3 baremetal operator and its webhook
-      ansible.builtin.shell: >-
-        oc rollout status deployment/metal3-baremetal-operator -n openshift-machine-api --timeout=300s
-        && oc get endpointslice -n openshift-machine-api
-        -l kubernetes.io/service-name=baremetal-operator-webhook-service
-        -o jsonpath='{.items[0].endpoints[0].addresses[0]}'
-      register: r_webhook
       changed_when: false
-      until: r_webhook.rc == 0 and r_webhook.stdout | length > 0
-      retries: 10
-      delay: 15
+      failed_when: r_watch.rc != 0 or r_watch.stdout != 'true'
 
-    # =========================================================================
-    # Exercise 3: Provision a bare-metal worker host
-    # =========================================================================
+    - name: Check Sushy Redfish service
+      ansible.builtin.uri:
+        url: "http://{{ bmf }}:8000/redfish/v1/Systems"
+        status_code: 200
 
-    - name: Create the worker VM on the BMF host (non-secure-boot UEFI)
+    - name: Record CaaS host identity and allocation before solving
+      ansible.builtin.command: oc get bmh {{ vm_name }} -n {{ osac_namespace }} --ignore-not-found -o json
+      register: r_caas_before
+      changed_when: false
+
+    - name: Read Alice's existing bare-metal instance
+      ansible.builtin.command: >-
+        osac --config {{ config_alice }} get baremetalinstance {{ bmaas_instance_name }} -o json
+      register: r_existing
+      changed_when: false
+
+    - name: Normalize the instance lookup
+      vars:
+        result: "{{ r_existing.stdout | from_json }}"
+      ansible.builtin.set_fact:
+        existing_instance: "{{ result if result is mapping else (result | first | default({})) }}"
+
+    - name: Read existing host without modifying it
+      ansible.builtin.command: >-
+        oc get bmh {{ bmaas_vm_name }} -n {{ osac_namespace }} --ignore-not-found -o json
+      register: r_existing_host
+      changed_when: false
+
+    - name: Normalize host lookup
+      ansible.builtin.set_fact:
+        existing_host: "{{ (r_existing_host.stdout | from_json) if r_existing_host.stdout | length > 0 else {} }}"
+
+    - name: Find hub instance identity for an existing order
+      ansible.builtin.command: >-
+        oc get baremetalinstance -n {{ osac_namespace }}
+        -l osac.openshift.io/baremetalinstance-uuid={{ existing_instance.get('id', 'missing') }} -o json
+      register: r_existing_hub
+      changed_when: false
+
+    - name: Read existing hub instance
+      ansible.builtin.set_fact:
+        existing_hub: "{{ (r_existing_hub.stdout | from_json)['items'] | first | default({}) }}"
+
+    - name: Refuse to reuse a host owned by another workload
+      ansible.builtin.assert:
+        that:
+          - bmaas_vm_name != vm_name
+          - bmaas_vm_mac != vm_mac
+          - >-
+            existing_host.get('spec', {}).get('consumerRef', {}).get('name', '') == '' or
+            existing_host.get('spec', {}).get('consumerRef', {}).get('name', '') ==
+            existing_hub.get('metadata', {}).get('uid', 'missing')
+          - existing_host.get('metadata', {}).get('deletionTimestamp', '') == ''
+          - existing_instance.get('metadata', {}).get('deletion_timestamp', '') == ''
+          - >-
+            existing_instance | length == 0 or
+            (existing_instance.get('metadata', {}).get('tenant', '') == tenant_name and
+             existing_instance.get('spec', {}).get('catalog_item', {}).get('name', '') == bmaas_catalog_item and
+             existing_instance.get('spec', {}).get('instance_type', {}).get('name', '') == bmaas_instance_type)
+          - >-
+            existing_host.get('metadata', {}).get('labels', {}).get('osac.openshift.io/host-type', bmaas_host_type)
+            == bmaas_host_type
+        fail_msg: >-
+          The selected host is CaaS capacity, is deleting, or belongs to another workload.
+          Use a separate BMaaS host; do not delete or relabel an occupied host.
+
+    - name: Generate SSH key if missing
+      ansible.builtin.command:
+        argv: [ssh-keygen, -q, -t, ed25519, -N, '', -f, "{{ bastion_home }}/.ssh/id_ed25519"]
+        creates: "{{ bastion_home }}/.ssh/id_ed25519"
+
+    - name: Create a separate BMaaS VM on the BMF host
       ansible.builtin.shell: |
-        sudo ssh {{ bmf }} bash -s <<'EOF'
-        if virsh -c qemu:///system dominfo {{ vm_name }} >/dev/null 2>&1; then
-          echo "exists"; exit 0
+        sudo ssh {{ bmf | quote }} bash -s <<'EOF'
+        set -euo pipefail
+        if virsh -c qemu:///system dominfo {{ bmaas_vm_name | quote }} >/dev/null 2>&1; then
+          echo exists
+          exit 0
         fi
-        virt-install --name {{ vm_name }} \
+        virt-install --name {{ bmaas_vm_name | quote }} \
           --memory 8192 --vcpus 4 \
-          --disk size=120,format=qcow2,bus=virtio,pool=default \
-          --network network=default,mac={{ vm_mac }} \
+          --disk size=60,format=qcow2,bus=virtio,pool=default \
+          --network network=default,mac={{ bmaas_vm_mac }} \
           --boot loader=/usr/share/edk2/ovmf/OVMF_CODE.fd,loader_ro=yes,loader_type=pflash,nvram_template=/usr/share/edk2/ovmf/OVMF_VARS.fd \
-          --os-variant rhel9-unknown \
-          --import --noautoconsole
+          --os-variant rhel9-unknown --import --noautoconsole
         EOF
       register: r_vm
       changed_when: "'exists' not in r_vm.stdout"
 
-    - name: Get the worker VM UUID
-      ansible.builtin.shell: sudo ssh {{ bmf }} virsh -c qemu:///system domuuid {{ vm_name }}
-      register: r_vm_uuid
-      changed_when: false
-
-    - name: Create the BMC secret and the BareMetalHost
-      no_log: true
+    - name: Check existing VM firmware and MAC before enrollment
       ansible.builtin.shell: |
-        oc apply -f - <<EOF
-        ---
-        apiVersion: v1
-        kind: Secret
-        metadata:
-          name: {{ vm_name }}-bmc-secret
-          namespace: osac
-        type: Opaque
-        stringData:
-          username: admin
-          password: {{ osac_user_password }}
-        ---
-        apiVersion: metal3.io/v1alpha1
-        kind: BareMetalHost
-        metadata:
-          name: {{ vm_name }}
-          namespace: osac
-          labels:
-            osac.openshift.io/host-type: default
-        spec:
-          online: true
-          bootMACAddress: {{ vm_mac }}
-          bootMode: UEFI
-          automatedCleaningMode: disabled
-          rootDeviceHints:
-            deviceName: /dev/vda
-          bmc:
-            address: redfish-virtualmedia+http://{{ bmf }}:8000/redfish/v1/Systems/{{ r_vm_uuid.stdout | trim }}
-            credentialsName: {{ vm_name }}-bmc-secret
-            disableCertificateVerification: true
-        EOF
-      register: r_bmh
-      changed_when: "'created' in r_bmh.stdout or 'configured' in r_bmh.stdout"
-
-    - name: Wait for the BareMetalHost to finish inspection (available or already claimed)
-      ansible.builtin.shell: oc get bmh {{ vm_name }} -n osac -o jsonpath='{.status.provisioning.state}'
-      register: r_bmh_state
-      changed_when: false
-      until: r_bmh_state.stdout in ['available', 'provisioning', 'provisioned']
-      retries: 60
-      delay: 30
-
-    # =========================================================================
-    # Exercise 4: Publish cluster catalog objects
-    # =========================================================================
-
-    - name: Create the BareMetalInstanceType
-      ansible.builtin.shell: >-
-        osac --config "$HOME/admin" get baremetalinstancetype | grep -qw {{ bmit_name }}
-        && echo exists
-        || osac --config "$HOME/admin" create baremetalinstancetype
-        --name {{ bmit_name }}
-        --description "RHDP libvirt+sushy BMH"
-        --cpu-cores 4
-        --cpu-architecture amd64
-        --cpu-threads-per-core 1
-        --memory-total-gb 8
-        --network-port enp1s0:fabric:Ethernet:10Gbps
-        --host-label osac.openshift.io/host-type=default
-      register: r_bmit
-      changed_when: "'exists' not in r_bmit.stdout"
-
-    - name: Create and publish the ClusterCatalogItem
-      ansible.builtin.shell: >-
-        osac --config "$HOME/admin" get clustercatalogitem | grep -qw {{ catalog_item }}
-        && echo exists
-        || osac --config "$HOME/admin" create clustercatalogitem
-        --name {{ catalog_item }}
-        --title "Hosted CI small"
-        --description "Single-replica hosted OCP cluster on bare-metal worker"
-        --template {{ cluster_template }}
-        --published
-      register: r_catalog
-      changed_when: "'exists' not in r_catalog.stdout"
-
-    # =========================================================================
-    # Exercise 5: Order a hosted cluster as Alice
-    # =========================================================================
-
-    - name: Login as Alice via device flow
-      no_log: true
-      ansible.builtin.shell: >-
-        {{ device_login_script }}
-        "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "alice" {{ osac_user_password | quote }}
-        "$HOME/alice" "{{ tenant_name }}"
-      changed_when: false
-
-    - name: Create Alice's pull secret
-      ansible.builtin.shell: >-
-        osac --config "$HOME/alice" create secret
-        --name cluster-pull-secret
-        --type=pull-secret
-        --from-file=.dockerconfigjson="$HOME/pull-secret-cluster.json"
-      register: r_pull_secret
-      changed_when: r_pull_secret.rc == 0
-      failed_when:
-        - r_pull_secret.rc != 0
-        - "'already exists' not in r_pull_secret.stderr"
-
-    - name: Check whether Alice's cluster already exists
-      ansible.builtin.shell: osac --config "$HOME/alice" get cluster {{ cluster_name }} -o json
-      register: r_existing_cluster
-      changed_when: false
-      failed_when: false
-
-    - name: Place cluster order (once)
-      when: r_existing_cluster.rc != 0 or (r_existing_cluster.stdout | from_json) | length == 0
-      ansible.builtin.shell: >-
-        osac --config "$HOME/alice" create cluster
-        --name {{ cluster_name }}
-        --catalog-item {{ catalog_item }}
-        --version {{ ocp_version }}
-        --node-set "name=workers,size=1,baremetal-instance-type={{ bmit_name }}"
-        --set node_sets.workers.baremetal_instance_type.shared=true
-        --pull-secret cluster-pull-secret
-        --ssh-public-key-file "$HOME/.ssh/id_ed25519.pub"
-      register: r_order
-      changed_when: "'exists' not in r_order.stdout"
-
-    - name: Read Alice's cluster ID
-      ansible.builtin.shell: osac --config "$HOME/alice" get cluster {{ cluster_name }} -o json
-      register: r_cluster_identity
-      changed_when: false
-
-    - name: Wait for the matching ClusterOrder
-      ansible.builtin.command: >-
-        oc get clusterorder -n {{ osac_namespace }}
-        -l osac.openshift.io/clusterorder-uuid={{ (r_cluster_identity.stdout | from_json).id }}
-        -o jsonpath='{.items[*].metadata.name}'
-      register: r_order_name
-      changed_when: false
-      until: r_order_name.rc == 0 and r_order_name.stdout.split() | length == 1
-      retries: 20
-      delay: 15
-
-    - name: Look up the hosted cluster domain
-      ansible.builtin.shell: oc get cm cluster-fulfillment-ig -n osac -o jsonpath='{.data.HOSTED_CLUSTER_BASE_DOMAIN}'
-      register: r_hosted_base
-      changed_when: false
-
-    - name: Set order facts
-      ansible.builtin.set_fact:
-        order_name: "{{ r_order_name.stdout | trim }}"
-        hcp_ns: "osac-{{ r_order_name.stdout | trim }}"
-        domain: "{{ r_order_name.stdout | trim }}.{{ r_hosted_base.stdout | trim }}"
-
-    - name: Check the tenant subnet (fabric-output ConfigMap workaround)
-      ansible.builtin.shell: oc get subnet -n osac -o jsonpath='{range .items[*]}{.metadata.name}={.status.phase}{"\n"}{end}'
-      register: r_subnets
-      changed_when: false
-
-    - name: Create the missing subnet fabric-output ConfigMap for failed subnets
-      ansible.builtin.shell: |
-        oc apply -f - <<EOF
-        apiVersion: v1
-        kind: ConfigMap
-        metadata:
-          name: subnet-{{ item.split('=')[0] }}-fabric-output
-          namespace: osac
-        data:
-          namespace: {{ item.split('=')[0] }}
-          cudn_name: {{ item.split('=')[0] }}
-          l2_vni: "100"
-          l3_vni: "200"
-          route_target: "65000:100"
-          vrf_name: {{ item.split('=')[0] }}
-          fabric_reserved_range: 10.200.0.0/28
-          dhcp_server_ip: ""
-          dhcp_relay_ip: ""
-        EOF
-      loop: "{{ r_subnets.stdout_lines | select('search', '=Failed$') | list }}"
-      changed_when: true
-
-    - name: Wait for the hosted cluster API VIP
-      ansible.builtin.shell: >-
-        oc get svc kube-apiserver -n {{ hcp_ns }}-{{ order_name }}
-        -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
-      register: r_vip
-      changed_when: false
-      until: r_vip.stdout | length > 0
-      retries: 60
-      delay: 20
-
-    - name: Set VIP fact
-      ansible.builtin.set_fact:
-        vip: "{{ r_vip.stdout | trim }}"
-
-    - name: Publish api and api-int in libvirt DNS on the BMF host
-      ansible.builtin.shell: |
-        sudo ssh {{ bmf }} bash -s <<'EOF'
-        virsh net-dumpxml default | grep -q "api.{{ domain }}" && { echo exists; exit 0; }
-        virsh net-update default add dns-host \
-          "<host ip='{{ vip }}'><hostname>api.{{ domain }}</hostname><hostname>api-int.{{ domain }}</hostname></host>" \
-          --live --config
-        EOF
-      register: r_api_dns
-      changed_when: "'exists' not in r_api_dns.stdout"
-
-    - name: Wait for Ironic to write RHCOS (BMH provisioned)
-      ansible.builtin.shell: oc get bmh {{ vm_name }} -n osac -o jsonpath='{.status.provisioning.state}'
-      register: r_bmh_prov
-      changed_when: false
-      until: r_bmh_prov.stdout == 'provisioned'
-      retries: 60
-      delay: 30
-
-    - name: Get the worker guest IP
-      ansible.builtin.shell: oc get bmh {{ vm_name }} -n osac -o jsonpath='{.status.hardware.nics[0].ip}'
-      register: r_guest_ip
-      changed_when: false
-      failed_when: r_guest_ip.stdout | length == 0
-
-    - name: Set guest facts
-      ansible.builtin.set_fact:
-        guest_ip: "{{ r_guest_ip.stdout | trim }}"
-        agent: "{{ r_vm_uuid.stdout | trim }}"
-
-    - name: Wait for the Agent to register
-      ansible.builtin.shell: oc get agent {{ agent }} -n osac -o name
-      register: r_agent
-      changed_when: false
-      until: r_agent.rc == 0
-      retries: 40
-      delay: 15
-
-    - name: Give the worker temporary wildcard DNS and restart the agent
-      ansible.builtin.shell: |
-        {{ guest_ssh }} sudo bash -s <<EOF
-        if systemctl is-active --quiet kubelet; then
-          echo 'The worker already runs the installed OS; nothing to do.'
-          exit 0
-        fi
-        install -d /etc/NetworkManager/dnsmasq.d /etc/NetworkManager/conf.d
-        echo 'address=/.{{ domain }}/{{ vip }}' > /etc/NetworkManager/dnsmasq.d/hosted.conf
-        printf '[main]\ndns=dnsmasq\n' > /etc/NetworkManager/conf.d/90-dnsmasq.conf
-        systemctl reload NetworkManager
-        sleep 3
-        getent hosts api.{{ domain }} probe.apps.{{ domain }}
-        systemctl restart agent.service
-        EOF
-      environment:
-        GUEST_IP: "{{ guest_ip }}"
-      register: r_agent_dns
-      changed_when: "'nothing to do' not in r_agent_dns.stdout"
-
-    - name: Wait for the agent to install and join (STAGE Done)
-      ansible.builtin.shell: oc get agent {{ agent }} -n osac -o jsonpath='{.status.progress.currentStage}'
-      register: r_agent_stage
-      changed_when: false
-      until: r_agent_stage.stdout == 'Done'
-      retries: 80
-      delay: 30
-
-    - name: Create the hosted kubeconfig directory
-      ansible.builtin.file:
-        path: "/tmp/{{ order_name }}"
-        state: directory
-        mode: '0700'
-
-    - name: Extract the hosted cluster admin kubeconfig
-      ansible.builtin.shell: oc extract secret/{{ order_name }}-admin-kubeconfig -n {{ hcp_ns }} --to=/tmp/{{ order_name }} --confirm
-      changed_when: false
-
-    - name: Set guest oc command
-      ansible.builtin.set_fact:
-        guest_oc: "oc --kubeconfig=/tmp/{{ order_name }}/kubeconfig --server=https://{{ vip }}:6443 --insecure-skip-tls-verify"
-
-    - name: Wait for the worker node to be Ready
-      ansible.builtin.shell: >-
-        {{ guest_oc }} get nodes
-        -o jsonpath='{.items[0].metadata.name} {.items[0].status.conditions[?(@.type=="Ready")].status}'
-      register: r_node
-      changed_when: false
-      until: r_node.rc == 0 and r_node.stdout.endswith(' True')
-      retries: 40
-      delay: 15
-
-    - name: Link the node to its Machine (providerID)
-      ansible.builtin.shell: |
-        NODE={{ r_node.stdout.split(' ')[0] }}
-        if [ -z "$({{ guest_oc }} get node ${NODE} -o jsonpath='{.spec.providerID}')" ]; then
-          {{ guest_oc }} patch node ${NODE} --type merge -p '{"spec":{"providerID":"agent://{{ agent }}"}}'
-        else
-          echo exists
-        fi
-      register: r_pid
-      changed_when: "'exists' not in r_pid.stdout"
-
-    - name: Point console, canary and oauth apps names at the worker in libvirt DNS
-      ansible.builtin.shell: |
-        sudo ssh {{ bmf }} bash -s <<'EOF'
-        virsh net-dumpxml default | grep -q "console-openshift-console.apps.{{ domain }}" && { echo exists; exit 0; }
-        virsh net-update default add dns-host \
-          "<host ip='{{ guest_ip }}'><hostname>console-openshift-console.apps.{{ domain }}</hostname><hostname>canary-openshift-ingress-canary.apps.{{ domain }}</hostname><hostname>oauth-openshift.apps.{{ domain }}</hostname></host>" \
-          --live --config
-        EOF
-      register: r_apps_dns
-      changed_when: "'exists' not in r_apps_dns.stdout"
-
-    - name: Remove the temporary resolver on the worker
-      ansible.builtin.shell: >-
-        {{ guest_ssh }} 'sudo rm -f /etc/NetworkManager/conf.d/90-dnsmasq.conf
-        /etc/NetworkManager/dnsmasq.d/hosted.conf; sudo systemctl reload NetworkManager'
-      environment:
-        GUEST_IP: "{{ guest_ip }}"
-      changed_when: false
-
-    - name: Wait for the order to be Ready
-      ansible.builtin.shell: oc get clusterorder {{ order_name }} -n osac -o jsonpath='{.status.phase}'
-      register: r_order_phase
-      changed_when: false
-      until: r_order_phase.stdout == 'Ready'
-      retries: 40
-      delay: 30
-      ignore_errors: true
-
-    - name: Recreate CoreDNS and console operator pods if the console reports server misbehaving
-      ansible.builtin.shell: |
-        if {{ guest_oc }} logs -n openshift-console-operator deploy/console-operator --since=5m | grep -qi 'server misbehaving'; then
-          {{ guest_oc }} delete pod -n openshift-dns -l dns.operator.openshift.io/daemonset-dns=default
-          {{ guest_oc }} delete pod -n openshift-console-operator --all
-        else
-          echo healthy
-        fi
-      register: r_coredns
-      changed_when: "'healthy' not in r_coredns.stdout"
-      when: r_order_phase.stdout != 'Ready'
-
-    - name: Wait again for the order to be Ready after the CoreDNS restart
-      ansible.builtin.shell: oc get clusterorder {{ order_name }} -n osac -o jsonpath='{.status.phase}'
-      register: r_order_phase2
-      changed_when: false
-      until: r_order_phase2.stdout == 'Ready'
-      retries: 30
-      delay: 30
-      when: r_order_phase.stdout != 'Ready'
-
-    # =========================================================================
-    # Exercise 6: Access the hosted cluster
-    # =========================================================================
-
-    - name: Look up hub domain, hub wildcard certificate and OAuth route
-      ansible.builtin.shell: |
-        echo "APPS=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')"
-        echo "HUB_CERT=$(oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.spec.defaultCertificate.name}')"
-        echo "OAUTH=$(oc get route oauth -n {{ hcp_ns }}-{{ order_name }} -o jsonpath='{.spec.host}')"
-      register: r_ex6
-      changed_when: false
-
-    - name: Set access facts
-      ansible.builtin.set_fact:
-        api_host: "api-{{ order_name }}.{{ r_ex6.stdout_lines[0].split('=')[1] }}"
-        console_host: "console-{{ order_name }}.{{ r_ex6.stdout_lines[0].split('=')[1] }}"
-        hub_cert: "{{ r_ex6.stdout_lines[1].split('=')[1] }}"
-        oauth_host: "{{ r_ex6.stdout_lines[2].split('=')[1] }}"
-
-    - name: Publish the API and console through the hub router
-      ansible.builtin.shell: |
-        oc create namespace osac-hosted-access --dry-run=client -o yaml | oc apply -f -
-        oc apply -n osac-hosted-access -f - <<EOF
-        apiVersion: v1
-        kind: Service
-        metadata:
-          name: api-{{ order_name }}
-        spec:
-          ports:
-          - {name: https, port: 6443, targetPort: 6443, protocol: TCP}
-        ---
-        apiVersion: discovery.k8s.io/v1
-        kind: EndpointSlice
-        metadata:
-          name: api-{{ order_name }}
-          labels:
-            kubernetes.io/service-name: api-{{ order_name }}
-            endpointslice.kubernetes.io/managed-by: osac-lab
-        addressType: IPv4
-        ports:
-        - {name: https, port: 6443, protocol: TCP}
-        endpoints:
-        - addresses: ["{{ vip }}"]
-        ---
-        apiVersion: route.openshift.io/v1
-        kind: Route
-        metadata:
-          name: api-{{ order_name }}
-        spec:
-          host: {{ api_host }}
-          to: {kind: Service, name: api-{{ order_name }}}
-          port: {targetPort: https}
-          tls: {termination: passthrough}
-        ---
-        apiVersion: v1
-        kind: Service
-        metadata:
-          name: console-{{ order_name }}
-        spec:
-          ports:
-          - {name: https, port: 443, targetPort: 443, protocol: TCP}
-        ---
-        apiVersion: discovery.k8s.io/v1
-        kind: EndpointSlice
-        metadata:
-          name: console-{{ order_name }}
-          labels:
-            kubernetes.io/service-name: console-{{ order_name }}
-            endpointslice.kubernetes.io/managed-by: osac-lab
-        addressType: IPv4
-        ports:
-        - {name: https, port: 443, protocol: TCP}
-        endpoints:
-        - addresses: ["{{ guest_ip }}"]
-        ---
-        apiVersion: route.openshift.io/v1
-        kind: Route
-        metadata:
-          name: console-{{ order_name }}
-        spec:
-          host: {{ console_host }}
-          to: {kind: Service, name: console-{{ order_name }}}
-          port: {targetPort: https}
-          tls: {termination: passthrough}
-        EOF
-      changed_when: false
-
-    - name: Copy the hub wildcard certificate to the HostedCluster namespace and the hosted cluster
-      ansible.builtin.shell: |
-        set -o pipefail
-        oc get secret {{ hub_cert }} -n openshift-ingress -o json \
-          | jq --arg ns {{ hcp_ns }} '{apiVersion: "v1", kind: "Secret", type: "kubernetes.io/tls",
-                 metadata: {name: "console-custom-tls", namespace: $ns},
-                 data: {"tls.crt": .data["tls.crt"], "tls.key": .data["tls.key"]}}' \
-          | oc apply -f -
-        oc get secret {{ hub_cert }} -n openshift-ingress -o json \
-          | jq '{apiVersion: "v1", kind: "Secret", type: "kubernetes.io/tls",
-                 metadata: {name: "console-custom-tls", namespace: "openshift-config"},
-                 data: {"tls.crt": .data["tls.crt"], "tls.key": .data["tls.key"]}}' \
-          | {{ guest_oc }} apply -f -
+        set -euo pipefail
+        sudo ssh {{ bmf | quote }} virsh -c qemu:///system dumpxml {{ bmaas_vm_name | quote }} > /tmp/osac-bmaas-domain.xml
+        python3 - <<'PY'
+        import xml.etree.ElementTree as ET
+        root = ET.parse('/tmp/osac-bmaas-domain.xml').getroot()
+        assert root.findtext('os/loader') == '/usr/share/edk2/ovmf/OVMF_CODE.fd', 'Expected non-secure-boot OVMF firmware'
+        assert '{{ bmaas_vm_mac }}' in [n.get('address') for n in root.findall('devices/interface/mac')], 'Unexpected VM MAC'
+        PY
       args:
         executable: /bin/bash
       changed_when: false
 
-    - name: Set the console hostname and certificate on the HostedCluster
-      ansible.builtin.shell: >-
-        oc patch hostedcluster {{ order_name }} -n {{ hcp_ns }} --type merge -p
-        '{"spec":{"configuration":{"ingress":{"componentRoutes":[{"name":"console","namespace":"openshift-console","hostname":"{{ console_host }}","servingCertKeyPairSecret":{"name":"console-custom-tls"}}]}}}}'
-      register: r_console_patch
-      changed_when: "'no change' not in r_console_patch.stdout"
-
-    - name: Give the OAuth server the trusted certificate
-      ansible.builtin.shell: >-
-        oc patch hostedcluster {{ order_name }} -n {{ hcp_ns }} --type merge -p
-        '{"spec":{"configuration":{"apiServer":{"servingCerts":{"namedCertificates":[{"names":["{{ oauth_host }}"],"servingCertificate":{"name":"console-custom-tls"}}]}}}}}'
-      register: r_oauth_patch
-      changed_when: "'no change' not in r_oauth_patch.stdout"
-
-    - name: Wait for the OAuth route to serve the trusted certificate
-      ansible.builtin.uri:
-        url: "https://{{ oauth_host }}/healthz"
-        validate_certs: true
-      register: r_oauth
-      until: r_oauth.status == 200
-      retries: 40
-      delay: 15
-
-    - name: Let the OAuth server reconnect after the rollout
-      ansible.builtin.pause:
-        seconds: 90
-      when: r_oauth_patch is changed
-
-    - name: Wait for the console operator to be Available
-      ansible.builtin.shell: >-
-        {{ guest_oc }} get co console
-        -o jsonpath='{.status.conditions[?(@.type=="Available")].status}'
-      register: r_console_co
-      changed_when: false
-      until: r_console_co.stdout == 'True'
-      retries: 40
-      delay: 15
-
-    - name: Check the console over trusted TLS
-      ansible.builtin.uri:
-        url: "https://{{ console_host }}/"
-        validate_certs: true
-      register: r_console_http
-      failed_when: false
-
-    - name: Final order status
-      ansible.builtin.shell: oc get clusterorder {{ order_name }} -n osac -o jsonpath='{.status.phase}'
-      register: r_final
+    - name: Read VM UUID
+      ansible.builtin.command: sudo ssh {{ bmf }} virsh -c qemu:///system domuuid {{ bmaas_vm_name }}
+      register: r_uuid
       changed_when: false
 
-    # =========================================================================
-    # Final status report
-    # =========================================================================
+    - name: Enroll the new host with its BMC credentials
+      when: existing_host | length == 0
+      no_log: true
+      ansible.builtin.shell: |
+        oc apply -f - <<'EOF'
+        {{ bmc_secret | to_nice_yaml }}
+        ---
+        {{ host_manifest | to_nice_yaml }}
+        EOF
+      vars:
+        bmc_secret:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ bmaas_vm_name }}-bmc-secret"
+            namespace: "{{ osac_namespace }}"
+          type: Opaque
+          stringData:
+            username: admin
+            password: "{{ osac_user_password }}"
+        host_manifest:
+          apiVersion: metal3.io/v1alpha1
+          kind: BareMetalHost
+          metadata:
+            name: "{{ bmaas_vm_name }}"
+            namespace: "{{ osac_namespace }}"
+            labels:
+              osac.openshift.io/host-type: "{{ bmaas_host_type }}"
+          spec:
+            online: true
+            bootMACAddress: "{{ bmaas_vm_mac }}"
+            bootMode: UEFI
+            automatedCleaningMode: disabled
+            rootDeviceHints:
+              deviceName: /dev/vda
+            bmc:
+              address: "redfish-virtualmedia+http://{{ bmf }}:8000/redfish/v1/Systems/{{ r_uuid.stdout | trim }}"
+              credentialsName: "{{ bmaas_vm_name }}-bmc-secret"
+              disableCertificateVerification: true
+      register: r_enroll
+      changed_when: "'created' in r_enroll.stdout or 'configured' in r_enroll.stdout"
 
-    - name: Report solve status
-      ansible.builtin.debug:
-        msg: |
-          === Module 04 Solve Results ===
-          BareMetalHost provisioned:   {{ 'ok' if r_bmh_prov.stdout == 'provisioned' else 'NOT ok' }}
-          Agent Done:                  {{ 'ok' if r_agent_stage.stdout == 'Done' else 'NOT ok' }}
-          ClusterOrder Ready:          {{ 'ok' if r_final.stdout == 'Ready' else 'NOT ok (' ~ r_final.stdout ~ ')' }}
-          Console operator Available:  {{ 'ok' if r_console_co.stdout == 'True' else 'NOT ok' }}
-          Console (trusted TLS):       {{ 'ok' if r_console_http.status | default(0) == 200 else 'NOT ok (' ~ (r_console_http.msg | default('')) ~ ')' }}
-          API:      https://{{ api_host }}
-          Console:  https://{{ console_host }}
-          OAuth:    https://{{ oauth_host }}
+    - name: Wait for unclaimed host inspection to complete
+      when: existing_instance | length == 0
+      ansible.builtin.command: oc get bmh {{ bmaas_vm_name }} -n {{ osac_namespace }} -o json
+      register: r_available
+      changed_when: false
+      until:
+        - (r_available.stdout | from_json).status.provisioning.state == 'available'
+        - (r_available.stdout | from_json).status.operationalStatus == 'OK'
+        - (r_available.stdout | from_json).spec.get('consumerRef', {}).get('name', '') == ''
+      retries: 60
+      delay: 20
+
+    - name: Read BMaaS instance type
+      ansible.builtin.command: >-
+        osac --config {{ config_admin }} get baremetalinstancetype {{ bmaas_instance_type }} -o json
+      register: r_type
+      changed_when: false
+
+    - name: Create isolated BMaaS instance type if missing
+      when: r_type.stdout | from_json | length == 0
+      ansible.builtin.command: >-
+        osac --config {{ config_admin }} create baremetalinstancetype
+        --name {{ bmaas_instance_type }} --description "RHDP BMaaS libvirt host"
+        --cpu-cores 4 --cpu-architecture amd64 --cpu-threads-per-core 1 --memory-total-gb 8
+        --network-port enp1s0:fabric:Ethernet:10Gbps
+        --host-label osac.openshift.io/host-type={{ bmaas_host_type }}
+      changed_when: true
+
+    - name: Check the selector of an existing instance type
+      when: r_type.stdout | from_json | length > 0
+      vars:
+        result: "{{ r_type.stdout | from_json }}"
+        profile: "{{ result if result is mapping else result | first }}"
+      ansible.builtin.assert:
+        that:
+          - profile.spec.host_label_selector.match_labels.get('osac.openshift.io/host-type', '') == bmaas_host_type
+        fail_msg: The existing hardware profile does not select isolated BMaaS capacity.
+
+    - name: Read shared RHCOS image
+      ansible.builtin.command: osac --config {{ config_admin }} get diskimage {{ bmaas_disk_image }} -o json
+      register: r_image
+      changed_when: false
+
+    - name: Create shared RHCOS image if missing
+      when: r_image.stdout | from_json | length == 0
+      ansible.builtin.command: >-
+        osac --config {{ config_admin }} create diskimage --name {{ bmaas_disk_image }}
+        --source-type registry --source-ref oci://quay.io/osac-project/rhcos:4.22.0 --architecture amd64
+      changed_when: true
+
+    - name: Read BMaaS catalog item
+      ansible.builtin.command: >-
+        osac --config {{ config_admin }} get baremetalinstancecatalogitem {{ bmaas_catalog_item }} -o json
+      register: r_catalog
+      changed_when: false
+
+    - name: Check an existing catalog item before ordering
+      when: r_catalog.stdout | from_json | length > 0
+      vars:
+        result: "{{ r_catalog.stdout | from_json }}"
+        catalog: "{{ result if result is mapping else result | first }}"
+      ansible.builtin.assert:
+        that:
+          - catalog.get('published', false) | bool
+          - catalog.get('template', {}).get('id', '') == bmaas_template
+        fail_msg: Publish the existing catalog item with the expected BMaaS template before ordering.
+
+    - name: Publish BMaaS catalog item if missing
+      when: r_catalog.stdout | from_json | length == 0
+      ansible.builtin.command: >-
+        osac --config {{ config_admin }} create baremetalinstancecatalogitem
+        --name {{ bmaas_catalog_item }} --title "Demo Bare Metal Host"
+        --description "Metal3-managed dedicated server" --template {{ bmaas_template }} --published
+      changed_when: true
+
+    - name: Read SSH public key
+      ansible.builtin.slurp:
+        src: "{{ bastion_home }}/.ssh/id_ed25519.pub"
+      register: r_key
+
+    - name: Build RHCOS first-boot Ignition configuration
+      ansible.builtin.set_fact:
+        bmaas_ignition:
+          ignition:
+            version: 3.4.0
+          passwd:
+            users:
+              - name: core
+                sshAuthorizedKeys:
+                  - "{{ r_key.content | b64decode | trim }}"
+
+    - name: Detect the deployed CLI's SSH key interface
+      ansible.builtin.command: osac create baremetalinstance --help
+      register: r_create_help
+      changed_when: false
+
+    - name: Select registered key or legacy inline key interface
+      ansible.builtin.set_fact:
+        bmaas_key_uses_secret: "{{ 'Name of a registered SSH public-key Secret' in r_create_help.stdout }}"
+
+    - name: Look up Alice's registered SSH key
+      when: bmaas_key_uses_secret
+      ansible.builtin.command: >-
+        osac --config {{ config_alice }} get secret {{ bmaas_ssh_key_secret }} -o json
+      register: r_key_secret
+      changed_when: false
+      no_log: true
+
+    - name: Register Alice's public key if missing
+      when: bmaas_key_uses_secret and r_key_secret.stdout | from_json | length == 0
+      ansible.builtin.command: >-
+        osac --config {{ config_alice }} create secret --name {{ bmaas_ssh_key_secret }}
+        --type ssh-public-key --from-file=public_key={{ bastion_home }}/.ssh/id_ed25519.pub
+      changed_when: true
+      no_log: true
+
+    - name: Order Alice's bare-metal instance once
+      when: existing_instance | length == 0
+      ansible.builtin.command:
+        argv:
+          - osac
+          - --config
+          - "{{ config_alice }}"
+          - create
+          - baremetalinstance
+          - --name={{ bmaas_instance_name }}
+          - --catalog-item={{ bmaas_catalog_item }}
+          - --disk-image={{ bmaas_disk_image }}
+          - --set=instance_type.name={{ bmaas_instance_type }}
+          - --set=instance_type.shared=true
+          - --ssh-key={{ bmaas_ssh_key_secret if bmaas_key_uses_secret else (r_key.content | b64decode | trim) }}
+          - --user-data={{ bmaas_ignition | to_json }}
+          - --run-strategy=Always
+      changed_when: true
+
+    - name: Restart an existing halted instance before waiting for provisioning
+      when: >-
+        existing_instance.get('spec', {}).get('run_strategy', '') ==
+        'BARE_METAL_INSTANCE_RUN_STRATEGY_HALTED'
+      ansible.builtin.include_tasks: power.yml
+      vars:
+        power_strategy: ALWAYS
+
+    - name: Wait for Alice's instance to be running
+      ansible.builtin.command: >-
+        osac --config {{ config_alice }} get baremetalinstance {{ bmaas_instance_name }} -o json
+      register: r_instance
+      changed_when: false
+      until: (r_instance.stdout | from_json).get('status', {}).get('state', '') == 'BARE_METAL_INSTANCE_STATE_RUNNING'
+      retries: 90
+      delay: 20
+
+    - name: Locate the hub instance by its public API ID
+      ansible.builtin.command: >-
+        oc get baremetalinstance -n {{ osac_namespace }}
+        -l osac.openshift.io/baremetalinstance-uuid={{ (r_instance.stdout | from_json).id }} -o json
+      register: r_hub
+      changed_when: false
+      failed_when: >-
+        r_hub.rc != 0 or (r_hub.stdout | from_json).get('items', []) | length != 1 or
+        (r_hub.stdout | from_json)['items'][0].spec.externalHostID != osac_namespace ~ '/' ~ bmaas_vm_name
+
+    - name: Wait for first boot and verify access before changing power
+      ansible.builtin.import_tasks: ssh.yml
+
+    - name: Exercise power lifecycle and restore running state
+      block:
+        - name: Halt and restart through Alice's public API
+          ansible.builtin.include_tasks: power.yml
+          loop: [HALTED, ALWAYS]
+          loop_control:
+            loop_var: power_strategy
+      always:
+        - name: Restore Always run strategy after a failed power check
+          ansible.builtin.include_tasks: power.yml
+          vars:
+            power_strategy: ALWAYS
+
+    - name: Verify guest access after restarting
+      ansible.builtin.import_tasks: ssh.yml
+
+    - name: Read CaaS host after solving
+      when: r_caas_before.stdout | length > 0
+      ansible.builtin.command: oc get bmh {{ vm_name }} -n {{ osac_namespace }} -o json
+      register: r_caas_after
+      changed_when: false
+
+    - name: Confirm CaaS host identity and allocation are preserved
+      when: r_caas_before.stdout | length > 0
+      vars:
+        before: "{{ r_caas_before.stdout | from_json }}"
+        after: "{{ r_caas_after.stdout | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - before.metadata.uid == after.metadata.uid
+          - before.spec.get('consumerRef', {}) == after.spec.get('consumerRef', {})
+        success_msg: CaaS host identity and allocation are unchanged.

@@ -1,0 +1,37 @@
+---
+- name: Login as platform administrator
+  ansible.builtin.command:
+    argv:
+      - osac
+      - --config
+      - "{{ config_admin }}"
+      - login
+      - --insecure
+      - --private
+      - --flow=password
+      - --user={{ osac_admin_user }}
+      - --password={{ osac_admin_password }}
+      - --issuer={{ keycloak_url }}/realms/osac
+      - "{{ fulfillment_api_url }}"
+  no_log: true
+  changed_when: false
+
+- name: Copy device login helper to bastion
+  ansible.builtin.copy:
+    src: "{{ device_login_script_src }}"
+    dest: "{{ device_login_script }}"
+    mode: '0755'
+  changed_when: false
+
+- name: Login as Alice through the tenant identity provider
+  ansible.builtin.command:
+    argv:
+      - "{{ device_login_script }}"
+      - "{{ keycloak_url }}"
+      - "{{ fulfillment_api_url }}"
+      - "{{ tenant_admin }}"
+      - "{{ osac_user_password }}"
+      - "{{ config_alice }}"
+      - "{{ tenant_name }}"
+  no_log: true
+  changed_when: false

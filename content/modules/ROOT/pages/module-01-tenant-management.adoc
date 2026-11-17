@@ -1,4 +1,4 @@
-= Module 2: Tenant Onboarding and Identity Management
+= Module 1: Tenant Onboarding and Identity Management
 :source-highlighter: rouge
 :toc: macro
 :toclevels: 2
@@ -24,6 +24,16 @@ By the end of this module, you'll be able to:
 When a platform administrator creates a tenant in Red Hat cloud extensions, the platform automatically provisions a Keycloak organization, a dedicated namespace, and a break-glass emergency access account. In this exercise, you create the `sai-corp` tenant and verify that all of these resources were provisioned correctly.
 
 === Steps
+
+. Switch to the *Terminal* tab and log in to the OpenShift cluster as the cluster administrator. You will use this connection to verify the resources created during onboarding:
++
+[source,role=execute,subs="attributes+"]
+----
+oc login {openshift_api_url} \
+  --username {openshift_cluster_admin_username} \
+  --password {openshift_cluster_admin_password} \
+  --insecure-skip-tls-verify
+----
 
 . Create a directory to collect various YAML files used in this workshop:
 +
@@ -53,6 +63,7 @@ osac --config $HOME/admin \
 ====
 
 . Switch to the *Red Hat cloud extensions* tab on the right.
+. Sign in as the platform administrator with username `{osac_admin_user}` and password `{osac_admin_password}`. If another user is already signed in, sign out first.
 . Navigate to *Administration* -> *Tenants*.
 . Create a new tenant named `sai-corp`. There are no other parameters except for the name.
 +
@@ -875,13 +886,13 @@ Review what you completed in this module:
 If you want to skip the exercises and see the final state of the tenant, click the *Solve* button below. This will create the `sai-corp` tenant, configure the identity provider, and assign roles and memberships for Alice and Bob.
 
 ++++
-<div class="solve-button-placeholder" data-module="module-02"></div>
+<div class="solve-button-placeholder" data-module="module-01"></div>
 ++++
 
 == Validate your work
 
 ++++
-<div class="validate-button-placeholder" data-module="module-02"></div>
+<div class="validate-button-placeholder" data-module="module-01"></div>
 ++++
 
 == Module summary

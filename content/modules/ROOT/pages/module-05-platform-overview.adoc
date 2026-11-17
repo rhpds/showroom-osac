@@ -1,13 +1,13 @@
-= Module 1: Exploring the Red Hat cloud extensions Platform
+= Module 5: Exploring the Red Hat cloud extensions Platform (Optional)
 :source-highlighter: rouge
 :toc: macro
 :toclevels: 1
 
 toc::[]
 
-The infrastructure team at Sovereign Cloud Corp just handed you the keys to a freshly deployed Red Hat cloud extensions environment. Before onboarding any tenants or provisioning workloads, you need to know the platform inside and out. A misconfigured component today means a frustrated tenant tomorrow — and in a government services context, that has real consequences.
+This optional module takes a closer look at the services behind Sovereign Cloud Corp's Red Hat cloud extensions platform. Explore how the UI, Keycloak, and Kafka support tenant onboarding and workload provisioning.
 
-In this module, you walk through the deployed Red Hat cloud extensions platform. You verify that every component is healthy, explore the UI, and understand how Keycloak and Kafka tie the system together. By the time you finish, you'll have a clear picture of the platform's architecture and the confidence to move forward.
+You inspect the deployed components and verify platform health. No other module depends on these exercises, and they do not require the tenant or workloads from Modules 1–4. You can skip this module entirely and continue to the xref:conclusion.adoc[Conclusion and Next Steps].
 
 == Learning objectives
 
@@ -88,7 +88,7 @@ Expected result: All pods `Running` or `Completed`.
 
 With the platform confirmed healthy, log in to the Red Hat cloud extensions web UI. This is the central console that platform engineers and tenant administrators use to manage the environment.
 
-. Switch to the *Red Hat cloud extensions* tab on the right. Login using the platform admin credentials:
+. Switch to the *Red Hat cloud extensions* tab on the right. If a tenant user is signed in, sign out first. Log in using the platform admin credentials:
 +
 .*Admin user*
 [source,role=copy,subs="attributes+"]
@@ -104,9 +104,9 @@ With the platform confirmed healthy, log in to the Red Hat cloud extensions web 
 
 . In the browser UI, locate and explore the following sections:
 +
-* **Tenants** — list of provisioned tenants. This is the view you land in right after logging in. If you need to go back to the Tenants view it is under *Administration* in the navigation area on the left. Currently there are only the `shared` and `system` tenants. You will create a new tenant in Module 2.
-* **Catalog** — available service catalog items. Currently empty.
-* **Projects** - list of projects in the environment. Currently only the `default` project exists. You will create new projects in Module 2.
+* **Tenants** — list of provisioned tenants, under *Administration* in the navigation area on the left. The platform provides `shared` and `system`; if you completed Module 1, you also see `sai-corp`.
+* **Catalog** — available service catalog items, including any VMaaS, CaaS, and BMaaS items published in Modules 2–4.
+* **Projects** — list of projects in the environment, including the tenant projects configured in Module 1 if you completed it.
 * **Infrastructure** — platform configuration and integrations.
 ** **Storage**
 ** **Instance Types**
@@ -114,13 +114,13 @@ With the platform confirmed healthy, log in to the Red Hat cloud extensions web 
 ** **Bare metal instance types**
 ** **Disk Images**
 * **Networking** — platform network configuration.
-** **Virtual Networks** - empty because no tenants exist yet.
-** **Security Groups** - empty because no tenants exist yet.
+** **Virtual Networks** — inspect the networks available to the provisioned tenants.
+** **Security Groups** — inspect any configured security groups.
 * **Secrets**
 
 == Exercise 3: Examine the Keycloak realm configuration
 
-Keycloak handles identity management for the entire Red Hat cloud extensions platform. Every tenant gets its own identity context tied to the `osac` realm. Understanding this configuration is essential before you create tenants in Module 2.
+Keycloak handles identity management for the entire Red Hat cloud extensions platform. Every tenant gets its own identity context tied to the `osac` realm. Here you examine the realm behind tenant onboarding and federated sign-in from Module 1.
 
 . Switch to the *Terminal* tab on the right and confirm the Keycloak pods are running and ready:
 +
@@ -227,7 +227,7 @@ You should see at least one broker pod in `Running` state.
 oc get kafkatopics -n osac-kafka
 ----
 +
-Topics prefixed with `osac-` handle platform events. Note the names — you will see these referenced in Module 3 when catalog workloads generate events.
+Topics prefixed with `osac-` handle platform events, including the catalog requests from Modules 2–4. These topics connect the fulfillment service and the operator behind the workload workflows.
 
 . Check KafkaUsers configured for Red Hat cloud extensions service-to-service communication:
 +
@@ -247,7 +247,7 @@ All conditions should show `"type": "Ready"` with `"status": "True"`.
 
 == Learning outcomes checkpoint
 
-Before moving to Module 2, confirm you can answer these questions:
+If you chose to complete this optional exploration, confirm you can answer these questions:
 
 * Which namespace contains all Red Hat cloud extensions platform components?
 * Which Keycloak realm governs Red Hat cloud extensions tenant identities?
@@ -257,7 +257,7 @@ If any of these are unclear, review the relevant exercise above or raise a quest
 
 == Module summary
 
-You have completed the platform orientation for Sovereign Cloud Corp's Red Hat cloud extensions environment.
+You have completed the optional platform exploration for Sovereign Cloud Corp's Red Hat cloud extensions environment.
 
 **What you accomplished:**
 
@@ -274,4 +274,4 @@ You have completed the platform orientation for Sovereign Cloud Corp's Red Hat c
 
 **Next steps:**
 
-Module 2 covers tenant management. You will use what you learned here about the Red Hat cloud extensions namespace and Keycloak realm to create and configure multi-tenant environments with federated identity and role-based access control.
+Continue to the xref:conclusion.adoc[Conclusion and Next Steps] to review the workshop and consider further exercises.

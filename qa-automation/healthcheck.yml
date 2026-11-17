@@ -5,4 +5,4 @@
 # checks the core provisioned services: OSAC namespace pods/CSVs/routes,
 # Keycloak, and Kafka. Full mutating workflow coverage lives in e2e.yml.
 
-- import_playbook: ../runtime-automation/module-01/validate.yml
+- import_playbook: ../runtime-automation/module-05/validate.yml

@@ -1,10 +1,8 @@
 ---
 # OSAC end-to-end automation.
 #
-# This playbook is intentionally a thin orchestrator around the existing
-# module solve/validate playbooks used by Showroom. Each module is solved and
-# then validated before moving to the next module so failures point at the
-# module that introduced the problem.
+# Solve and validate the four core modules in order. Optional platform
+# exploration runs last only when run_optional_exploration=true.
 
 - import_playbook: ../runtime-automation/module-01/solve.yml
 - import_playbook: ../runtime-automation/module-01/validate.yml
@@ -17,3 +15,8 @@
 
 - import_playbook: ../runtime-automation/module-04/solve.yml
 - import_playbook: ../runtime-automation/module-04/validate.yml
+
+- import_playbook: ../runtime-automation/module-05/solve.yml
+  when: run_optional_exploration | default(false) | bool
+- import_playbook: ../runtime-automation/module-05/validate.yml
+  when: run_optional_exploration | default(false) | bool

@@ -1,0 +1,245 @@
+---
+- import_playbook: ../bastion.yml
+
+- name: Optional Module 05 — Platform Overview Validation
+  hosts: bastion
+  gather_facts: false
+  vars_files:
+    - ../vars.yml
+  vars:
+    student_user: "{{ user | default('') }}"
+  environment:
+    KUBECONFIG: "{{ bastion_kubeconfig }}"
+
+  tasks:
+
+    # -------------------------------------------------------
+    # Check 1 — All pods in osac namespace are Running or Succeeded
+    # -------------------------------------------------------
+    - name: Get all pods in osac namespace
+      ansible.builtin.command: oc get Pod -n osac -o json
+      register: r_osac_pods_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 2 — All platform deployments in osac namespace are Available
+    # -------------------------------------------------------
+    - name: Get platform deployments in osac namespace
+      ansible.builtin.command: oc get deployments -n osac -o json
+      register: r_csvs_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 3 — Route with name containing 'osac-ui' exists in osac namespace
+    # -------------------------------------------------------
+    - name: Get routes in osac namespace
+      ansible.builtin.command: oc get Route -n osac -o json
+      register: r_routes_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 4 — keycloak pods in keycloak namespace are Running
+    # -------------------------------------------------------
+    - name: Get pods in keycloak namespace
+      ansible.builtin.command: oc get Pod -n keycloak -o json
+      register: r_keycloak_pods_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 5 — Deployment keycloak-service in keycloak namespace has readyReplicas >= 1
+    # -------------------------------------------------------
+    - name: Get keycloak-service deployment
+      ansible.builtin.command: oc get Deployment keycloak-service -n keycloak -o json
+      register: r_keycloak_deploy_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 6 — Keycloak EndpointSlices contain a ready endpoint
+    # -------------------------------------------------------
+    - name: Get Keycloak EndpointSlices
+      ansible.builtin.command: oc get endpointslices -n keycloak -l kubernetes.io/service-name=keycloak -o json
+      register: r_keycloak_ep_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 7 — Keycloak realm API returns realm=osac with non-empty public_key
+    # -------------------------------------------------------
+    - name: Query Keycloak realm API
+      when: keycloak_url | length > 0
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/realms/osac"
+        method: GET
+        validate_certs: false
+        timeout: 10
+      register: r_keycloak_realm
+      ignore_errors: true
+
+    # -------------------------------------------------------
+    # Check 8 — At least one Kafka CR in osac-kafka with Ready condition True
+    # -------------------------------------------------------
+    - name: Get Kafka CRs in osac-kafka namespace
+      ansible.builtin.command: oc get Kafka -n osac-kafka -o json
+      register: r_kafka_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 9 — At least one Kafka broker pod running in osac-kafka
+    # -------------------------------------------------------
+    - name: Get Kafka broker pods in osac-kafka namespace
+      ansible.builtin.command: oc get Pod -n osac-kafka -l strimzi.io/kind=Kafka -o json
+      register: r_kafka_pods_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 10 — At least one KafkaTopic with name prefix 'osac.' or 'osac-' in osac-kafka
+    # -------------------------------------------------------
+    - name: Get KafkaTopics in osac-kafka namespace
+      ansible.builtin.command: oc get KafkaTopic -n osac-kafka -o json
+      register: r_kafka_topics_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Check 11 — At least one KafkaUser exists in osac-kafka
+    # -------------------------------------------------------
+    - name: Get KafkaUsers in osac-kafka namespace
+      ansible.builtin.command: oc get KafkaUser -n osac-kafka -o json
+      register: r_kafka_users_command
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------
+    # Build task results
+    # -------------------------------------------------------
+    - name: Normalize cluster query results
+      ansible.builtin.set_fact:
+        r_osac_pods: "{{ {'resources': (r_osac_pods_command.stdout | from_json).get('items', []) if r_osac_pods_command.rc == 0 else []} }}"
+        r_csvs: "{{ {'resources': (r_csvs_command.stdout | from_json).get('items', []) if r_csvs_command.rc == 0 else []} }}"
+        r_routes: "{{ {'resources': (r_routes_command.stdout | from_json).get('items', []) if r_routes_command.rc == 0 else []} }}"
+        r_keycloak_pods: "{{ {'resources': (r_keycloak_pods_command.stdout | from_json).get('items', []) if r_keycloak_pods_command.rc == 0 else []} }}"
+        r_keycloak_deploy: "{{ {'resources': [(r_keycloak_deploy_command.stdout | from_json)] if r_keycloak_deploy_command.rc == 0 else []} }}"
+        r_keycloak_ep: "{{ {'resources': (r_keycloak_ep_command.stdout | from_json).get('items', []) if r_keycloak_ep_command.rc == 0 else []} }}"
+        r_kafka: "{{ {'resources': (r_kafka_command.stdout | from_json).get('items', []) if r_kafka_command.rc == 0 else []} }}"
+        r_kafka_pods: "{{ {'resources': (r_kafka_pods_command.stdout | from_json).get('items', []) if r_kafka_pods_command.rc == 0 else []} }}"
+        r_kafka_topics: "{{ {'resources': (r_kafka_topics_command.stdout | from_json).get('items', []) if r_kafka_topics_command.rc == 0 else []} }}"
+        r_kafka_users: "{{ {'resources': (r_kafka_users_command.stdout | from_json).get('items', []) if r_kafka_users_command.rc == 0 else []} }}"
+
+    - name: Build task results
+      ansible.builtin.set_fact:
+        _task1_ok: >-
+          {{ r_osac_pods.resources | default([]) | length > 0 and
+             r_osac_pods.resources |
+               rejectattr('status.phase', 'equalto', 'Running') |
+               rejectattr('status.phase', 'equalto', 'Succeeded') |
+               list | length == 0 }}
+        _task2_ok: >-
+          {{ r_csvs.resources | length > 0 and
+             r_csvs.resources | selectattr('status.conditions', 'defined') |
+             map(attribute='status.conditions') | flatten |
+             selectattr('type', 'equalto', 'Available') |
+             selectattr('status', 'equalto', 'True') | list | length == r_csvs.resources | length }}
+        _task3_ok: >-
+          {{ r_routes.resources | default([]) |
+             map(attribute='metadata.name') |
+             select('match', 'osac-ui') |
+             list | length > 0 }}
+        _task4_ok: >-
+          {{ r_keycloak_pods.resources | default([]) |
+             selectattr('status.phase', 'equalto', 'Running') |
+             list | length > 0 }}
+        _task5_ok: >-
+          {{ r_keycloak_deploy.resources | default([]) | length > 0 and
+             (r_keycloak_deploy.resources[0].status.readyReplicas | default(0)) | int >= 1 }}
+        _task6_ok: >-
+          {{ r_keycloak_ep.resources | map(attribute='endpoints', default=[]) | flatten |
+             selectattr('conditions.ready', 'defined') |
+             selectattr('conditions.ready', 'equalto', true) | list | length > 0 }}
+        _task7_ok: >-
+          {{ r_keycloak_realm is defined and
+             r_keycloak_realm is not skipped and
+             r_keycloak_realm is not failed and
+             (r_keycloak_realm.json | default({})).realm | default('') == 'osac' and
+             (r_keycloak_realm.json | default({})).public_key | default('') | length > 0 }}
+        _task8_ok: >-
+          {{ r_kafka.resources | default([]) | length > 0 and
+             r_kafka.resources |
+               map(attribute='status.conditions', default=[]) |
+               flatten |
+               selectattr('type', 'equalto', 'Ready') |
+               selectattr('status', 'equalto', 'True') |
+               list | length > 0 }}
+        _task9_ok: >-
+          {{ r_kafka_pods.resources | default([]) |
+             selectattr('status.phase', 'equalto', 'Running') |
+             list | length > 0 }}
+        _task10_ok: >-
+          {{ r_kafka_topics.resources | default([]) |
+             map(attribute='metadata.name') |
+             select('match', 'osac[.-]') |
+             list | length > 0 }}
+        _task11_ok: >-
+          {{ r_kafka_users.resources | default([]) | length > 0 }}
+
+    # -------------------------------------------------------
+    # Validate all tasks
+    # -------------------------------------------------------
+    - name: Validate all tasks
+      delegate_to: localhost
+      validation_check:
+        check: >-
+          {{ _task1_ok and _task2_ok and _task3_ok and _task4_ok and _task5_ok and
+             _task6_ok and _task7_ok and _task8_ok and _task9_ok and _task10_ok and _task11_ok }}
+        pass_msg: |
+          ✅ Task 1: All pods in osac namespace are Running or Succeeded
+          ✅ Task 2: All platform deployments in osac namespace are Available
+          ✅ Task 3: Route 'osac-ui' exists in osac namespace
+          ✅ Task 4: Keycloak pods are Running in keycloak namespace
+          ✅ Task 5: Deployment keycloak-service has readyReplicas >= 1
+          ✅ Task 6: Keycloak EndpointSlice has a ready endpoint
+          ✅ Task 7: Keycloak realm API returns realm=osac with public_key
+          ✅ Task 8: Kafka CR is Ready in osac-kafka namespace
+          ✅ Task 9: Kafka broker pod is running in osac-kafka namespace
+          ✅ Task 10: KafkaTopic with 'osac.' or 'osac-' prefix exists in osac-kafka namespace
+          ✅ Task 11: KafkaUser exists in osac-kafka namespace
+        error_msg: |
+          {{ '✅' if _task1_ok else '❌' }} Task 1: osac namespace pods — \
+          {{ 'all Running or Succeeded' if _task1_ok else 'FAILED — pods not healthy; run: oc get pods -n osac' }}
+          {{ '✅' if _task2_ok else '❌' }} Task 2: Platform deployments — \
+          {{ 'all Available' if _task2_ok else 'FAILED — operators not ready; run: oc get deploy -n osac' }}
+          {{ '✅' if _task3_ok else '❌' }} Task 3: osac-ui route — \
+          {{ 'exists' if _task3_ok else 'FAILED — route not found; run: oc get routes -n osac' }}
+          {{ '✅' if _task4_ok else '❌' }} Task 4: Keycloak pods — \
+          {{ 'running' if _task4_ok else 'FAILED — no running pods; run: oc get pods -n keycloak' }}
+          {{ '✅' if _task5_ok else '❌' }} Task 5: keycloak-service deployment — \
+          {{ 'ready' if _task5_ok else 'FAILED — deployment not ready; run: oc get deploy keycloak-service -n keycloak' }}
+          {{ '✅' if _task6_ok else '❌' }} Task 6: Keycloak EndpointSlices — \
+          {{ 'populated' if _task6_ok else 'FAILED — no endpoints; run: oc get endpointslices -n keycloak' }}
+          {{ '✅' if _task7_ok else '❌' }} Task 7: Keycloak realm API — \
+          {{ 'OK' if _task7_ok else 'FAILED — realm endpoint not responding; check Keycloak pod logs' }}
+          {{ '✅' if _task8_ok else '❌' }} Task 8: Kafka CR Ready — \
+          {{ 'Ready' if _task8_ok else 'FAILED — Kafka not ready; run: oc get kafka -n osac-kafka' }}
+          {{ '✅' if _task9_ok else '❌' }} Task 9: Kafka broker pod — \
+          {{ 'running' if _task9_ok else 'FAILED — no broker pods; run: oc get pods -n osac-kafka -l strimzi.io/kind=Kafka' }}
+          {{ '✅' if _task10_ok else '❌' }} Task 10: KafkaTopic with osac. or osac- prefix — \
+          {{ 'exists' if _task10_ok else 'FAILED — no topics found; run: oc get kafkatopics -n osac-kafka' }}
+          {{ '✅' if _task11_ok else '❌' }} Task 11: KafkaUser — \
+          {{ 'exists' if _task11_ok else 'FAILED — no KafkaUsers; run: oc get kafkausers -n osac-kafka' }}
+      register: r_validate
+      ignore_errors: true
+
+    - name: Show validation results
+      ansible.builtin.debug:
+        msg: "{{ r_validate.msg }}"
+
+    - name: Fail if validation did not pass
+      ansible.builtin.fail:
+        msg: "One or more validation checks failed — see results above"
+      when: r_validate.failed | default(false)

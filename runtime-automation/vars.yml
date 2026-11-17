@@ -19,7 +19,7 @@ config_breakglass: "{{ bastion_home }}/breakglass"
 disk_image_name: fedora
 instance_type_name: small-1-2
 catalog_item_name: standard-linux-vm
-# Module 4 provisions a libvirt host through Metal3, not a KubeVirt worker VM.
+# Module 3 provisions a libvirt host through Metal3, not a KubeVirt worker VM.
 bmf: 10.10.10.2
 vm_name: virtual-bmh-1
 vm_mac: "52:54:00:ca:aa:01"
@@ -28,3 +28,14 @@ catalog_item: hosted-ci-small
 cluster_template: ocp-ci-small
 cluster_name: sai-corp-cluster-1
 ocp_version: 4.22.0
+# Module 4 uses separate capacity and a selector that cannot claim CaaS hosts.
+bmaas_vm_name: virtual-bmh-2
+bmaas_vm_mac: "52:54:00:ca:aa:02"
+bmaas_host_type: bmaas
+bmaas_instance_type: c1-bmaas-amd64
+bmaas_disk_image: rhcos-4-22
+bmaas_catalog_item: demo-bm-default
+bmaas_instance_name: sai-corp-bm-1
+bmaas_template: osac.templates.bm_host_provisioning
+bmaas_ssh_key_secret: bmaas-ssh-key
+bmaas_expected_state: running
