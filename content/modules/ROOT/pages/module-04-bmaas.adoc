@@ -59,6 +59,13 @@ Use the fulfillment *internal* API supplied with this lab. All `--config` argume
 osac --config "$HOME/admin" get baremetalinstancetemplates
 ----
 +
+.Sample output
+----
+TENANT  DELETING  ID                                         NAME                        TITLE
+shared  -         osac.templates.bm_host_agent_provisioning  bm-host-agent-provisioning  Bare Metal Host Agent Provisioning
+shared  -         osac.templates.bm_host_provisioning        bm-host-provisioning        Bare Metal Host Image Provisioning
+----
++
 The list must include `osac.templates.bm_host_provisioning`. If the BMaaS service or template is missing, ask your instructor to check the deployment's `bmaas.enabled` setting before continuing.
 
 . Verify Sushy and Metal3's namespace scope:
@@ -84,6 +91,12 @@ watchAllNamespaces=true
 ----
 oc get bmh -n osac \
   -o custom-columns=NAME:.metadata.name,STATUS:.status.operationalStatus,STATE:.status.provisioning.state,HOST-TYPE:.metadata.labels.osac\.openshift\.io/host-type,CONSUMER:.spec.consumerRef.name,ONLINE:.spec.online,ERROR:.status.errorMessage
+----
++
+.Sample output (if you completed Module 3)
+----
+NAME            STATUS   STATE         HOST-TYPE   CONSUMER                               ONLINE   ERROR
+virtual-bmh-1   OK       provisioned   <none>      b387efac-f0fe-448e-991d-169642212c7a   true     
 ----
 +
 If you completed Module 3, `virtual-bmh-1` is already provisioned for CaaS. Leave its consumer, labels, and power settings intact. This module uses a different VM, MAC address, and host selector:
@@ -117,6 +130,13 @@ The new host needs a blank disk, a unique MAC, and UEFI firmware without Secure 
 sudo ssh 10.10.10.2
 virsh -c qemu:///system list --all
 ----
++
+.Sample output
+----
+ Id   Name            State
+-------------------------------
+ 3    virtual-bmh-1   running
+----
 
 . If `virtual-bmh-2` is absent, create it:
 +
@@ -129,6 +149,14 @@ virt-install --name virtual-bmh-2 \
   --boot loader=/usr/share/edk2/ovmf/OVMF_CODE.fd,loader_ro=yes,loader_type=pflash,nvram_template=/usr/share/edk2/ovmf/OVMF_VARS.fd \
   --os-variant rhel9-unknown \
   --import --noautoconsole
+----
++
+.Sample output
+----
+Starting install...
+Allocating 'virtual-bmh-3.qcow2'                                                                                  |  60 GB  00:00:00     
+Creating domain...                                                                                                |         00:00:00     
+Domain creation completed.
 ----
 +
 Use the explicit `OVMF_CODE.fd` loader shown here. The generic `--boot uefi` option can select Secure Boot firmware in this lab, which prevents the inspection agent from booting correctly.
