@@ -1,0 +1,30 @@
+---
+# AgnosticD user info supplies the URLs and credentials for the deployed lab.
+osac_namespace: osac
+tenant_name: sai-corp
+tenant_admin: alice
+tenant_user: bob
+project_name: sai-corp-default-project
+keycloak_url: "{{ osac_keycloak_url | default('https://keycloak-keycloak.' ~ openshift_cluster_ingress_domain) }}"
+fulfillment_api_url: "{{ osac_fulfillment_internal_api_url | default('https://fulfillment-internal-api-osac.' ~ openshift_cluster_ingress_domain) }}"
+bastion_home: "/home/{{ bastion_ssh_user_name }}"
+bastion_kubeconfig: "{{ bastion_home }}/.kube/config"
+# copy resolves relative sources against the importing module's directory.
+device_login_script_src: ../scripts/osac-device-login.sh
+device_login_script: "{{ bastion_home }}/osac-device-login.sh"
+config_admin: "{{ bastion_home }}/admin"
+config_alice: "{{ bastion_home }}/alice"
+config_bob: "{{ bastion_home }}/bob"
+config_breakglass: "{{ bastion_home }}/breakglass"
+disk_image_name: fedora
+instance_type_name: small-1-2
+catalog_item_name: standard-linux-vm
+# Module 4 provisions a libvirt host through Metal3, not a KubeVirt worker VM.
+bmf: 10.10.10.2
+vm_name: virtual-bmh-1
+vm_mac: "52:54:00:ca:aa:01"
+bmit_name: c1-metal-amd64
+catalog_item: hosted-ci-small
+cluster_template: ocp-ci-small
+cluster_name: sai-corp-cluster-1
+ocp_version: 4.22.0

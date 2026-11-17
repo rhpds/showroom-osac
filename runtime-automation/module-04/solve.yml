@@ -3,43 +3,21 @@
 # Runs the module steps on the bastion as lab-user: worker BMH on the BMF host,
 # catalog objects, Alice's cluster order with the dns.noop workarounds, and
 # public access to the hosted cluster's API and console (Exercise 6).
-- name: Register bastion in inventory
-  hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: Add bastion host
-      ansible.builtin.add_host:
-        name: bastion
-        ansible_host: "{{ bastion_public_hostname }}"
-        ansible_port: "{{ bastion_ssh_port }}"
-        ansible_user: "{{ bastion_ssh_user_name }}"
-        ansible_password: "{{ bastion_ssh_password }}"
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+- import_playbook: ../bastion.yml
 
 - name: Module 04 - Cluster as a Service Solve
   hosts: bastion
   gather_facts: false
+  vars_files:
+    - ../vars.yml
   vars:
-    tenant_name: sai-corp
-    keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
-    fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
-    device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
-    device_login_script: "/home/{{ bastion_ssh_user_name }}/osac-device-login.sh"
-    bmf: 10.10.10.2
-    vm_name: virtual-bmh-1
-    vm_mac: "52:54:00:ca:aa:01"
-    bmit_name: c1-metal-amd64
-    catalog_item: hosted-ci-small
-    cluster_template: ocp-ci-small
-    cluster_name: sai-corp-cluster-1
-    ocp_version: 4.22.0
     # guest_ssh as in the lab's ~/.bashrc helper; the guest IP is passed in GUEST_IP
     guest_ssh: >-
       ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no
       -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
       -o 'ProxyCommand=sudo ssh -W %h:%p root@{{ bmf }}' core@${GUEST_IP}
   environment:
-    KUBECONFIG: "/home/{{ bastion_ssh_user_name }}/.kube/config"
+    KUBECONFIG: "{{ bastion_kubeconfig }}"
 
   tasks:
 
@@ -65,11 +43,12 @@
       changed_when: false
 
     - name: Login as cloud administrator (private API)
+      no_log: true
       ansible.builtin.shell: >-
         osac --config "$HOME/admin" login --insecure --private
         --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
+        --user={{ osac_admin_user | quote }}
+        --password={{ osac_admin_password | quote }}
         --issuer="{{ keycloak_url }}/realms/osac"
         {{ fulfillment_api_url }}
       changed_when: false
@@ -124,6 +103,7 @@
       changed_when: false
 
     - name: Create the BMC secret and the BareMetalHost
+      no_log: true
       ansible.builtin.shell: |
         oc apply -f - <<EOF
         ---
@@ -205,10 +185,11 @@
     # =========================================================================
 
     - name: Login as Alice via device flow
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "alice" "{{ osac_user_password }}"
+        "alice" {{ osac_user_password | quote }}
         "$HOME/alice" "{{ tenant_name }}"
       changed_when: false
 
@@ -224,10 +205,16 @@
         - r_pull_secret.rc != 0
         - "'already exists' not in r_pull_secret.stderr"
 
-    - name: Place the cluster order (once)
+    - name: Check whether Alice's cluster already exists
+      ansible.builtin.shell: osac --config "$HOME/alice" get cluster {{ cluster_name }} -o json
+      register: r_existing_cluster
+      changed_when: false
+      failed_when: false
+
+    - name: Place cluster order (once)
+      when: r_existing_cluster.rc != 0 or (r_existing_cluster.stdout | from_json) | length == 0
       ansible.builtin.shell: >-
-        oc get clusterorder -n osac -o name | grep -q . && echo exists
-        || osac --config "$HOME/alice" create cluster
+        osac --config "$HOME/alice" create cluster
         --name {{ cluster_name }}
         --catalog-item {{ catalog_item }}
         --version {{ ocp_version }}
@@ -238,13 +225,19 @@
       register: r_order
       changed_when: "'exists' not in r_order.stdout"
 
-    - name: Wait for the ClusterOrder
-      ansible.builtin.shell: >-
-        oc get clusterorder -n osac --sort-by=.metadata.creationTimestamp
-        -o jsonpath='{.items[-1:].metadata.name}'
+    - name: Read Alice's cluster ID
+      ansible.builtin.shell: osac --config "$HOME/alice" get cluster {{ cluster_name }} -o json
+      register: r_cluster_identity
+      changed_when: false
+
+    - name: Wait for the matching ClusterOrder
+      ansible.builtin.command: >-
+        oc get clusterorder -n {{ osac_namespace }}
+        -l osac.openshift.io/clusterorder-uuid={{ (r_cluster_identity.stdout | from_json).id }}
+        -o jsonpath='{.items[*].metadata.name}'
       register: r_order_name
       changed_when: false
-      until: r_order_name.stdout | length > 0
+      until: r_order_name.rc == 0 and r_order_name.stdout.split() | length == 1
       retries: 20
       delay: 15
 
@@ -365,6 +358,12 @@
       until: r_agent_stage.stdout == 'Done'
       retries: 80
       delay: 30
+
+    - name: Create the hosted kubeconfig directory
+      ansible.builtin.file:
+        path: "/tmp/{{ order_name }}"
+        state: directory
+        mode: '0700'
 
     - name: Extract the hosted cluster admin kubeconfig
       ansible.builtin.shell: oc extract secret/{{ order_name }}-admin-kubeconfig -n {{ hcp_ns }} --to=/tmp/{{ order_name }} --confirm

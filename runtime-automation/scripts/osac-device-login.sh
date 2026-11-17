@@ -85,7 +85,7 @@ LOGIN_ACTION=$(cat "${RESP_FILE}" | py_extract 'action="([^"]+)"')
 # Submit username
 curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   -D "${HDR_FILE}" -o "${RESP_FILE}" \
-  -X POST "${LOGIN_ACTION}" -d "username=${USERNAME}"
+  -X POST "${LOGIN_ACTION}" --data-urlencode "username=${USERNAME}"
 
 HTTP_CODE=$(grep "^HTTP" "${HDR_FILE}" | tail -1 | awk '{print $2}')
 
@@ -113,7 +113,8 @@ IDP_ACTION=$(cat "${RESP_FILE}" | py_extract 'action="([^"]+)"')
 curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   -D "${HDR_FILE}" -o /dev/null \
   -X POST "${IDP_ACTION}" \
-  -d "username=${USERNAME}&password=${PASSWORD}&credentialId="
+  --data-urlencode "username=${USERNAME}" \
+  --data-urlencode "password=${PASSWORD}" --data-urlencode "credentialId="
 
 # Follow broker callback → consent page
 REDIRECT=$(fixurl "$(get_redirect)")
@@ -127,7 +128,7 @@ HIDDEN_CODE=$(cat "${RESP_FILE}" | py_extract 'name="code"\s+value="([^"]+)"')
 CONSENT_ACTION=$(fixurl "${CONSENT_ACTION}")
 
 curl -sk -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
-  -X POST "${CONSENT_ACTION}" -d "code=${HIDDEN_CODE}&accept=Yes" -o /dev/null
+  -X POST "${CONSENT_ACTION}" --data-urlencode "code=${HIDDEN_CODE}" --data-urlencode "accept=Yes" -o /dev/null
 >&2 echo "Consent approved."
 
 # Wait for osac login to finish

@@ -1,0 +1,16 @@
+---
+# Shared by standalone module buttons and the QA orchestrators.
+- name: Register bastion in inventory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Add bastion host
+      ansible.builtin.add_host:
+        name: bastion
+        ansible_host: "{{ bastion_public_hostname }}"
+        ansible_port: "{{ bastion_ssh_port | default(22) }}"
+        ansible_user: "{{ bastion_ssh_user_name }}"
+        ansible_password: "{{ bastion_ssh_password }}"
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+      no_log: true

@@ -1,39 +1,20 @@
 ---
 # Module 2: Tenant Onboarding and Identity Management — validate playbook
-- name: Register bastion in inventory
-  hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: Add bastion host
-      ansible.builtin.add_host:
-        name: bastion
-        ansible_host: "{{ bastion_public_hostname }}"
-        ansible_port: "{{ bastion_ssh_port }}"
-        ansible_user: "{{ bastion_ssh_user_name }}"
-        ansible_password: "{{ bastion_ssh_password }}"
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+- import_playbook: ../bastion.yml
 
 - name: Module 02 - Tenant Onboarding and Identity Management Validation
   hosts: bastion
   gather_facts: false
+  vars_files:
+    - ../vars.yml
   vars:
     student_user: "{{ user | default('') }}"
-    osac_namespace: osac
-    tenant_name: sai-corp
-    tenant_admin: alice
-    tenant_user: bob
-    project_name: sai-corp-default-project
     idp_realm: sai-corp-idp
     idp_client_id: osac-federation
-    keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
-    fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
     break_glass_user: "{{ tenant_name }}-osac-break-glass"
-    device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
-    device_login_script: "/home/{{ bastion_ssh_user_name }}/osac-device-login.sh"
-    config_admin: "/home/{{ bastion_ssh_user_name }}/admin"
-    config_breakglass: "/home/{{ bastion_ssh_user_name }}/breakglass"
-    config_alice: "/home/{{ bastion_ssh_user_name }}/alice"
-    config_bob: "/home/{{ bastion_ssh_user_name }}/bob"
+
+  environment:
+    KUBECONFIG: "{{ bastion_kubeconfig }}"
 
   tasks:
 
@@ -48,6 +29,7 @@
     # Pre-flight — Keycloak admin token for all KC API checks
     # -------------------------------------------------------
     - name: Get Keycloak admin token
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
         method: POST
@@ -80,6 +62,7 @@
     # Check 2 — Keycloak realm sai-corp-idp exists and is enabled
     # -------------------------------------------------------
     - name: Check KC realm sai-corp-idp exists and is enabled
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}"
         method: GET
@@ -94,6 +77,7 @@
     # Check 3 — KC OIDC client osac-federation exists in sai-corp-idp
     # -------------------------------------------------------
     - name: Check KC client osac-federation in sai-corp-idp
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/clients?clientId={{ idp_client_id }}"
         method: GET
@@ -108,6 +92,7 @@
     # Check 4 — KC users alice and bob exist in sai-corp-idp and are enabled
     # -------------------------------------------------------
     - name: Check KC user alice in sai-corp-idp
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/users?username={{ tenant_admin }}&exact=true"
         method: GET
@@ -119,6 +104,7 @@
       ignore_errors: true
 
     - name: Check KC user bob in sai-corp-idp
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/users?username={{ tenant_user }}&exact=true"
         method: GET
@@ -133,6 +119,7 @@
     # Check 5 — Keycloak organization sai-corp exists in osac realm and is enabled
     # -------------------------------------------------------
     - name: Check KC org sai-corp in osac realm
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/osac/organizations?search={{ tenant_name }}"
         method: GET
@@ -145,12 +132,13 @@
 
     - name: Set KC org ID fact
       ansible.builtin.set_fact:
-        kc_org_id: "{{ (r_org.json | default([{}]) | first).id | default('') }}"
+        kc_org_id: "{{ (r_org.json | default([]) | first | default({})).id | default('') }}"
 
     # -------------------------------------------------------
     # Check 6 — KC org sai-corp members include alice, bob, and break-glass
     # -------------------------------------------------------
     - name: Check KC org sai-corp members
+      no_log: true
       when: kc_org_id | length > 0
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/osac/organizations/{{ kc_org_id }}/members"
@@ -166,12 +154,13 @@
     # Pre-flight — OSAC platform admin login
     # -------------------------------------------------------
     - name: Login as OSAC platform admin
+      no_log: true
       ansible.builtin.shell: >-
         osac --config "{{ config_admin }}" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
+        --user={{ osac_admin_user | quote }}
+        --password={{ osac_admin_password | quote }}
         {{ fulfillment_api_url }}
       changed_when: false
       ignore_errors: true
@@ -200,12 +189,13 @@
     # Pre-flight — Login as break-glass to check tenant secret
     # -------------------------------------------------------
     - name: Login as break-glass user
+      no_log: true
       ansible.builtin.shell: >-
         osac --config "{{ config_breakglass }}" login --insecure
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
-        --user={{ break_glass_user }}
-        --password={{ osac_user_password }}
+        --user={{ break_glass_user | quote }}
+        --password={{ osac_user_password | quote }}
         {{ fulfillment_api_url }}
       changed_when: false
       ignore_errors: true
@@ -224,10 +214,11 @@
     # Pre-flight — Login as alice (tenant-admin) for project checks
     # -------------------------------------------------------
     - name: Login as alice via device flow (if not already logged in)
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "{{ tenant_admin }}" "{{ osac_user_password }}"
+        "{{ tenant_admin }}" {{ osac_user_password | quote }}
         "{{ config_alice }}" "{{ tenant_name }}"
       changed_when: false
       ignore_errors: true
@@ -256,10 +247,11 @@
     # Pre-flight — Login as bob for RBAC enforcement check
     # -------------------------------------------------------
     - name: Login as bob via device flow (if not already logged in)
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "{{ tenant_user }}" "{{ osac_user_password }}"
+        "{{ tenant_user }}" {{ osac_user_password | quote }}
         "{{ config_bob }}" "{{ tenant_name }}"
       changed_when: false
       ignore_errors: true
@@ -276,6 +268,7 @@
       ansible.builtin.shell: >-
         osac --config "{{ config_bob }}" get users
       register: r_bob_rbac
+      failed_when: false
       changed_when: false
       ignore_errors: true
 
@@ -332,6 +325,7 @@
              'PermissionDenied' in (r_bob_rbac.stdout | default('')) }}
 
     - name: Validate all tasks
+      delegate_to: localhost
       validation_check:
         check: >-
           {{ _task1_ok and _task2_ok and _task3_ok and _task4_ok and

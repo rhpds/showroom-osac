@@ -28,3 +28,24 @@ Run manually with:
 ansible-playbook qa-automation/healthcheck.yml
 ansible-playbook qa-automation/e2e.yml
 ```
+
+Both entry points need the lab's AgnosticD user-info variables (supplied by
+Nookbag). For a manual run, pass them with `-e @/path/to/user-info.yml`.
+The file must contain the bastion connection variables, OSAC and Keycloak
+credentials, and the URLs exported by the OSAC workload.
+
+All cluster and OSAC checks run on the bastion as the lab user, using its
+installed `oc` and `osac` commands and `$HOME/.kube/config`. The QA container
+needs Ansible and the Showroom `validation_check` plugin. Validation results
+are reported on localhost, and a failed validation stops the end-to-end run.
+
+Shared lab settings live in `runtime-automation/vars.yml`. Each module can
+also run independently: it registers the bastion and copies the device-login
+helper using paths relative to the module, including when imported by QA.
+
+Module 4 checks the current Metal3/libvirt workflow: `virtual-bmh-1`, the
+platform-provided RHCOS image and cluster version, Alice's
+`sai-corp-cluster-1`, its generated ClusterOrder/HostedCluster, the worker,
+and public API/console access. It does not require the retired
+`hardware-inventory` KubeVirt worker setup. A full e2e run provisions the
+VM and hosted cluster and can take an hour or more.

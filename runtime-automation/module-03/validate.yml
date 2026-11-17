@@ -1,32 +1,37 @@
 ---
+- import_playbook: ../bastion.yml
+
 # Module 3: Virtual Machine as a Service — validate playbook
 - name: Module 03 - Virtual Machine as a Service Validation
-  hosts: localhost
-  connection: local
+  hosts: bastion
   gather_facts: false
+  vars_files:
+    - ../vars.yml
   vars:
     student_user: "{{ user | default('') }}"
-    osac_namespace: osac
-    tenant_name: sai-corp
-    disk_image_name: fedora
-    instance_type_name: small-1-2
-    catalog_item_name: standard-linux-vm
-    keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
-    fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
-    device_login_script: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
+
+  environment:
+    KUBECONFIG: "{{ bastion_kubeconfig }}"
 
   tasks:
+    - name: Copy device login script to bastion
+      ansible.builtin.copy:
+        src: "{{ device_login_script_src }}"
+        dest: "{{ device_login_script }}"
+        mode: '0755'
+      changed_when: false
 
     # -------------------------------------------------------
     # Pre-flight — Login as platform admin
     # -------------------------------------------------------
     - name: Login as platform admin
+      no_log: true
       ansible.builtin.shell: >-
         osac --config "$HOME/admin" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
+        --user={{ osac_admin_user | quote }}
+        --password={{ osac_admin_password | quote }}
         {{ fulfillment_api_url }}
       changed_when: false
       ignore_errors: true
@@ -41,7 +46,7 @@
         oc get tenant {{ tenant_name }} -n {{ osac_namespace }}
         -o jsonpath='{.status.phase} {.status.storageClasses}'
       environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
+        KUBECONFIG: "{{ bastion_kubeconfig }}"
       register: r_tenant
       changed_when: false
       ignore_errors: true
@@ -70,9 +75,8 @@
     # Check 4 — Catalog item 'standard-linux-vm' is published
     # -------------------------------------------------------
     - name: Check catalog item standard-linux-vm is published
-      ansible.builtin.shell: |
-        osac --config "$HOME/admin" get computeinstancecatalogitem {{ catalog_item_name }} -o json |
-        python3 -c "import json,sys; d=json.load(sys.stdin); print('OK' if d.get('published') else 'FAIL')"
+      ansible.builtin.shell: >-
+        osac --config "$HOME/admin" get computeinstancecatalogitem {{ catalog_item_name }} -o json
       register: r_catalog
       changed_when: false
       ignore_errors: true
@@ -81,10 +85,11 @@
     # Pre-flight — Login as Alice for networking and VM checks (once)
     # -------------------------------------------------------
     - name: Login as Alice via device flow (once, idempotent)
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "alice" "{{ osac_user_password }}"
+        "alice" {{ osac_user_password | quote }}
         "$HOME/alice" "{{ tenant_name }}"
       changed_when: false
       ignore_errors: true
@@ -125,35 +130,50 @@
     # -------------------------------------------------------
     # Check 7 — VirtualMachine resource is Running on the cluster
     # -------------------------------------------------------
-    - name: Check VirtualMachine Running status in OCP
-      ansible.builtin.shell: >-
-        oc get vm -n {{ tenant_name }} -o jsonpath='{.items[*].status.printableStatus}'
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
+    - name: Read portal-vm instance ID
+      ansible.builtin.set_fact:
+        compute_instance_id: "{{ (r_vm_osac.stdout | from_json).get('id', 'missing') if r_vm_osac.rc == 0 else 'missing' }}"
+
+    - name: Find portal-vm VirtualMachine
+      ansible.builtin.command: >-
+        oc get vm -n {{ tenant_name }}
+        -l osac.openshift.io/compute-instance-id={{ compute_instance_id }} -o json
       register: r_vm_k8s
       changed_when: false
-      ignore_errors: true
+      failed_when: false
 
-    # -------------------------------------------------------
-    # Check 8 — DataVolume for portal-vm has Succeeded
-    # -------------------------------------------------------
-    - name: Check DataVolume Succeeded phase in OCP
-      ansible.builtin.shell: >-
-        oc get dv -n {{ tenant_name }} -o jsonpath='{.items[*].status.phase}'
-      environment:
-        KUBECONFIG: "{{ k8s_kubeconfig }}"
+    - name: Read portal-vm VirtualMachine result
+      ansible.builtin.set_fact:
+        portal_vms: "{{ (r_vm_k8s.stdout | from_json).get('items', []) if r_vm_k8s.rc == 0 else [] }}"
+
+    - name: Read portal-vm boot disk names
+      ansible.builtin.set_fact:
+        portal_disks: >-
+          {{ portal_vms | map(attribute='spec.template.spec.volumes', default=[]) | flatten |
+             selectattr('dataVolume', 'defined') | map(attribute='dataVolume.name') | list }}
+
+    - name: Check portal-vm boot DataVolumes
+      ansible.builtin.command: oc get dv {{ item }} -n {{ tenant_name }} -o json
+      loop: "{{ portal_disks }}"
       register: r_dv
       changed_when: false
-      ignore_errors: true
+      failed_when: false
+
+    - name: Read portal-vm boot DataVolume results
+      ansible.builtin.set_fact:
+        portal_disk_phases: >-
+          {{ r_dv.results | default([]) | selectattr('rc', 'equalto', 0) |
+             map(attribute='stdout') | map('from_json') | map(attribute='status.phase', default='') | list }}
 
     # -------------------------------------------------------
     # Pre-flight — Login as Bob for RBAC verification (once)
     # -------------------------------------------------------
     - name: Login as Bob via device flow (once, idempotent)
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "bob" "{{ osac_user_password }}"
+        "bob" {{ osac_user_password | quote }}
         "$HOME/bob" "{{ tenant_name }}"
       changed_when: false
       ignore_errors: true
@@ -198,7 +218,7 @@
           {{ r_instancetype.rc | default(1) == 0 and
              'ACTIVE' in (r_instancetype.stdout | default('')) }}
         _task4_ok: >-
-          {{ 'OK' in (r_catalog.stdout | default('')) }}
+          {{ r_catalog.rc | default(1) == 0 and (r_catalog.stdout | from_json).get('published', false) | bool }}
         _task5_ok: >-
           {{ r_vnet.rc | default(1) == 0 and 'READY' in (r_vnet.stdout | default('')) and
              r_subnet.rc | default(1) == 0 and 'READY' in (r_subnet.stdout | default('')) and
@@ -207,9 +227,9 @@
           {{ r_vm_osac.rc | default(1) == 0 and
              'RUNNING' in (r_vm_osac.stdout | default('')) }}
         _task7_ok: >-
-          {{ 'Running' in (r_vm_k8s.stdout | default('')) }}
+          {{ portal_vms | length == 1 and portal_vms[0].status.printableStatus | default('') == 'Running' }}
         _task8_ok: >-
-          {{ 'Succeeded' in (r_dv.stdout | default('')) }}
+          {{ portal_disks | length > 0 and portal_disk_phases | length == portal_disks | length and portal_disk_phases | reject('equalto', 'Succeeded') | list | length == 0 }}
         _task9_ok: >-
           {{ r_bob_list.rc | default(1) == 0 and
              'portal-vm' in (r_bob_list.stdout | default('')) }}
@@ -221,6 +241,7 @@
     # Validate all tasks
     # -------------------------------------------------------
     - name: Validate all tasks
+      delegate_to: localhost
       validation_check:
         check: >-
           {{ _task1_ok and
@@ -259,3 +280,14 @@
           {{ 'ok' if _task9_ok else 'FAILED — ensure Bob has a VIEWER ProjectMembership in sai-corp; check as Alice: osac --config $HOME/alice get projectmembership' }}
           {{ '✅' if _task10_ok else '❌' }} Task 10: Bob cannot list tenant users — \
           {{ 'ok' if _task10_ok else 'FAILED — Bob should receive PermissionDenied on get users; verify he has no tenant-admin RoleBinding' }}
+      register: r_validate
+      ignore_errors: true
+
+    - name: Show validation results
+      ansible.builtin.debug:
+        msg: "{{ r_validate.msg }}"
+
+    - name: Fail if validation did not pass
+      ansible.builtin.fail:
+        msg: "One or more validation checks failed — see results above"
+      when: r_validate.failed | default(false)

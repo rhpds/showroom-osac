@@ -2,32 +2,17 @@
 # Module 3: Virtual Machine as a Service — solve playbook
 # Automates all exercises: storage config, catalog publishing, networking
 # verification, VM deployment, and RBAC verification.
-- name: Register bastion in inventory
-  hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: Add bastion host
-      ansible.builtin.add_host:
-        name: bastion
-        ansible_host: "{{ bastion_public_hostname }}"
-        ansible_port: "{{ bastion_ssh_port }}"
-        ansible_user: "{{ bastion_ssh_user_name }}"
-        ansible_password: "{{ bastion_ssh_password }}"
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+- import_playbook: ../bastion.yml
 
 - name: Module 03 - Virtual Machine as a Service Solve
   hosts: bastion
   gather_facts: false
+  vars_files:
+    - ../vars.yml
   vars:
-    osac_namespace: osac
-    tenant_name: sai-corp
-    keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
-    fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
-    device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
-    device_login_script: "/home/{{ bastion_ssh_user_name }}/osac-device-login.sh"
-    disk_image_name: fedora
-    instance_type_name: small-1-2
-    catalog_item_name: standard-linux-vm
+
+  environment:
+    KUBECONFIG: "{{ bastion_kubeconfig }}"
 
   tasks:
 
@@ -45,12 +30,13 @@
     # Private API, same as the module: reading storage tiers and publishing
     # catalog objects are private-API operations.
     - name: Login as platform admin (private API)
+      no_log: true
       ansible.builtin.shell: >-
         osac --config "$HOME/admin" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
+        --user={{ osac_admin_user | quote }}
+        --password={{ osac_admin_password | quote }}
         {{ fulfillment_api_url }}
       changed_when: false
 
@@ -63,7 +49,7 @@
       register: r_tenant_status
       retries: 20
       delay: 5
-      until: "'Ready' in r_tenant_status.stdout"
+      until: "r_tenant_status.rc == 0 and 'Ready' in r_tenant_status.stdout and 'local' in r_tenant_status.stdout"
       changed_when: false
 
     # =========================================================================
@@ -151,10 +137,11 @@
     # =========================================================================
 
     - name: Login as Alice via device flow (once)
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "alice" "{{ osac_user_password }}"
+        "alice" {{ osac_user_password | quote }}
         "$HOME/alice" "{{ tenant_name }}"
       changed_when: false
 
@@ -228,6 +215,7 @@
         catalog_id: "{{ r_catalog_id.stdout | trim }}"
 
     - name: Create portal-vm compute instance
+      no_log: true
       ansible.builtin.shell: |
         osac --config "$HOME/alice" create computeinstance \
           --name portal-vm \
@@ -285,10 +273,11 @@
     # =========================================================================
 
     - name: Login as Bob via device flow (once)
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "bob" "{{ osac_user_password }}"
+        "bob" {{ osac_user_password | quote }}
         "$HOME/bob" "{{ tenant_name }}"
       changed_when: false
 
@@ -312,7 +301,6 @@
       ansible.builtin.debug:
         msg: |
           === Module 03 Solve Results ===
-          Storage backend created:        {{ 'ok' if backend_id | default('') | length > 10 else 'NOT ok' }}
           Tenant sai-corp storage ready:  {{ 'ok' if  'Ready' in r_tenant_status.stdout else 'NOT ok' }}
           Disk image AVAILABLE:           {{ 'ok' if 'AVAILABLE' in r_diskimage_status.stdout else 'NOT ok' }}
           Instance type ACTIVE:           {{ 'ok' if 'ACTIVE' in r_instancetype_status.stdout else 'NOT ok' }}

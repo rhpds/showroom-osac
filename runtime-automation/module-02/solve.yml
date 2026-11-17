@@ -2,40 +2,21 @@
 # Module 2: Tenant Onboarding and Identity Management — solve playbook
 # Automates all exercises: tenant creation, IdP setup, user onboarding,
 # role assignment, project creation, and RBAC verification.
-- name: Register bastion in inventory
-  hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: Add bastion host
-      ansible.builtin.add_host:
-        name: bastion
-        ansible_host: "{{ bastion_public_hostname }}"
-        ansible_port: "{{ bastion_ssh_port }}"
-        ansible_user: "{{ bastion_ssh_user_name }}"
-        ansible_password: "{{ bastion_ssh_password }}"
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+- import_playbook: ../bastion.yml
 
 - name: Module 02 - Tenant Onboarding and Identity Management
   hosts: bastion
   gather_facts: false
+  vars_files:
+    - ../vars.yml
   vars:
-    osac_namespace: osac
-    tenant_name: sai-corp
-    tenant_admin: alice
-    tenant_user: bob
-    project_name: sai-corp-default-project
     idp_realm: sai-corp-idp
     idp_client_id: osac-federation
     idp_client_secret: osac-demo-secret
-    keycloak_url: "https://keycloak-keycloak.{{ openshift_cluster_ingress_domain }}"
-    fulfillment_api_url: "https://fulfillment-internal-api-osac.{{ openshift_cluster_ingress_domain }}"
     break_glass_user: "{{ tenant_name }}-osac-break-glass"
-    device_login_script_src: "{{ playbook_dir }}/../scripts/osac-device-login.sh"
-    device_login_script: "/home/{{ bastion_ssh_user_name }}/osac-device-login.sh"
-    config_admin: "/home/{{ bastion_ssh_user_name }}/admin"
-    config_breakglass: "/home/{{ bastion_ssh_user_name }}/breakglass"
-    config_alice: "/home/{{ bastion_ssh_user_name }}/alice"
-    config_bob: "/home/{{ bastion_ssh_user_name }}/bob"
+
+  environment:
+    KUBECONFIG: "{{ bastion_kubeconfig }}"
 
   tasks:
     # =========================================================================
@@ -59,12 +40,13 @@
     # The module logs the admin config in to the private API and leaves it there.
     # Later modules rely on that — a public session cannot read storage tiers.
     - name: Login as platform admin (private API)
+      no_log: true
       ansible.builtin.shell: >-
         osac --config "{{ config_admin }}" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
+        --user={{ osac_admin_user | quote }}
+        --password={{ osac_admin_password | quote }}
         {{ fulfillment_api_url }}
       changed_when: false
 
@@ -90,16 +72,18 @@
         - "'already exists' not in r_tenant.stderr"
 
     - name: Restore admin private API session as the admin user
+      no_log: true
       ansible.builtin.shell: >-
         osac --config "{{ config_admin }}" login --insecure --private
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
-        --user={{ osac_admin_user }}
-        --password={{ osac_admin_password }}
+        --user={{ osac_admin_user | quote }}
+        --password={{ osac_admin_password | quote }}
         {{ fulfillment_api_url }}
       changed_when: false
 
     - name: Get Keycloak admin token
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
         method: POST
@@ -120,6 +104,7 @@
       changed_when: false
 
     - name: Verify Keycloak organization exists
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/osac/organizations?search={{ tenant_name }}"
         headers:
@@ -145,6 +130,7 @@
     # =========================================================================
 
     - name: Create sai-corp-idp realm
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms"
         method: POST
@@ -161,6 +147,7 @@
       changed_when: r_realm_create.status == 201
 
     - name: Set sai-corp-idp session limits to 24h
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}"
         method: PUT
@@ -174,6 +161,7 @@
         status_code: [204]
 
     - name: Create OIDC federation client
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/clients"
         method: POST
@@ -195,6 +183,7 @@
       changed_when: r_client_create.status == 201
 
     - name: Create IdP users
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/{{ idp_realm }}/users"
         method: POST
@@ -221,6 +210,7 @@
       changed_when: r_user_create.status == 201
 
     - name: Set break-glass password as non-temporary via KC admin API
+      no_log: true
       block:
         - name: Find break-glass user ID in osac realm
           ansible.builtin.uri:
@@ -248,18 +238,19 @@
           changed_when: true
 
     - name: Login as break-glass user
+      no_log: true
       ansible.builtin.shell: >-
         osac --config "{{ config_breakglass }}" login --insecure
         --issuer="{{ keycloak_url }}/realms/osac"
         --flow=password
-        --user={{ break_glass_user }}
-        --password={{ osac_user_password }}
+        --user={{ break_glass_user | quote }}
+        --password={{ osac_user_password | quote }}
         {{ fulfillment_api_url }}
       changed_when: false
 
     - name: Create OSAC secret for IdP client secret
       ansible.builtin.shell: >-
-        echo -n "{{ idp_client_secret }}" | osac --config "{{ config_breakglass }}"
+        echo -n {{ idp_client_secret | quote }} | osac --config "{{ config_breakglass }}"
         create secret --name idp-client-secret
         --type value --from-file=value=-
       register: r_secret
@@ -303,6 +294,7 @@
       changed_when: false
 
     - name: Refresh KC token before IdP enable check
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
         method: POST
@@ -323,6 +315,7 @@
       changed_when: false
 
     - name: Get realm-level KC IdP for sai-corp
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/admin/realms/osac/identity-provider/instances/{{ tenant_name }}-{{ tenant_name }}"
         method: GET
@@ -334,6 +327,7 @@
       ignore_errors: true
 
     - name: Enable Keycloak IdP for sai-corp
+      no_log: true
       when:
         - not (r_kc_idp_instance.failed | default(true))
         - not (r_kc_idp_instance.json.enabled | default(false))
@@ -354,10 +348,11 @@
     # =========================================================================
 
     - name: Onboard Alice via device flow
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "{{ tenant_admin }}" "{{ osac_user_password }}"
+        "{{ tenant_admin }}" {{ osac_user_password | quote }}
         "{{ config_alice }}" "{{ tenant_name }}"
       changed_when: true
 
@@ -369,10 +364,11 @@
       changed_when: false
 
     - name: Onboard Bob via device flow
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "{{ tenant_user }}" "{{ osac_user_password }}"
+        "{{ tenant_user }}" {{ osac_user_password | quote }}
         "{{ config_bob }}" "{{ tenant_name }}"
       changed_when: true
 
@@ -384,6 +380,7 @@
       changed_when: false
 
     - name: Refresh KC token for org member check
+      no_log: true
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
         method: POST
@@ -398,6 +395,7 @@
       changed_when: false
 
     - name: Verify both users are in KC organization
+      no_log: true
       ansible.builtin.uri:
         url: >-
           {{ keycloak_url }}/admin/realms/osac/organizations/{{ r_kc_org.json[0].id }}/members
@@ -460,10 +458,11 @@
       changed_when: false
 
     - name: Re-login Alice to refresh token with new role
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "{{ tenant_admin }}" "{{ osac_user_password }}"
+        "{{ tenant_admin }}" {{ osac_user_password | quote }}
         "{{ config_alice }}" "{{ tenant_name }}"
       changed_when: false
 
@@ -533,10 +532,11 @@
     # =========================================================================
 
     - name: Re-login Bob to refresh token with project membership
+      no_log: true
       ansible.builtin.shell: >-
         {{ device_login_script }}
         "{{ keycloak_url }}" "{{ fulfillment_api_url }}"
-        "{{ tenant_user }}" "{{ osac_user_password }}"
+        "{{ tenant_user }}" {{ osac_user_password | quote }}
         "{{ config_bob }}" "{{ tenant_name }}"
       changed_when: false
 
