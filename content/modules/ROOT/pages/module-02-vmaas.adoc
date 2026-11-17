@@ -315,7 +315,7 @@ Created compute instance '01a0d377-5991-7e0e-8b3a-5135683208ec'.
 oc get dv -n sai-corp -w
 ----
 +
-Press `Ctrl+C` when the phase shows `Succeeded`.
+Press kbd:[Ctrl+C] when the phase shows `Succeeded`.
 
 . Check the VM status:
 +
@@ -342,7 +342,7 @@ oc get vm,vmi -A --no-headers
 +
 The `VirtualMachine` and `VirtualMachineInstance` objects should show `Running`.
 
-. Access the VM serial console (you may need to press `Enter` to see the login prompt):
+. Access the VM serial console (you may need to press kbd:[Enter] to see the login prompt):
 +
 [source,role=execute]
 ----
@@ -371,7 +371,7 @@ PRETTY_NAME="Fedora Linux 45 (Cloud Edition)"
 ...
 ----
 
-. Disconnect from the VM by typing `exit` and then press `Ctrl+]` to disconnect from the console.
+. Disconnect from the VM by typing `exit` and then press kbd:[Ctrl+\]] to disconnect from the console.
 
 == Exercise 5: Verify the platform and tenant boundary
 

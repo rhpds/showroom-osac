@@ -385,7 +385,7 @@ The CLI displays a URL and a one-time code. Complete the login in your browser (
 +
 .. Copy the URL displayed in the terminal
 .. Open a new *incognito/private* browser window
-.. Paste the URL and press Enter
+.. Paste the URL and press kbd:[Enter]
 .. Enter the code that the `osac login` command printed
 .. On the login page, enter `alice`, then click *Sign In*
 .. On the next login page, click *SAI Corp Corporate SSO* (the federated identity provider) at the bottom.
@@ -458,7 +458,7 @@ Complete the login in a *fresh incognito* window:
 +
 .. Copy the URL displayed in the terminal
 .. Open a new *incognito/private* browser window
-.. Paste the URL and press Enter
+.. Paste the URL and press kbd:[Enter]
 .. Enter the code that the `osac login` command printed
 .. On the login page, enter `bob`, then click *Sign In*
 .. On the next login page, click *SAI Corp Corporate SSO* (the federated identity provider) at the bottom.
