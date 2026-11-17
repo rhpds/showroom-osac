@@ -364,7 +364,7 @@
           loop_control:
             loop_var: power_strategy
       always:
-        - name: Restore Always run strategy after a failed power check
+        - name: Ensure the instance is left running after the power checks
           ansible.builtin.include_tasks: power.yml
           vars:
             power_strategy: ALWAYS

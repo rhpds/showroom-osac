@@ -742,6 +742,8 @@ PRETTY_NAME="Red Hat Enterprise Linux CoreOS 9.8.20260428-0 (Plow)"
 
 The *Solve* button registers separate BMaaS capacity, publishes the offering, orders Alice's server, checks a halt/start cycle, and verifies SSH. It leaves the server running. It refuses to reuse a host owned by another workload. Inspection and provisioning can take 10–30 minutes.
 
+While waiting for inspection, provisioning, power changes, or SSH, Ansible may print `FAILED - RETRYING`. These are pending readiness checks; the solve continues polling. A successful run ends with `failed=0` in the play recap and `Completed successfully`. The final task to ensure the instance is running executes after both successful and failed power checks.
+
 ++++
 <div class="solve-button-placeholder" data-module="module-04"></div>
 ++++
