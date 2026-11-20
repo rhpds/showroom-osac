@@ -284,6 +284,14 @@
     when: console_route.get('spec', {}).get('host', '') | length > 0
     register: r_console
     failed_when: false
+  - name: Show observed cluster and order state
+    ansible.builtin.debug:
+      msg:
+      - 'osac cluster rc: {{ r_cluster.rc | default("n/a") }}'
+      - 'osac cluster keys: {{ cluster.keys() | list }}'
+      - 'osac cluster status.state: {{ cluster.get("status", {}).get("state", "<unset>") }}'
+      - 'ClusterOrder name: {{ order_name | default("<unset>") }}'
+      - 'ClusterOrder status.phase: {{ order.get("status", {}).get("phase", "<unset>") }}'
   - name: Build task results
     ansible.builtin.set_fact:
       module03_checks:
@@ -307,8 +315,9 @@
         OpenShift version is registered: '{{ r_versions.rc == 0 and ocp_version in r_versions.stdout }}'
         Hosted cluster catalog item is published: '{{ r_catalog.rc == 0 and catalog.get(''published'', false) |
           bool }}'
-        Alice cluster and its matching ClusterOrder are Ready: '{{ r_cluster.rc == 0 and ''READY'' in cluster.get(''status'',
-          {}).get(''state'', '''') and order.get(''status'', {}).get(''phase'', '''') == ''Ready'' }}'
+        Alice cluster reports READY: '{{ r_cluster.rc == 0 and ''READY'' in cluster.get(''status'', {}).get(''state'',
+          '''') }}'
+        Matching ClusterOrder is Ready: '{{ order.get(''status'', {}).get(''phase'', '''') == ''Ready'' }}'
         HostedCluster is Available: '{{ hosted.get(''status'', {}).get(''conditions'', []) | selectattr(''type'',
           ''equalto'', ''Available'') | selectattr(''status'', ''equalto'', ''True'') | list | length > 0 }}'
         Worker Agent completed installation: '{{ agent.get(''status'', {}).get(''progress'', {}).get(''currentStage'',

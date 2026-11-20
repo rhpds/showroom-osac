@@ -304,7 +304,7 @@
           Tenant sai-corp storage ready:  {{ 'ok' if  'Ready' in r_tenant_status.stdout else 'NOT ok' }}
           Disk image AVAILABLE:           {{ 'ok' if 'AVAILABLE' in r_diskimage_status.stdout else 'NOT ok' }}
           Instance type ACTIVE:           {{ 'ok' if 'ACTIVE' in r_instancetype_status.stdout else 'NOT ok' }}
-          Catalog item published:         {{ 'ok' if r_catalog_published.stdout | trim == 'true' else 'NOT ok' }}
+          Catalog item published:         {{ 'ok' if 'true' in r_catalog_published.stdout else 'NOT ok' }}
           Subnet READY:                   {{ 'ok' if 'READY' in r_subnet_state.stdout else 'NOT ok' }}
           Security group READY:           {{ 'ok' if 'READY' in r_sg_state.stdout else 'NOT ok' }}
           DataVolume phase:               {{ r_dv_phase.stdout | trim | default('unknown') }}
