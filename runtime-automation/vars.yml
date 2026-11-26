@@ -39,3 +39,10 @@ bmaas_instance_name: sai-corp-bm-1
 bmaas_template: osac.templates.bm_host_provisioning
 bmaas_ssh_key_secret: bmaas-ssh-key
 bmaas_expected_state: running
+# Module 5 sends usage to the Monetize360 (Magent) UAT Usage API. The key comes from AgnosticD user data.
+m360_api_url: https://redhat.magent-uat.com
+m360_api_key: "{{ osac_m360_api_key | default('') }}"
+m360_secret_name: m360-api-key
+m360_adapter_tag: sha-635f9cf
+m360_chart_ref: oci://ghcr.io/osac-project/charts/osac
+m360_adapter_label: app.kubernetes.io/component=m360-adapter
