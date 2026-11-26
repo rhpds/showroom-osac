@@ -44,5 +44,6 @@ m360_api_url: https://redhat.magent-uat.com
 m360_api_key: "{{ osac_m360_api_key | default('') }}"
 m360_secret_name: m360-api-key
 m360_adapter_tag: sha-635f9cf
+m360_chart_version: 0.4.0-rc.5
 m360_chart_ref: oci://ghcr.io/osac-project/charts/osac
 m360_adapter_label: app.kubernetes.io/component=m360-adapter

@@ -77,7 +77,7 @@ All commands run in the bastion terminal. Check what is running before you chang
 helm history osac -n osac | tail -3
 ----
 +
-The release is `deployed`. Note the chart version in the last column. You use the same version later.
+The release is `deployed`. The chart version in the last column can be out of date, because this lab was deployed from chart `0.4.0-rc.5`. You use that version later.
 
 . List the metering pods:
 +
@@ -148,11 +148,11 @@ jq '.metering.m360Adapter = {
 +
 The image tag is pinned. Do not use `latest` in this lab.
 
-. Pull the chart version that is already deployed:
+. Pull the chart version that this lab was deployed from. Use the same version as the platform. A different version can reject your current values:
 +
 [source,role=execute]
 ----
-CHART=$(helm list -n osac --filter '^osac$' -o json | jq -r '.[0].chart | sub("^osac-"; "")')
+CHART=0.4.0-rc.5
 helm pull oci://ghcr.io/osac-project/charts/osac --version "$CHART" --destination /tmp
 echo "$CHART"
 ----
@@ -162,7 +162,7 @@ echo "$CHART"
 [source,role=execute]
 ----
 helm upgrade osac "/tmp/osac-$CHART.tgz" -n osac \
-  -f ~/osac-values-with-m360.json --dry-run | grep -E 'm360-adapter|api-key' | head
+  -f ~/osac-values-with-m360.json --dry-run 2>&1 | grep -E '^Error|m360-adapter|api-key' | head -20
 ----
 +
 The output must mention an `osac-metering-m360-adapter` Deployment and your `m360-api-key` Secret.

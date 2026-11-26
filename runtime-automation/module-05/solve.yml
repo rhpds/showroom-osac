@@ -16,11 +16,6 @@
         that: m360_api_key | length > 0
         fail_msg: osac_m360_api_key is missing from the AgnosticD user data
 
-    - name: Read current Helm release
-      ansible.builtin.command: helm list -n {{ osac_namespace }} --filter '^osac$' -o json
-      register: r_release
-      changed_when: false
-
     - name: Read current user-supplied Helm values
       ansible.builtin.command: helm get values osac -n {{ osac_namespace }} -o json
       register: r_values
@@ -59,7 +54,6 @@
         m360_values: "{{ (r_values.stdout | from_json) | combine(adapter, recursive=true) }}"
         m360_enabled: >-
           {{ (r_values.stdout | from_json).get('metering', {}).get('m360Adapter', {}).get('enabled', false) | bool }}
-        chart_version: "{{ (r_release.stdout | from_json | first).chart | regex_replace('^osac-', '') }}"
 
     - name: Write merged values file
       when: not m360_enabled
@@ -71,13 +65,13 @@
     - name: Pull the matching chart
       when: not m360_enabled
       ansible.builtin.command: >-
-        helm pull {{ m360_chart_ref }} --version {{ chart_version }} --destination /tmp
+        helm pull {{ m360_chart_ref }} --version {{ m360_chart_version }} --destination /tmp
       changed_when: false
 
     - name: Enable the m360 adapter
       when: not m360_enabled
       ansible.builtin.command: >-
-        helm upgrade osac /tmp/osac-{{ chart_version }}.tgz -n {{ osac_namespace }}
+        helm upgrade osac /tmp/osac-{{ m360_chart_version }}.tgz -n {{ osac_namespace }}
         -f {{ bastion_home }}/osac-values-with-m360.yaml --wait --timeout 15m
       async: 1000
       poll: 15
