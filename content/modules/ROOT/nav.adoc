@@ -7,6 +7,7 @@
 * xref:module-02-vmaas.adoc[2. Virtual Machine as a Service (VMaaS)]
 * xref:module-03-caas.adoc[3. Cluster as a Service (CaaS)]
 * xref:module-04-bmaas.adoc[4. Bare Metal as a Service (BMaaS)]
-* xref:module-05-platform-overview.adoc[5. Exploring the Red Hat cloud extensions Platform (Optional)]
+* xref:module-05-metering.adoc[5. Metering and Billing]
+* xref:module-06-platform-overview.adoc[6. Exploring the Red Hat cloud extensions Platform (Optional)]
 
 * xref:conclusion.adoc[Conclusion and Next Steps]

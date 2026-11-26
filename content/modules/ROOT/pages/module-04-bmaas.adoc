@@ -801,4 +801,4 @@ SAI Corp can now order a dedicated server through the Red Hat cloud extensions c
 * Halting retains the allocation. Deleting the instance releases it back to inventory.
 * In this lab, libvirt and Sushy simulate the server and its BMC; Metal3/Ironic follows the bare-metal provisioning path.
 
-The core workshop is complete. Continue to xref:conclusion.adoc[Conclusion and Next Steps], or choose xref:module-05-platform-overview.adoc[optional Module 5: Exploring the Red Hat cloud extensions Platform] to inspect the services behind the workflows.
+Continue to xref:module-05-metering.adoc[Module 5: Metering and Billing] to send the usage of these workloads to a billing platform.

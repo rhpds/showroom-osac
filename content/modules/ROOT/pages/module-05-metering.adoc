@@ -1,0 +1,405 @@
+= Module 5: Metering and Billing
+:source-highlighter: rouge
+:toc: macro
+:toclevels: 2
+
+toc::[]
+
+[NOTE]
+.Before you start
+====
+This module meters the workloads from the earlier modules. Complete xref:module-02-vmaas.adoc[Module 2] and xref:module-04-bmaas.adoc[Module 4], or use their *Solve* buttons, if you want to find your own VM and server in the billing system in Exercise 4. Exercises 1 to 3 work without them.
+
+Exercise 4 and the Magent steps need a Red Hat ID that can sign in to the Magent UAT portal. Ask your instructor if you cannot sign in.
+====
+
+Sovereign Cloud Corp now delivers VMs, clusters, and dedicated servers to SAI Corp. Leadership's next question is how to charge for them. The platform already measures usage. In this module, you connect that measurement to Monetize360, the billing platform that receives usage and turns it into invoices.
+
+== Learning objectives
+
+By the end of this module, you will be able to:
+
+* Explain how usage flows from the fulfillment service to a billing system
+* Enable the `metering-m360-adapter` with a Secret and Helm values
+* Verify the integration through the adapter logs and the Monetize360 Usage API
+* Find usage events in the Magent *Usage & Metering* pages
+* Recover an adapter that is stuck behind a Kafka backlog
+
+== How metering works
+
+OSAC *measures* usage. A billing system *receives* it. An adapter sits between the two.
+
+[cols="1,3",options="header"]
+|===
+|Term |Meaning
+|*Monetize360 (M360)* |The platform for usage metering, rating, and billing workflows
+|*Magent* |The Red Hat Monetize360 portal used in this lab. You sign in with your Red Hat ID to see received usage. It is a billing system, not part of OpenShift or OSAC
+|*`metering-m360-adapter`* |The OSAC pod that reads usage from Kafka and posts it to the Magent Usage API
+|*`event_id`* |A unique string for one usage record. Magent stores it and shows it in the `EVENT_ID` column, so you can match an API call to a row
+|===
+
+[source,text]
+----
+fulfillment Watch -> metering-service -> Kafka heartbeats
+                                           |
+                       metering-echo-adapter  (lab debug output)
+                       metering-m360-adapter --POST--> Magent Usage API
+                                                         |
+                                       Usage & Metering pages in Magent
+----
+
+The adapter posts each resource type to its own endpoint under `/api/v1/external/run`:
+
+[cols="2,2,3",options="header"]
+|===
+|OSAC resource |Endpoint |Magent page (*Usage & Metering*)
+|`ComputeInstance` |`/vmaas/event` |VMaaS Usage Data
+|`ClusterOrder` |`/caas/event` |CaaS Usage Data
+|`BareMetalInstance` |`/bmaas/event` |BMaaS Usage Data
+|Inference (MaaS) |`/maas/event` |MaaS / Token Usage Data
+|`ExternalIP` |`/networking/externalip/event` |Network usage
+|`NATGateway` |`/networking/natgateway/event` |Network usage
+|`Volume` |`/storage/volume/event` |Storage usage
+|===
+
+== Exercise 1: Inspect the metering pipeline
+
+*Role: Platform administrator*
+
+All commands run in the bastion terminal. Check what is running before you change anything.
+
+=== Steps
+
+. Check the Helm release that deployed the platform:
++
+[source,role=execute]
+----
+helm history osac -n osac | tail -3
+----
++
+The release is `deployed`. Note the chart version in the last column. You use the same version later.
+
+. List the metering pods:
++
+[source,role=execute]
+----
+oc get pods -n osac | grep metering
+----
++
+.Sample output
+----
+osac-metering-echo-adapter-6c9d8b7f5-xk2lp   1/1   Running   0   3d
+osac-metering-service-5f7b9c6d44-q8t4m       1/1   Running   0   3d
+----
++
+The metering service and the echo adapter are running. The echo adapter prints usage to its log for debugging. There is no `m360-adapter` pod yet.
+
+. Confirm that heartbeats flow on Kafka:
++
+[source,role=execute]
+----
+oc get kafkatopic -n osac-kafka | grep metering
+----
++
+You see one `osac.metering.heartbeat.<tenant>` topic for the `sai-corp` tenant.
+
+== Exercise 2: Enable the m360 adapter
+
+*Role: Platform administrator*
+
+The adapter is part of the OSAC Helm chart and is switched off by default. You give it an API key in a Secret, then enable it in the Helm values.
+
+=== Steps
+
+. Create the Secret that holds the Usage API key:
++
+[source,role=execute,subs="attributes+"]
+----
+oc -n osac create secret generic m360-api-key \
+  --from-literal=api-key='{osac_m360_api_key}' \
+  --dry-run=client -o yaml | oc apply -f -
+----
++
+[IMPORTANT]
+====
+The Secret data key must be named `api-key`. The adapter mounts it as `/etc/m360/api-key`, and any other name makes the adapter fail to start.
+====
+
+. Save your current values and add the adapter block. Only the `metering.m360Adapter` section changes, so the database, echo adapter, and monitors keep their settings:
++
+[source,role=execute]
+----
+helm get values osac -n osac -o json > ~/osac-values.json
+
+jq '.metering.m360Adapter = {
+  enabled: true,
+  image: {
+    repository: "ghcr.io/osac-project/metering-m360-adapter",
+    tag: "sha-635f9cf",
+    pullPolicy: "Always"
+  },
+  m360: {
+    apiUrl: "https://redhat.magent-uat.com",
+    apiKeySecret: "m360-api-key",
+    apiVersion: "v1"
+  }
+}' ~/osac-values.json > ~/osac-values-with-m360.json
+----
++
+The image tag is pinned. Do not use `latest` in this lab.
+
+. Pull the chart version that is already deployed:
++
+[source,role=execute]
+----
+CHART=$(helm list -n osac --filter '^osac$' -o json | jq -r '.[0].chart | sub("^osac-"; "")')
+helm pull oci://ghcr.io/osac-project/charts/osac --version "$CHART" --destination /tmp
+echo "$CHART"
+----
+
+. Preview the change with a dry run:
++
+[source,role=execute]
+----
+helm upgrade osac "/tmp/osac-$CHART.tgz" -n osac \
+  -f ~/osac-values-with-m360.json --dry-run | grep -E 'm360-adapter|api-key' | head
+----
++
+The output must mention an `osac-metering-m360-adapter` Deployment and your `m360-api-key` Secret.
+
+. Apply the upgrade:
++
+[source,role=execute]
+----
+helm upgrade osac "/tmp/osac-$CHART.tgz" -n osac \
+  -f ~/osac-values-with-m360.json --wait --timeout 15m
+----
++
+The command can take several minutes because Helm waits for the platform bootstrap job. The adapter pod usually starts before Helm finishes. Open a second terminal and run `oc get pods -n osac -w | grep m360` to watch it.
+
+. Confirm the release revision increased:
++
+[source,role=execute]
+----
+helm history osac -n osac | tail -2
+----
++
+The newest revision is `deployed`.
+
+== Exercise 3: Verify the integration
+
+*Role: Platform administrator*
+
+A running pod does not prove that billing receives usage. Verify each hop.
+
+=== Steps
+
+. Check the adapter, its Kafka user, and its configuration:
++
+[source,role=execute]
+----
+oc -n osac get deploy,pod -l app.kubernetes.io/component=m360-adapter
+oc -n osac-kafka get kafkauser osac-metering-m360-adapter
+helm get values osac -n osac -o json | jq .metering.m360Adapter
+----
++
+Expect the deployment `1/1`, the pod `Running`, the Kafka user `Ready`, and `enabled: true` with the Magent `apiUrl`.
+
+. Look at the adapter log:
++
+[source,role=execute]
+----
+oc -n osac logs deploy/osac-metering-m360-adapter --tail=20
+oc -n osac logs deploy/osac-metering-m360-adapter --since=5m | grep -c 'context deadline exceeded'
+----
++
+Expect a count of `0`. If you see a steady stream of `context deadline exceeded`, go to Exercise 5.
+
+. Send a test usage event to the BMaaS endpoint with the stored key. This is the same call the adapter makes:
++
+[source,role=execute]
+----
+KEY=$(oc -n osac get secret m360-api-key -o jsonpath='{.data.api-key}' | base64 -d)
+EID="$USER-ui-check-$(date +%s)"
+
+curl -sk -X POST \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"event_id\":\"$EID\",\"usage_quantity\":\"60\",\"usage_unit\":\"second\"}" \
+  https://redhat.magent-uat.com/api/v1/external/run/bmaas/event | jq
+
+echo "EVENT_ID=$EID"
+----
++
+.Sample output
+----
+{
+  "output": { "event_id": "student-ui-check-1795615348" },
+  "flowExecutionId": "...",
+  "success": true,
+  "status": 200
+}
+----
++
+`success: true` means Magent accepted the event. `flowExecutionId` is Magent's internal run ID and is not searchable. Your `EVENT_ID` is the label to look for.
+
+. Open https://redhat.magent-uat.com and sign in with your Red Hat ID.
+
+. In the left navigation, select *Usage & Metering* > *BMaaS Usage Data*. Clear the *Search* box, click *Refresh*, and sort by `EVENT_TIME`. Find the row whose `EVENT_ID` matches yours.
++
+[NOTE]
+====
+Do not use *Deal Manager*. It shows commercial deals, not usage. The row for a minimal test event often shows only `EVENT_ID` and a duration, with other columns empty. That is normal and still proves the API, the key, and the flow.
+====
+
+== Exercise 4: Find your resources in the billing system
+
+*Role: Platform administrator*
+
+Test events prove the connection. The adapter turns the real VMs and servers of the earlier modules into usage events in the same grids.
+
+=== Steps
+
+. Get the IDs of your resources. Skip any resource you did not create:
++
+[source,role=execute]
+----
+osac --config "$HOME/alice" get computeinstances
+osac --config "$HOME/alice" get baremetalinstance sai-corp-bm-1 -o json | jq -r .id
+----
++
+The adapter reports the resource ID of each instance as `RESOURCE_ID`.
+
+. In Magent, open *Usage & Metering* > *VMaaS Usage Data* and *BMaaS Usage Data*. Clear *Search*, click *Refresh*, and look for rows with your resource IDs. These rows come from the adapter and have a hex `EVENT_ID` and fully populated columns.
+
+. Optional: send a richer event for your server. Fill in the resource ID from the previous step:
++
+[source,role=execute]
+----
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EID="$USER-full-bmaas-$(date +%s)"
+BMI_ID=$(osac --config "$HOME/alice" get baremetalinstance sai-corp-bm-1 -o json | jq -r .id)
+
+curl -sk -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d "{
+    \"event_id\": \"$EID\",
+    \"event_time\": \"$NOW\",
+    \"resource_type\": \"bare_metal_instance\",
+    \"resource_id\": \"$BMI_ID\",
+    \"tenant_id\": \"sai-corp\",
+    \"usage_quantity\": \"60.000000\",
+    \"usage_unit\": \"second\",
+    \"usage_semantics\": \"consumption\",
+    \"duration_seconds\": \"60\",
+    \"meter_type\": \"second\"
+  }" https://redhat.magent-uat.com/api/v1/external/run/bmaas/event | jq
+----
++
+Refresh *BMaaS Usage Data* and look for your `EVENT_ID` again. This time more columns are filled.
+
+. Optional: set an external billing account on the tenant so that events carry an `external_billing_account_id`. This is the field a billing system uses to map usage to a customer. Ask your instructor for the value the billing team uses for `sai-corp`.
+
+== Exercise 5: Recover from a Kafka backlog (optional)
+
+*Role: Platform administrator*
+
+If the adapter starts long after the platform began producing heartbeats, it has a large backlog to process. Each Magent call takes about a second, so the adapter cannot drain the queue inside the Kafka session window. The log then repeats:
+
+----
+submit interrupted ... error="context deadline exceeded"
+topic="osac.metering.heartbeat.sai-corp"
+----
+
+Magent is fine in this case. The consumer group is behind. Complete this exercise only if you see the symptom in Exercise 3.
+
+=== Steps
+
+. Stop the adapter so that the consumer group is idle. Kafka rejects an offset reset while the group has active members:
++
+[source,role=execute]
+----
+oc -n osac scale deploy/osac-metering-m360-adapter --replicas=0
+oc -n osac rollout status deploy/osac-metering-m360-adapter --timeout=60s
+sleep 8
+----
+
+. Prepare a Kafka client configuration on a broker. It must trust the OSAC `ca-bundle`. The Strimzi cluster CA alone fails the TLS handshake on this listener:
++
+[source,role=execute]
+----
+GROUP=osac-metering-m360-adapter
+BS=osac-kafka-kafka-bootstrap.osac-kafka.svc:9093
+KP=osac-kafka-dual-role-0
+PASS=$(oc -n osac-kafka get secret $GROUP -o jsonpath='{.data.password}' | base64 -d)
+
+oc -n osac get cm ca-bundle -o jsonpath='{.data.bundle\.pem}' > /tmp/bundle.pem
+oc -n osac-kafka cp /tmp/bundle.pem "$KP":/tmp/bundle.pem -c kafka
+
+oc -n osac-kafka exec -c kafka "$KP" -- sh -c "cat > /tmp/m360-client.properties <<PROP
+security.protocol=SASL_SSL
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"$GROUP\" password=\"$PASS\";
+ssl.truststore.type=PEM
+ssl.truststore.location=/tmp/bundle.pem
+PROP"
+----
+
+. Look at the lag, then reset the group to the newest offset:
++
+[source,role=execute]
+----
+oc -n osac-kafka exec -c kafka "$KP" -- /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server "$BS" --command-config /tmp/m360-client.properties \
+  --group "$GROUP" --describe
+
+oc -n osac-kafka exec -c kafka "$KP" -- /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server "$BS" --command-config /tmp/m360-client.properties \
+  --group "$GROUP" --reset-offsets --to-latest --all-topics --execute
+----
++
+The `LAG` column drops to `0`.
++
+[WARNING]
+====
+`--to-latest` skips all heartbeats that are already in Kafka, so that usage is never billed. This is fine in a lab. In production, drain the backlog or raise the adapter timeouts instead.
+====
+
+. Start the adapter again and check the log:
++
+[source,role=execute]
+----
+oc -n osac scale deploy/osac-metering-m360-adapter --replicas=1
+oc -n osac rollout status deploy/osac-metering-m360-adapter --timeout=120s
+oc -n osac logs deploy/osac-metering-m360-adapter --since=2m | grep -c 'context deadline exceeded'
+----
++
+Expect `0`.
+
+== Solve the module
+
+The *Solve* button creates the `m360-api-key` Secret, adds the adapter to the Helm values, upgrades the release, waits for the adapter, and sends a test event to the Usage API. It skips the upgrade if the adapter is already enabled. The Helm upgrade can take several minutes.
+
+++++
+<div class="solve-button-placeholder" data-module="module-05"></div>
+++++
+
+== Validate your work
+
+The validator checks the release status, the adapter values, the Secret key name, the adapter deployment, the Kafka user, the adapter log for backlog errors, and that the Usage API accepts an event sent with the stored key.
+
+++++
+<div class="validate-button-placeholder" data-module="module-05"></div>
+++++
+
+== Module summary
+
+Usage from SAI Corp's workloads now reaches the billing platform. The platform administrator controls which adapters run and which credentials they use. The adapter forwards what the metering service measures.
+
+* The metering service turns fulfillment events into Kafka heartbeats. Adapters read the heartbeats and deliver them to an external system.
+* The m360 adapter is a Helm option, configured with a Secret named `m360-api-key` whose data key is `api-key`.
+* A running pod is not proof of delivery. Verify the log and the Usage API response, then find the `EVENT_ID` in Magent.
+* A consumer group stuck behind a backlog shows as `context deadline exceeded` even when the billing system is healthy.
+
+To roll the change back, set `metering.m360Adapter.enabled` to `false` in your values and run `helm upgrade` again. The Secret can stay.
+
+Continue to the xref:conclusion.adoc[Conclusion and Next Steps], or choose xref:module-06-platform-overview.adoc[optional Module 6: Exploring the Red Hat cloud extensions Platform] to inspect the services behind the workflows.
