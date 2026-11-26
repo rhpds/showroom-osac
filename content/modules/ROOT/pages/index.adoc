@@ -64,7 +64,7 @@ Your access details are provided in the **Credentials** page for reference. They
 * *Module 4*: Bare Metal as a Service — BMaaS (30 minutes)
 * *Module 5*: Metering and Billing (30 minutes)
 
-Start with xref:module-01-tenant-management.adoc[Module 1: Tenant Onboarding and Identity Management]. Modules 2–5 use the tenant and users created there. Module 4 uses separate bare-metal capacity and does not require a CaaS cluster from Module 3.
+Start with xref:module-01-tenant-management.adoc[Module 1: Tenant Onboarding and Identity Management]. Modules 2-5 use the tenant and users created there. Module 4 uses separate bare-metal capacity and does not require a CaaS cluster from Module 3.
 
 Work at your own pace and pause between modules as needed. Allow additional time for inspection, image downloads, and provisioning in Modules 3 and 4.
 
