@@ -1,4 +1,4 @@
-= Module 5: Exploring the Red Hat cloud extensions Platform (Optional)
+= Module 6: Exploring the Red Hat cloud extensions Platform (Optional)
 :source-highlighter: rouge
 :toc: macro
 :toclevels: 1
@@ -7,7 +7,7 @@ toc::[]
 
 This optional module takes a closer look at the services behind Sovereign Cloud Corp's Red Hat cloud extensions platform. Explore how the UI, Keycloak, and Kafka support tenant onboarding and workload provisioning.
 
-You inspect the deployed components and verify platform health. No other module depends on these exercises, and they do not require the tenant or workloads from Modules 1–4. You can skip this module entirely and continue to the xref:conclusion.adoc[Conclusion and Next Steps].
+You inspect the deployed components and verify platform health. No other module depends on these exercises, and they do not require the tenant or workloads from Modules 1-5. You can skip this module entirely and continue to the xref:conclusion.adoc[Conclusion and Next Steps].
 
 == Learning objectives
 

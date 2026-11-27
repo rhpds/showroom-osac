@@ -22,9 +22,9 @@ By the end of this workshop, you'll have the hands-on skills to run Red Hat clou
 * Provision virtual machines, hosted OpenShift clusters, and dedicated servers through the service catalog → *deliver VMaaS, CaaS, and BMaaS workloads to tenants on demand*
 * Verify tenant readiness and workload access → *confirm that tenant users can use their provisioned services with the intended permissions*
 
-The core path is *Module 1: Tenant Onboarding*, *Module 2: VMaaS*, *Module 3: CaaS*, and *Module 4: BMaaS*. Start with xref:module-01-tenant-management.adoc[Module 1]; its tenant and users are prerequisites for the workload modules.
+The core path is *Module 1: Tenant Onboarding*, *Module 2: VMaaS*, *Module 3: CaaS*, and *Module 4: BMaaS*, and *Module 5: Metering and Billing*. Start with xref:module-01-tenant-management.adoc[Module 1]; its tenant and users are prerequisites for the workload modules.
 
-*Optional Module 5: Platform Exploration* examines the architecture, Keycloak, Kafka, and platform health. It is fully optional: skip it and go directly to the conclusion whenever you finish the core modules.
+*Optional Module 6: Platform Exploration* examines the architecture, Keycloak, Kafka, and platform health. It is fully optional: skip it and go directly to the conclusion whenever you finish the core modules.
 
 *Technical outcome*: You'll operate a real Red Hat cloud extensions deployment — including the osac-operator, fulfillment service, Keycloak, and Kafka — using the same tools and workflows you'd use in production.
 
@@ -86,7 +86,7 @@ If Red Hat cloud extensions meets Sovereign Cloud Corp's requirements, here's wh
 == Common questions
 
 *"What does 'sovereign' actually mean for this platform?"*
-→ It means workload data stays within your infrastructure boundary, access is mediated through Keycloak, and nothing runs on external public cloud. Optional Module 5 walks through the architecture and each component's role.
+→ It means workload data stays within your infrastructure boundary, access is mediated through Keycloak, and nothing runs on external public cloud. Optional Module 6 walks through the architecture and each component's role.
 
 *"How does multi-tenancy work — are tenants truly isolated?"*
 → Yes. Each tenant gets dedicated namespaces, storage classes, and network policies. Module 1 shows you how to create a tenant and verify its isolation against the shared and system tenants already in the cluster.
@@ -101,4 +101,4 @@ If Red Hat cloud extensions meets Sovereign Cloud Corp's requirements, here's wh
 → BMaaS installs an operating system on a dedicated host and gives the tenant control over its lifecycle. CaaS uses bare-metal capacity as workers for a hosted OpenShift cluster. Module 4 covers a standalone BMaaS order, SSH access, power management, and release, using separate capacity from Module 3.
 
 *"Where does Kafka fit in?"*
-→ Kafka handles event streaming between the fulfillment service and the osac-operator. When a tenant requests a workload through the catalog, Kafka carries that request to the operator for processing. Optional Module 5 lets you inspect the Kafka resources behind that event flow.
+→ Kafka handles event streaming between the fulfillment service and the osac-operator. When a tenant requests a workload through the catalog, Kafka carries that request to the operator for processing. Optional Module 6 lets you inspect the Kafka resources behind that event flow.

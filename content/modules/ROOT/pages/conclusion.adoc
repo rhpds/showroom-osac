@@ -6,7 +6,7 @@ When you started, Sovereign Cloud Corp had a freshly deployed platform and a mis
 
 SAI Corp, your first government agency client, has its own isolated tenant. Its employees sign in through their corporate identity provider, and nobody on your team had to hand out a platform password. Alice runs the tenant. Bob can see what's deployed but can't change it. When SAI Corp's teams need a virtual machine, a full OpenShift cluster, or a dedicated server, they order one from the catalog. They don't file a ticket, and every request flows through the same auditable fulfillment process your compliance team signed off on.
 
-Platform exploration in Module 5 is fully optional. If you skipped it, your core workshop is still complete. You can visit xref:module-05-platform-overview.adoc[Module 5] whenever you want a closer look at platform health and architecture.
+Platform exploration in Module 6 is fully optional. If you skipped it, your core workshop is still complete. You can visit xref:module-06-platform-overview.adoc[Module 6] whenever you want a closer look at platform health and architecture.
 
 == What you've learned
 
@@ -52,7 +52,17 @@ You gave SAI Corp control over a dedicated server's lifecycle.
 * Halted and restarted the server through the tenant API, checking both requested and actual power
 * Optionally released the instance and verified that its host returned to available inventory
 
-=== Optional Module 5: Exploring the Red Hat cloud extensions Platform
+=== Module 5: Metering and Billing
+
+You connected platform usage to a billing system.
+
+* Traced usage from fulfillment through the metering service and Kafka heartbeats to the adapter
+* Enabled the `metering-m360-adapter` with a Kubernetes Secret and Helm values
+* Verified the integration through the adapter logs and the Monetize360 Usage API
+* Found usage events in the Magent Usage & Metering pages
+* Optionally recovered an adapter that was stuck behind a Kafka backlog
+
+=== Optional Module 6: Exploring the Red Hat cloud extensions Platform
 
 If you chose the optional exploration, you examined the services behind the core workflows:
 
@@ -83,7 +93,7 @@ Here are some ways to keep building on what you did today:
 * *Grow the catalog*: Add more instance types and disk images, and publish catalog items for different VM sizes and operating systems.
 * *Offer more cluster versions*: Publish catalog items that point at different `ClusterVersion` objects, so tenants can choose between OpenShift releases.
 * *Automate onboarding*: Script the tenant, identity provider, RoleBinding, and ProjectMembership steps from Module 1 with the `osac` CLI so a new agency can be onboarded in one run.
-* *Watch the event stream*: Use xref:module-05-platform-overview.adoc[optional Module 5] to inspect Kafka topics, then explore the events your catalog orders produced.
+* *Watch the event stream*: Use xref:module-06-platform-overview.adoc[optional Module 6] to inspect Kafka topics, then explore the events your catalog orders produced.
 
 == References
 

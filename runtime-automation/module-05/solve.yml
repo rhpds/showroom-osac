@@ -1,10 +1,100 @@
 ---
-# Optional Module 5: Exploring the Red Hat cloud extensions Platform — solve tasks
-# Generate with: /ftl:rhdp-lab-validator
-- name: Optional Module 05 - Platform exploration solve placeholder
-  hosts: localhost
+# Enables the m360 adapter exactly as the student does. Safe to re-run.
+- import_playbook: ../bastion.yml
+
+- name: Module 05 - Metering and Billing Solve
+  hosts: bastion
   gather_facts: false
+  vars_files:
+    - ../vars.yml
+  environment:
+    KUBECONFIG: "{{ bastion_kubeconfig }}"
+    NO_COLOR: '1'
   tasks:
-    - name: Placeholder
-      ansible.builtin.debug:
-        msg: "Optional Module 5 is read-only. Follow the exploration exercises or run its validator."
+    - name: Check the Monetize360 API key was provided
+      ansible.builtin.assert:
+        that: m360_api_key | length > 0
+        fail_msg: osac_m360_api_key is missing from the AgnosticD user data
+
+    - name: Read current user-supplied Helm values
+      ansible.builtin.command: helm get values osac -n {{ osac_namespace }} -o json
+      register: r_values
+      changed_when: false
+
+    - name: Create the Monetize360 API key secret
+      ansible.builtin.command: oc apply -f -
+      args:
+        stdin: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {{ m360_secret_name }}
+            namespace: {{ osac_namespace }}
+          stringData:
+            api-key: "{{ m360_api_key }}"
+      register: r_secret
+      changed_when: "'unchanged' not in r_secret.stdout"
+      no_log: true
+
+    - name: Build values with the adapter enabled
+      vars:
+        adapter:
+          metering:
+            m360Adapter:
+              enabled: true
+              image:
+                repository: ghcr.io/osac-project/metering-m360-adapter
+                tag: "{{ m360_adapter_tag }}"
+                pullPolicy: Always
+              m360:
+                apiUrl: "{{ m360_api_url }}"
+                apiKeySecret: "{{ m360_secret_name }}"
+                apiVersion: v1
+      ansible.builtin.set_fact:
+        m360_values: "{{ (r_values.stdout | from_json) | combine(adapter, recursive=true) }}"
+        m360_enabled: >-
+          {{ (r_values.stdout | from_json).get('metering', {}).get('m360Adapter', {}).get('enabled', false) | bool }}
+
+    - name: Write merged values file
+      when: not m360_enabled
+      ansible.builtin.copy:
+        content: "{{ m360_values | to_nice_yaml }}"
+        dest: "{{ bastion_home }}/osac-values-with-m360.yaml"
+        mode: '0600'
+
+    - name: Pull the matching chart
+      when: not m360_enabled
+      ansible.builtin.command: >-
+        helm pull {{ m360_chart_ref }} --version {{ m360_chart_version }} --destination /tmp
+      changed_when: false
+
+    - name: Enable the m360 adapter
+      when: not m360_enabled
+      ansible.builtin.command: >-
+        helm upgrade osac /tmp/osac-{{ m360_chart_version }}.tgz -n {{ osac_namespace }}
+        -f {{ bastion_home }}/osac-values-with-m360.yaml --wait --timeout 15m
+      async: 1000
+      poll: 15
+      changed_when: true
+
+    - name: Wait for the adapter deployment
+      ansible.builtin.command: >-
+        oc rollout status deploy/osac-metering-m360-adapter -n {{ osac_namespace }} --timeout=300s
+      changed_when: false
+
+    - name: Send a test usage event to the BMaaS endpoint
+      ansible.builtin.uri:
+        url: "{{ m360_api_url }}/api/v1/external/run/bmaas/event"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ m360_api_key }}"
+        body_format: json
+        body:
+          event_id: "{{ tenant_user }}-ui-check-{{ lookup('pipe', 'date +%s') }}"
+          usage_quantity: "60"
+          usage_unit: second
+        validate_certs: false
+      register: r_event
+      failed_when: not r_event.json.success | default(false)
+      no_log: true
+      changed_when: true

@@ -116,7 +116,7 @@ video {
 [id^="solve-output-content"] { color: #00ff00 !important; }
 
 /* ── Validate button ────────────────────────────────── */
-.validate-btn { padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: all 0.3s ease; background: #007bff; color: white; }
-.validate-btn:hover:not(:disabled) { background: #0056b3; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,123,255,0.3); }
-.validate-btn:disabled { background: #adb5bd; cursor: not-allowed; animation: pulse 1.5s ease-in-out infinite; }
+.validation-btn { padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: all 0.3s ease; background: #007bff; color: white; }
+.validation-btn:hover:not(:disabled) { background: #0056b3; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,123,255,0.3); }
+.validation-btn:disabled { background: #adb5bd; cursor: not-allowed; animation: pulse 1.5s ease-in-out infinite; }
 [id^="validate-output-content"] { color: #00bfff !important; }
