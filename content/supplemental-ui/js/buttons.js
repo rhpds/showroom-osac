@@ -141,10 +141,10 @@
       var m = p.getAttribute('data-module');
       var wrap = document.createElement('div');
       wrap.className = 'btn-section';
-      wrap.innerHTML = '<button class="validate-btn" data-module="' + m + '">✓ Validate Module</button>';
+      wrap.innerHTML = '<button class="validation-btn" data-module="' + m + '">✓ Validate Module</button>';
       p.replaceWith(wrap);
     });
-    document.querySelectorAll('.validate-btn').forEach(function (btn) {
+    document.querySelectorAll('.validation-btn').forEach(function (btn) {
       btn.addEventListener('click', function () { runStream('validation', this.getAttribute('data-module'), this.closest('.btn-section')); });
     });
   }
